@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in { animation: slide-in 0.25s ease-out; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  * {
+    @apply border-gray-200;
+  }
+
+  .dark * {
+    @apply border-gray-700;
+  }
+
+  .dark body {
+    @apply bg-gray-900 text-gray-100;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800 shadow-sm;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600;
+  }
+
+  .btn-accent {
+    @apply bg-accent-600 text-white hover:bg-accent-700 active:bg-accent-800;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700 active:bg-red-800;
+  }
+
+  .input {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400;
+  }
+
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden dark:bg-gray-800 dark:border-gray-700;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply bg-accent-100 text-accent-800;
+  }
+
+  .badge-warning {
+    @apply bg-warning-100 text-warning-800;
+  }
+
+  .badge-pending {
+    @apply bg-gray-100 text-gray-800;
+  }
+}
+
+/* Dark mode overrides for hardcoded Tailwind classes */
+.dark .bg-white { background-color: rgb(31 41 55) !important; }
+.dark .bg-gray-50 { background-color: rgb(17 24 39) !important; }
+.dark .bg-gray-100 { background-color: rgb(55 65 81) !important; }
+.dark .bg-gray-200 { background-color: rgb(75 85 99) !important; }
+.dark .text-gray-900 { color: rgb(243 244 246) !important; }
+.dark .text-gray-800 { color: rgb(229 231 235) !important; }
+.dark .text-gray-700 { color: rgb(209 213 219) !important; }
+.dark .text-gray-600 { color: rgb(156 163 175) !important; }
+.dark .text-gray-500 { color: rgb(107 114 128) !important; }
+.dark .border-gray-100 { border-color: rgb(55 65 81) !important; }
+.dark .border-gray-200 { border-color: rgb(75 85 99) !important; }
+.dark .border-gray-300 { border-color: rgb(75 85 99) !important; }
+.dark .divide-gray-200 > * + * { border-color: rgb(55 65 81) !important; }
+.dark .hover\:bg-gray-50:hover { background-color: rgb(55 65 81) !important; }
+.dark .hover\:bg-gray-100:hover { background-color: rgb(75 85 99) !important; }
+.dark .hover\:bg-gray-200:hover { background-color: rgb(107 114 128) !important; }
+.dark .hover\:text-gray-900:hover { color: rgb(243 244 246) !important; }
+.dark table { color: rgb(229 231 235); }
+.dark thead { background-color: rgb(55 65 81) !important; }
+.dark thead th { color: rgb(209 213 219) !important; }
+.dark tbody tr:hover { background-color: rgb(55 65 81) !important; }
+.dark select { background-color: rgb(31 41 55) !important; color: rgb(229 231 235) !important; border-color: rgb(75 85 99) !important; }
+.dark .bg-primary-50 { background-color: rgb(30 58 138 / 0.3) !important; }
+.dark .text-primary-700 { color: rgb(147 197 253) !important; }
