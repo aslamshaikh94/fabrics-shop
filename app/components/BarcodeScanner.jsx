@@ -3,23 +3,25 @@ import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 export default function BarcodeScanner({ onScan, onClose }) {
-  const scannerRef = useRef(null);
   const instanceRef = useRef(null);
+  const onScanRef = useRef(onScan);
+  const elementId = useRef('qr-' + Math.random().toString(36).slice(2));
+  onScanRef.current = onScan;
 
   useEffect(() => {
-    let scanner;
+    const id = elementId.current;
     import('html5-qrcode').then(({ Html5Qrcode }) => {
-      scanner = new Html5Qrcode('qr-reader');
+      const scanner = new Html5Qrcode(id);
       instanceRef.current = scanner;
       scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        { fps: 10, qrbox: { width: 240, height: 120 } },
         (decodedText) => {
           scanner.stop().catch(() => {});
-          onScan(decodedText);
+          onScanRef.current(decodedText);
         },
         () => {}
-      ).catch(() => {});
+      ).catch((err) => console.error('Scanner error:', err));
     });
     return () => {
       instanceRef.current?.stop().catch(() => {});
@@ -35,7 +37,7 @@ export default function BarcodeScanner({ onScan, onClose }) {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div id="qr-reader" ref={scannerRef} className="w-full rounded-lg overflow-hidden" />
+        <div id={elementId.current} style={{ minHeight: '200px' }} className="w-full rounded-lg" />
         <p className="text-xs text-gray-500 text-center mt-3">Point camera at the barcode on the fabric roll</p>
       </div>
     </div>
