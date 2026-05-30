@@ -4,9 +4,9 @@ import { X, ScanLine } from 'lucide-react';
 
 export default function BarcodeScanner({ onScan, onClose }) {
   const videoRef = useRef(null);
+  const readerRef = useRef(null);
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
-  const readerRef = useRef(null);
   const [error, setError] = useState(null);
   const [scanning, setScanning] = useState(false);
 
@@ -15,32 +15,16 @@ export default function BarcodeScanner({ onScan, onClose }) {
 
     async function start() {
       try {
-        // Dynamically import to avoid SSR
         const { BrowserMultiFormatReader } = await import('@zxing/library');
         if (stopped) return;
 
         const reader = new BrowserMultiFormatReader();
         readerRef.current = reader;
 
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        if (stopped) return;
-
-        // Prefer back camera
-        const device = devices.find(d =>
-          d.label.toLowerCase().includes('back') ||
-          d.label.toLowerCase().includes('rear') ||
-          d.label.toLowerCase().includes('environment')
-        ) || devices[devices.length - 1] || devices[0];
-
-        if (!device) {
-          setError('No camera found on this device.');
-          return;
-        }
-
         setScanning(true);
 
-        await reader.decodeFromVideoDevice(
-          device.deviceId,
+        await reader.decodeFromConstraints(
+          { video: { facingMode: { ideal: 'environment' } } },
           videoRef.current,
           (result, err) => {
             if (result && !stopped) {
@@ -52,10 +36,10 @@ export default function BarcodeScanner({ onScan, onClose }) {
         );
       } catch (err) {
         if (stopped) return;
-        if (err.name === 'NotAllowedError') {
+        if (err?.name === 'NotAllowedError') {
           setError('Camera permission denied. Please allow camera access and try again.');
         } else {
-          setError('Could not start camera: ' + (err.message || err));
+          setError('Could not start camera: ' + (err?.message || err));
         }
       }
     }
