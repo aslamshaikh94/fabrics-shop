@@ -1,15 +1,13 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, Pencil, Trash2, X, Search, Package, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Search, Package, AlertTriangle, ScanLine } from 'lucide-react';
+import BarcodeScanner from './BarcodeScanner';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
 
-const emptyForm = {
-  name: '', type: '', color: '',
-  purchase_price_per_meter: '', selling_price_per_meter: '',
-  total_meters: '', supplier_id: '', notes: '',
-};
+const emptyRow = { name: '', type: '', color: '', total_meters: '', purchase_price_per_meter: '', selling_price_per_meter: '', barcode: '' };
+const emptyForm = { supplier_id: '', notes: '' };
 
 export default function Fabrics() {
   const [fabrics, setFabrics] = useState([]);
@@ -21,6 +19,8 @@ export default function Fabrics() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const toast = useToast();
   const [formData, setFormData] = useState(emptyForm);
+  const [rows, setRows] = useState([{ ...emptyRow }]);
+  const [scanningRowIdx, setScanningRowIdx] = useState(null);
 
   useEffect(() => { fetchFabrics(); fetchSuppliers(); }, []);
 
@@ -45,32 +45,49 @@ export default function Fabrics() {
     }
   }
 
+  function updateRow(idx, field, value) {
+    setRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      const payload = {
-        name: formData.name,
-        type: formData.type,
-        color: formData.color,
-        purchase_price_per_meter: parseFloat(formData.purchase_price_per_meter) || 0,
-        selling_price_per_meter: parseFloat(formData.selling_price_per_meter) || 0,
-        total_meters: parseFloat(formData.total_meters) || 0,
-        available_meters: parseFloat(formData.total_meters) || 0,
-        supplier_id: formData.supplier_id || null,
-        notes: formData.notes,
-      };
       if (editingId) {
+        const r = rows[0];
+        const payload = {
+          name: r.name, type: r.type, color: r.color,
+          purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
+          selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
+          total_meters: parseFloat(r.total_meters) || 0,
+          available_meters: parseFloat(r.total_meters) || 0,
+          supplier_id: formData.supplier_id || null,
+          notes: formData.notes,
+          barcode: r.barcode || '',
+        };
         const { error } = await supabase.from('fabrics').update(payload).eq('id', editingId);
         if (error) throw error;
+        toast('Fabric updated');
       } else {
-        const { error } = await supabase.from('fabrics').insert([payload]);
+        const validRows = rows.filter(r => r.name.trim());
+        const payloads = validRows.map(r => ({
+          name: r.name, type: r.type, color: r.color,
+          purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
+          selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
+          total_meters: parseFloat(r.total_meters) || 0,
+          available_meters: parseFloat(r.total_meters) || 0,
+          supplier_id: formData.supplier_id || null,
+          notes: formData.notes,
+          barcode: r.barcode || '',
+        }));
+        const { error } = await supabase.from('fabrics').insert(payloads);
         if (error) throw error;
+        toast(`${payloads.length} fabric${payloads.length > 1 ? 's' : ''} added`);
       }
       setShowForm(false);
       setEditingId(null);
       setFormData(emptyForm);
+      setRows([{ ...emptyRow }]);
       fetchFabrics();
-      toast(editingId ? 'Fabric updated' : 'Fabric added');
     } catch (err) {
       console.error('Error saving fabric:', err);
       toast('Failed to save fabric', 'error');
@@ -92,16 +109,14 @@ export default function Fabrics() {
   }
 
   function handleEdit(fabric) {
-    setFormData({
-      name: fabric.name,
-      type: fabric.type,
-      color: fabric.color,
+    setFormData({ supplier_id: fabric.supplier_id || '', notes: fabric.notes });
+    setRows([{
+      name: fabric.name, type: fabric.type, color: fabric.color,
       purchase_price_per_meter: fabric.purchase_price_per_meter.toString(),
       selling_price_per_meter: fabric.selling_price_per_meter.toString(),
       total_meters: fabric.total_meters.toString(),
-      supplier_id: fabric.supplier_id || '',
-      notes: fabric.notes,
-    });
+      barcode: fabric.barcode || '',
+    }]);
     setEditingId(fabric.id);
     setShowForm(true);
   }
@@ -129,7 +144,7 @@ export default function Fabrics() {
           <h1 className="text-2xl font-bold text-gray-900">Fabrics</h1>
           <p className="text-gray-500 mt-1">Manage your fabric inventory</p>
         </div>
-        <button onClick={() => { setShowForm(true); setEditingId(null); setFormData(emptyForm); }} className="btn btn-primary">
+        <button onClick={() => { setShowForm(true); setEditingId(null); setFormData(emptyForm); setRows([{ ...emptyRow }]); }} className="btn btn-primary">
           <Plus className="w-5 h-5 mr-2" />Add Fabric
         </button>
       </div>
@@ -155,41 +170,13 @@ export default function Fabrics() {
 
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-md p-6 my-8">
+          <div className="bg-white rounded-xl w-full max-w-4xl p-6 my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">{editingId ? 'Edit Fabric' : 'Add Fabric'}</h2>
+              <h2 className="text-xl font-semibold">{editingId ? 'Edit Fabric' : 'Add Fabrics'}</h2>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                <input type="text" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="input" placeholder="Fabric name" />
-              </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                  <input type="text" value={formData.type} onChange={e => setFormData({ ...formData, type: e.target.value })} className="input" placeholder="Cotton, Silk..." />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Color</label>
-                  <input type="text" value={formData.color} onChange={e => setFormData({ ...formData, color: e.target.value })} className="input" placeholder="Color" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price/m *</label>
-                  <input type="number" step="0.01" required value={formData.purchase_price_per_meter} onChange={e => setFormData({ ...formData, purchase_price_per_meter: e.target.value })} className="input" placeholder="0.00" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Selling Price/m *</label>
-                  <input type="number" step="0.01" required value={formData.selling_price_per_meter} onChange={e => setFormData({ ...formData, selling_price_per_meter: e.target.value })} className="input" placeholder="0.00" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Total Meters *</label>
-                  <input type="number" step="0.01" required value={formData.total_meters} onChange={e => setFormData({ ...formData, total_meters: e.target.value })} className="input" placeholder="0" />
-                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
                   <select value={formData.supplier_id} onChange={e => setFormData({ ...formData, supplier_id: e.target.value })} className="input">
@@ -197,18 +184,70 @@ export default function Fabrics() {
                     {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <input type="text" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="input" placeholder="Optional notes" />
+                </div>
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="input" rows={2} placeholder="Additional notes" />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">Fabric Items</label>
+                  {!editingId && <button type="button" onClick={() => setRows(prev => [...prev, { ...emptyRow }])} className="text-xs text-primary-600 hover:underline">+ Add row</button>}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm" style={{ minWidth: '700px' }}>
+                    <thead>
+                      <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                        <th className="px-2 py-1 text-left">Name *</th>
+                        <th className="px-2 py-1 text-left w-28">Type</th>
+                        <th className="px-2 py-1 text-left w-28">Color</th>
+                        <th className="px-2 py-1 text-right w-24">Meters</th>
+                        <th className="px-2 py-1 text-right w-28">Buy Price/m</th>
+                        <th className="px-2 py-1 text-right w-28">Sell Price/m</th>
+                        <th className="px-2 py-1 text-left w-32">Barcode</th>
+                        <th className="w-6"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {rows.map((row, idx) => (
+                        <tr key={idx}>
+                          <td className="px-1 py-1"><input required className="input py-1 text-sm" value={row.name} onChange={e => updateRow(idx, 'name', e.target.value)} placeholder="Fabric name" /></td>
+                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={row.type} onChange={e => updateRow(idx, 'type', e.target.value)} placeholder="Cotton..." /></td>
+                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={row.color} onChange={e => updateRow(idx, 'color', e.target.value)} placeholder="Color" /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={row.total_meters} onChange={e => updateRow(idx, 'total_meters', e.target.value)} placeholder="0" /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={row.purchase_price_per_meter} onChange={e => updateRow(idx, 'purchase_price_per_meter', e.target.value)} placeholder="0.00" /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={row.selling_price_per_meter} onChange={e => updateRow(idx, 'selling_price_per_meter', e.target.value)} placeholder="0.00" /></td>
+                          <td className="px-1 py-1">
+                            <div className="flex gap-1">
+                              <input className="input py-1 text-sm w-20" value={row.barcode} onChange={e => updateRow(idx, 'barcode', e.target.value)} placeholder="Code" />
+                              <button type="button" onClick={() => setScanningRowIdx(idx)} className="p-1.5 bg-gray-100 hover:bg-primary-100 rounded text-gray-500 hover:text-primary-600" title="Scan barcode"><ScanLine className="w-4 h-4" /></button>
+                            </div>
+                          </td>
+                          <td className="px-1 py-1">
+                            {rows.length > 1 && <button type="button" onClick={() => setRows(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="flex gap-3 pt-4">
+
+              <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary flex-1">Cancel</button>
                 <button type="submit" className="btn btn-primary flex-1">{editingId ? 'Update' : 'Add'} Fabric</button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {scanningRowIdx !== null && (
+        <BarcodeScanner
+          onScan={(code) => { updateRow(scanningRowIdx, 'barcode', code); setScanningRowIdx(null); }}
+          onClose={() => setScanningRowIdx(null)}
+        />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -22,11 +22,12 @@ export default function Purchases() {
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const emptyItem = { description: '', hsn: '520811', meters: '', rate: '' };
   const [formData, setFormData] = useState({
-    supplier_id: '', fabric_name: '', fabric_type: '', fabric_color: '',
-    meters: '', price_per_meter: '', total_amount: '',
+    supplier_id: '',
     purchase_date: new Date().toISOString().split('T')[0], notes: '',
   });
+  const [items, setItems] = useState([{ ...emptyItem }]);
   const [paymentData, setPaymentData] = useState({
     amount: '', payment_date: new Date().toISOString().split('T')[0],
     payment_method: 'cash', reference_number: '', notes: '',
@@ -55,27 +56,34 @@ export default function Purchases() {
     }
   }
 
-  function calculateTotal() {
-    const meters = parseFloat(formData.meters) || 0;
-    const price = parseFloat(formData.price_per_meter) || 0;
-    return (meters * price).toFixed(2);
+  function itemAmount(item) {
+    return (parseFloat(item.meters) || 0) * (parseFloat(item.rate) || 0);
+  }
+  function subtotal() { return items.reduce((s, i) => s + itemAmount(i), 0); }
+  function gstAmount() { return subtotal() * 0.05; }
+  function grandTotal() { return subtotal() + gstAmount(); }
+
+  function updateItem(idx, field, value) {
+    setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      const total = parseFloat(calculateTotal());
-      const payload = {
-        supplier_id: formData.supplier_id,
-        total_amount: total,
-        purchase_date: formData.purchase_date,
-        notes: `Fabric: ${formData.fabric_name}${formData.fabric_type ? ` (${formData.fabric_type})` : ''}${formData.fabric_color ? ` - ${formData.fabric_color}` : ''}${formData.meters ? ` | ${formData.meters}m @ ₹${formData.price_per_meter}/m` : ''}${formData.notes ? ` | ${formData.notes}` : ''}`,
-        status: 'pending',
-      };
-      const { error } = await supabase.from('purchases').insert([payload]);
+      const { data: purchase, error } = await supabase
+        .from('purchases')
+        .insert([{ supplier_id: formData.supplier_id, total_amount: grandTotal(), purchase_date: formData.purchase_date, notes: formData.notes, status: 'pending' }])
+        .select('id')
+        .single();
       if (error) throw error;
+      const itemRows = items.filter(i => i.description && parseFloat(i.meters) > 0).map(i => ({
+        purchase_id: purchase.id, description: i.description, hsn: i.hsn,
+        meters: parseFloat(i.meters), rate: parseFloat(i.rate),
+      }));
+      if (itemRows.length) await supabase.from('purchase_items').insert(itemRows);
       setShowForm(false);
-      setFormData({ supplier_id: '', fabric_name: '', fabric_type: '', fabric_color: '', meters: '', price_per_meter: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' });
+      setFormData({ supplier_id: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' });
+      setItems([{ ...emptyItem }]);
       fetchPurchases();
       toast('Purchase added successfully');
     } catch (error) {
@@ -195,62 +203,71 @@ export default function Purchases() {
 
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-lg p-6 my-8">
+          <div className="bg-white rounded-xl w-full max-w-3xl p-6 my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">New Purchase</h2>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
-                <select required value={formData.supplier_id} onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })} className="input">
-                  <option value="">Select supplier</option>
-                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div className="border-t border-gray-200 pt-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">Fabric Details</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Fabric Name</label>
-                    <input type="text" value={formData.fabric_name} onChange={(e) => setFormData({ ...formData, fabric_name: e.target.value })} className="input" placeholder="e.g., Cotton Silk" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    <input type="text" value={formData.fabric_type} onChange={(e) => setFormData({ ...formData, fabric_type: e.target.value })} className="input" placeholder="e.g., Cotton, Silk" />
-                  </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
+                  <select required value={formData.supplier_id} onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })} className="input">
+                    <option value="">Select supplier</option>
+                    {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Color</label>
-                    <input type="text" value={formData.fabric_color} onChange={(e) => setFormData({ ...formData, fabric_color: e.target.value })} className="input" placeholder="e.g., Blue, Red" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Meters</label>
-                    <input type="number" step="0.01" value={formData.meters} onChange={(e) => setFormData({ ...formData, meters: e.target.value })} className="input" placeholder="0" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Price per Meter</label>
-                    <input type="number" step="0.01" value={formData.price_per_meter} onChange={(e) => setFormData({ ...formData, price_per_meter: e.target.value })} className="input" placeholder="₹0.00" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Total Amount *</label>
-                    <input type="number" step="0.01" required value={calculateTotal()} onChange={(e) => setFormData({ ...formData, total_amount: e.target.value })} className="input bg-gray-50" placeholder="₹0.00" />
-                    {formData.meters && formData.price_per_meter && <p className="text-xs text-gray-500 mt-1">Auto-calculated from meters × price</p>}
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+                  <input type="date" value={formData.purchase_date} onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })} className="input" />
                 </div>
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-                <input type="date" value={formData.purchase_date} onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })} className="input" />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">Items</label>
+                  <button type="button" onClick={() => setItems(prev => [...prev, { ...emptyItem }])} className="text-xs text-primary-600 hover:underline">+ Add row</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm" style={{ minWidth: '520px' }}>
+                    <thead>
+                      <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                        <th className="px-2 py-1 text-left">Description</th>
+                        <th className="px-2 py-1 text-left w-24">HSN</th>
+                        <th className="px-2 py-1 text-right w-20">Meters</th>
+                        <th className="px-2 py-1 text-right w-24">Rate (₹)</th>
+                        <th className="px-2 py-1 text-right w-24">Amount</th>
+                        <th className="w-6"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} placeholder="Fabric name" /></td>
+                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={item.hsn} onChange={e => updateItem(idx, 'hsn', e.target.value)} /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={item.meters} onChange={e => updateItem(idx, 'meters', e.target.value)} placeholder="0" /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={item.rate} onChange={e => updateItem(idx, 'rate', e.target.value)} placeholder="0" /></td>
+                          <td className="px-2 py-1 text-right font-medium">₹{itemAmount(item).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                          <td className="px-1 py-1">
+                            {items.length > 1 && <button type="button" onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-2 text-sm text-right space-y-0.5 text-gray-600">
+                  <p>Subtotal: <span className="font-medium">₹{subtotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></p>
+                  <p>IGST @5%: <span className="font-medium">₹{gstAmount().toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></p>
+                  <p className="text-base font-semibold text-gray-900">Total: ₹{grandTotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                </div>
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes</label>
-                <textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="input" rows={2} placeholder="Any other details..." />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="input" rows={2} placeholder="Invoice no., remarks..." />
               </div>
-              <div className="flex gap-3 pt-4">
+              <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary flex-1">Cancel</button>
                 <button type="submit" className="btn btn-primary flex-1">Add Purchase</button>
               </div>

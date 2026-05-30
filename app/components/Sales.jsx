@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, ScanLine } from 'lucide-react';
+import BarcodeScanner from './BarcodeScanner';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
 
@@ -22,6 +23,7 @@ export default function Sales() {
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showScanner, setShowScanner] = useState(false);
   const [formData, setFormData] = useState({
     customer_id: '', customer_name: '', fabric_name: '', fabric_type: '', fabric_color: '',
     meters: '', price_per_meter: '', cost_price_per_meter: '',
@@ -53,6 +55,23 @@ export default function Sales() {
       setCustomers(data || []);
     } catch (error) {
       console.error('Error fetching customers:', error);
+    }
+  }
+
+  async function handleBarcodeScan(code) {
+    setShowScanner(false);
+    const { data } = await supabase.from('fabrics').select('*').eq('barcode', code).single();
+    if (data) {
+      setFormData(prev => ({
+        ...prev,
+        fabric_name: data.name,
+        fabric_type: data.type,
+        fabric_color: data.color,
+        cost_price_per_meter: data.purchase_price_per_meter.toString(),
+        price_per_meter: data.selling_price_per_meter.toString(),
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, fabric_name: code }));
     }
   }
 
@@ -235,7 +254,10 @@ export default function Sales() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Fabric Name *</label>
-                    <input type="text" required value={formData.fabric_name} onChange={(e) => setFormData({ ...formData, fabric_name: e.target.value })} className="input" placeholder="e.g., Cotton Silk" />
+                    <div className="flex gap-2">
+                      <input type="text" required value={formData.fabric_name} onChange={(e) => setFormData({ ...formData, fabric_name: e.target.value })} className="input" placeholder="e.g., Cotton Silk" />
+                      <button type="button" onClick={() => setShowScanner(true)} className="px-3 bg-gray-100 hover:bg-primary-100 border border-gray-200 rounded-lg text-gray-500 hover:text-primary-600" title="Scan barcode"><ScanLine className="w-5 h-5" /></button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
@@ -307,6 +329,8 @@ export default function Sales() {
           </div>
         </div>
       )}
+
+      {showScanner && <BarcodeScanner onScan={handleBarcodeScan} onClose={() => setShowScanner(false)} />}
 
       {showPaymentForm && selectedSale && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
