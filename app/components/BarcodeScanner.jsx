@@ -4,10 +4,9 @@ import { X, ScanLine } from 'lucide-react';
 
 export default function BarcodeScanner({ onScan, onClose }) {
   const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const rafRef = useRef(null);
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
+  const readerRef = useRef(null);
   const [error, setError] = useState(null);
   const [scanning, setScanning] = useState(false);
 
@@ -16,65 +15,56 @@ export default function BarcodeScanner({ onScan, onClose }) {
 
     async function start() {
       try {
-        // Check BarcodeDetector support
-        if (!('BarcodeDetector' in window)) {
-          setError('Your browser does not support barcode scanning. Please use Chrome on Android or Safari 17+ on iOS.');
+        // Dynamically import to avoid SSR
+        const { BrowserMultiFormatReader } = await import('@zxing/library');
+        if (stopped) return;
+
+        const reader = new BrowserMultiFormatReader();
+        readerRef.current = reader;
+
+        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+        if (stopped) return;
+
+        // Prefer back camera
+        const device = devices.find(d =>
+          d.label.toLowerCase().includes('back') ||
+          d.label.toLowerCase().includes('rear') ||
+          d.label.toLowerCase().includes('environment')
+        ) || devices[devices.length - 1] || devices[0];
+
+        if (!device) {
+          setError('No camera found on this device.');
           return;
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
-
-        if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
-
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        const detector = new window.BarcodeDetector({
-          formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'],
-        });
-
         setScanning(true);
 
-        async function detect() {
-          if (stopped || !videoRef.current) return;
-          try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0) {
+        await reader.decodeFromVideoDevice(
+          device.deviceId,
+          videoRef.current,
+          (result, err) => {
+            if (result && !stopped) {
               stopped = true;
-              stopStream();
-              onScanRef.current(barcodes[0].rawValue);
-              return;
+              reader.reset();
+              onScanRef.current(result.getText());
             }
-          } catch (_) {}
-          rafRef.current = requestAnimationFrame(detect);
-        }
-
-        rafRef.current = requestAnimationFrame(detect);
+          }
+        );
       } catch (err) {
+        if (stopped) return;
         if (err.name === 'NotAllowedError') {
           setError('Camera permission denied. Please allow camera access and try again.');
         } else {
-          setError('Could not access camera: ' + err.message);
+          setError('Could not start camera: ' + (err.message || err));
         }
       }
-    }
-
-    function stopStream() {
-      cancelAnimationFrame(rafRef.current);
-      streamRef.current?.getTracks().forEach(t => t.stop());
     }
 
     start();
 
     return () => {
       stopped = true;
-      cancelAnimationFrame(rafRef.current);
-      streamRef.current?.getTracks().forEach(t => t.stop());
+      readerRef.current?.reset();
     };
   }, []);
 
@@ -98,10 +88,9 @@ export default function BarcodeScanner({ onScan, onClose }) {
               ref={videoRef}
               muted
               playsInline
-              className="w-full h-full object-cover"
+              className="w-full object-cover"
               style={{ minHeight: '220px' }}
             />
-            {/* Scanning overlay */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="border-2 border-primary-400 rounded-lg w-56 h-24 relative">
                 <ScanLine className="absolute -top-3 left-1/2 -translate-x-1/2 w-5 h-5 text-primary-400 animate-bounce" />
