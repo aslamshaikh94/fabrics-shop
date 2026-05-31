@@ -12,7 +12,12 @@ body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
+
+/* Prevent horizontal overflow on mobile */
+html, body { overflow-x: hidden; max-width: 100vw; }
 
 @layer base {
   * {

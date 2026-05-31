@@ -57,25 +57,25 @@ export default function CustomerLedger({ customer, onClose }) {
         ) : (
           <>
             {/* Summary */}
-            <div className="grid grid-cols-3 gap-4 p-6 border-b border-gray-100">
+            <div className="grid grid-cols-3 gap-2 p-4 sm:p-6 border-b border-gray-100">
               <div className="text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total Billed</p>
-                <p className="text-xl font-bold text-gray-900 mt-1">₹{totalBilled.toLocaleString('en-IN')}</p>
+                <p className="text-lg sm:text-xl font-bold text-gray-900 mt-1">₹{totalBilled.toLocaleString('en-IN')}</p>
               </div>
               <div className="text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total Paid</p>
-                <p className="text-xl font-bold text-accent-600 mt-1">₹{totalPaid.toLocaleString('en-IN')}</p>
+                <p className="text-lg sm:text-xl font-bold text-accent-600 mt-1">₹{totalPaid.toLocaleString('en-IN')}</p>
               </div>
               <div className="text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Outstanding</p>
-                <p className={`text-xl font-bold mt-1 ${outstanding > 0 ? 'text-warning-600' : 'text-accent-600'}`}>
+                <p className={`text-lg sm:text-xl font-bold mt-1 ${outstanding > 0 ? 'text-warning-600' : 'text-accent-600'}`}>
                   ₹{outstanding.toLocaleString('en-IN')}
                 </p>
               </div>
             </div>
 
             {/* Timeline */}
-            <div className="overflow-y-auto flex-1 p-6">
+            <div className="overflow-y-auto flex-1 p-4 sm:p-6">
               {timeline.length === 0 ? (
                 <p className="text-center text-gray-500 py-8">No transactions found</p>
               ) : (

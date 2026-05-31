@@ -29,6 +29,15 @@ const ALL_NAV = [
   { id: 'reports', label: 'Reports', icon: BarChart2 },
 ];
 
+// Bottom nav shown on mobile — most used pages
+const BOTTOM_NAV = [
+  { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+  { id: 'sales', label: 'Sales', icon: TrendingUp },
+  { id: 'purchases', label: 'Purchases', icon: ShoppingBag, adminOnly: true },
+  { id: 'customers', label: 'Customers', icon: Users },
+  { id: 'reports', label: 'Reports', icon: BarChart2 },
+];
+
 const pages = {
   dashboard: <Dashboard />,
   purchases: <Purchases />,
@@ -48,6 +57,7 @@ export default function Shell() {
   const [dark, setDark] = useState(false);
 
   const navItems = ALL_NAV.filter(item => !item.adminOnly || isAdmin);
+  const bottomNavItems = BOTTOM_NAV.filter(item => !item.adminOnly || isAdmin);
 
   // If current page is not accessible, fall back to dashboard
   const allowedIds = navItems.map(n => n.id);
@@ -66,11 +76,11 @@ export default function Shell() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Mobile header */}
-      <div className="lg:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
+      <div className="lg:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
         <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
           <Menu className="w-6 h-6 text-gray-600" />
         </button>
-        <h1 className="text-lg font-semibold text-gray-900">CRMS</h1>
+        <h1 className="text-lg font-semibold text-gray-900">{ALL_NAV.find(n => n.id === activePage)?.label || 'CRMS'}</h1>
         <div className="w-10" />
       </div>
 
@@ -126,10 +136,31 @@ export default function Shell() {
 
       {/* Main content */}
       <main className="lg:ml-64">
-        <div className="p-4 lg:p-8">
+        <div className="p-4 pb-24 lg:pb-8 lg:p-8">
           {pages[activePage]}
         </div>
       </main>
+
+      {/* Mobile bottom nav */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 z-30 flex">
+        {bottomNavItems.map(item => {
+          const Icon = item.icon;
+          const active = activePage === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => navigate(item.id)}
+              className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 transition-colors ${
+                active ? 'text-primary-600' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Icon className={`w-5 h-5 ${active ? 'text-primary-600' : ''}`} />
+              <span className="text-[10px] font-medium">{item.label}</span>
+              {active && <span className="absolute bottom-0 w-8 h-0.5 bg-primary-600 rounded-t-full" />}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
 
@@ -22,12 +22,11 @@ export default function Purchases() {
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const emptyItem = { description: '', hsn: '520811', meters: '', rate: '' };
+  const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
-    supplier_id: '',
+    supplier_id: '', total_amount: '',
     purchase_date: new Date().toISOString().split('T')[0], notes: '',
   });
-  const [items, setItems] = useState([{ ...emptyItem }]);
   const [paymentData, setPaymentData] = useState({
     amount: '', payment_date: new Date().toISOString().split('T')[0],
     payment_method: 'cash', reference_number: '', notes: '',
@@ -56,36 +55,33 @@ export default function Purchases() {
     }
   }
 
-  function itemAmount(item) {
-    return (parseFloat(item.meters) || 0) * (parseFloat(item.rate) || 0);
-  }
-  function subtotal() { return items.reduce((s, i) => s + itemAmount(i), 0); }
-  function gstAmount() { return subtotal() * 0.05; }
-  function grandTotal() { return subtotal() + gstAmount(); }
-
-  function updateItem(idx, field, value) {
-    setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      const { data: purchase, error } = await supabase
-        .from('purchases')
-        .insert([{ supplier_id: formData.supplier_id, total_amount: grandTotal(), purchase_date: formData.purchase_date, notes: formData.notes, status: 'pending' }])
-        .select('id')
-        .single();
-      if (error) throw error;
-      const itemRows = items.filter(i => i.description && parseFloat(i.meters) > 0).map(i => ({
-        purchase_id: purchase.id, description: i.description, hsn: i.hsn,
-        meters: parseFloat(i.meters), rate: parseFloat(i.rate),
-      }));
-      if (itemRows.length) await supabase.from('purchase_items').insert(itemRows);
+      if (editingId) {
+        const { error } = await supabase.from('purchases').update({
+          supplier_id: formData.supplier_id,
+          total_amount: parseFloat(formData.total_amount),
+          purchase_date: formData.purchase_date,
+          notes: formData.notes,
+        }).eq('id', editingId);
+        if (error) throw error;
+        toast('Purchase updated');
+      } else {
+        const { error } = await supabase.from('purchases').insert([{
+          supplier_id: formData.supplier_id,
+          total_amount: parseFloat(formData.total_amount),
+          purchase_date: formData.purchase_date,
+          notes: formData.notes,
+          status: 'pending',
+        }]);
+        if (error) throw error;
+        toast('Purchase added successfully');
+      }
       setShowForm(false);
-      setFormData({ supplier_id: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' });
-      setItems([{ ...emptyItem }]);
+      setEditingId(null);
+      setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' });
       fetchPurchases();
-      toast('Purchase added successfully');
     } catch (error) {
       console.error('Error saving purchase:', error);
       toast('Failed to save purchase', 'error');
@@ -123,6 +119,17 @@ export default function Purchases() {
     } catch (error) {
       console.error('Error fetching payments:', error);
     }
+  }
+
+  function handleEdit(purchase) {
+    setFormData({
+      supplier_id: purchase.supplier_id,
+      total_amount: purchase.total_amount.toString(),
+      purchase_date: purchase.purchase_date,
+      notes: purchase.notes,
+    });
+    setEditingId(purchase.id);
+    setShowForm(true);
   }
 
   function handleViewPayments(purchase) {
@@ -181,7 +188,7 @@ export default function Purchases() {
           <h1 className="text-2xl font-bold text-gray-900">Purchases</h1>
           <p className="text-gray-500 mt-1">Track purchases and payments to suppliers</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn btn-primary">
+        <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' }); }} className="btn btn-primary">
           <Plus className="w-5 h-5 mr-2" />New Purchase
         </button>
       </div>
@@ -202,74 +209,35 @@ export default function Purchases() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-3xl p-6 my-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">New Purchase</h2>
+              <h2 className="text-xl font-semibold">{editingId ? 'Edit Purchase' : 'New Purchase'}</h2>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
-                  <select required value={formData.supplier_id} onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })} className="input">
-                    <option value="">Select supplier</option>
-                    {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-                  <input type="date" value={formData.purchase_date} onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })} className="input" />
-                </div>
-              </div>
-
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-700">Items</label>
-                  <button type="button" onClick={() => setItems(prev => [...prev, { ...emptyItem }])} className="text-xs text-primary-600 hover:underline">+ Add row</button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm" style={{ minWidth: '520px' }}>
-                    <thead>
-                      <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
-                        <th className="px-2 py-1 text-left">Description</th>
-                        <th className="px-2 py-1 text-left w-24">HSN</th>
-                        <th className="px-2 py-1 text-right w-20">Meters</th>
-                        <th className="px-2 py-1 text-right w-24">Rate (₹)</th>
-                        <th className="px-2 py-1 text-right w-24">Amount</th>
-                        <th className="w-6"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {items.map((item, idx) => (
-                        <tr key={idx}>
-                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} placeholder="Fabric name" /></td>
-                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={item.hsn} onChange={e => updateItem(idx, 'hsn', e.target.value)} /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={item.meters} onChange={e => updateItem(idx, 'meters', e.target.value)} placeholder="0" /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={item.rate} onChange={e => updateItem(idx, 'rate', e.target.value)} placeholder="0" /></td>
-                          <td className="px-2 py-1 text-right font-medium">₹{itemAmount(item).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                          <td className="px-1 py-1">
-                            {items.length > 1 && <button type="button" onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mt-2 text-sm text-right space-y-0.5 text-gray-600">
-                  <p>Subtotal: <span className="font-medium">₹{subtotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></p>
-                  <p>IGST @5%: <span className="font-medium">₹{gstAmount().toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></p>
-                  <p className="text-base font-semibold text-gray-900">Total: ₹{grandTotal().toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
+                <select required value={formData.supplier_id} onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })} className="input">
+                  <option value="">Select supplier</option>
+                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
-
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Total Amount *</label>
+                <input type="number" step="0.01" required value={formData.total_amount} onChange={(e) => setFormData({ ...formData, total_amount: e.target.value })} className="input" placeholder="₹0.00" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+                <input type="date" value={formData.purchase_date} onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })} className="input" />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                 <textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="input" rows={2} placeholder="Invoice no., remarks..." />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Add Purchase</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="btn btn-secondary flex-1">Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">{editingId ? 'Update Purchase' : 'Add Purchase'}</button>
               </div>
             </form>
           </div>
@@ -277,8 +245,8 @@ export default function Purchases() {
       )}
 
       {showPaymentForm && selectedPurchase && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Add Payment</h2>
               <button onClick={() => setShowPaymentForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
@@ -324,8 +292,8 @@ export default function Purchases() {
       )}
 
       {selectedPurchase && !showPaymentForm && payments.length > 0 && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Payment History</h2>
               <button onClick={() => { setSelectedPurchase(null); setPayments([]); }} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
@@ -401,6 +369,7 @@ export default function Purchases() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => handleViewPayments(purchase)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="View payments"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => handleEdit(purchase)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="Edit purchase"><Pencil className="w-4 h-4" /></button>
                       {purchase.remaining_amount > 0 && (
                         <button onClick={() => handleAddPayment(purchase)} className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600" title="Add payment"><CreditCard className="w-4 h-4" /></button>
                       )}

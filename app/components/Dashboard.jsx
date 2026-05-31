@@ -1,16 +1,16 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Package, DollarSign, Users, AlertCircle, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Package, DollarSign, Users, AlertCircle, AlertTriangle, ShoppingBag, CreditCard, ArrowRight } from 'lucide-react';
 
 function pctChange(curr, prev) {
   if (!prev) return null;
   const diff = ((curr - prev) / prev) * 100;
-  return { value: `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`, type: diff >= 0 ? 'increase' : 'decrease' };
+  return { value: `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`, up: diff >= 0 };
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ totalSales: 0, totalMargin: 0, pendingPurchasePayments: 0, pendingSalePayments: 0, totalFabrics: 0, totalCustomers: 0 });
+  const [stats, setStats] = useState({ thisMonthSales: 0, thisMonthProfit: 0, pendingPurchasePayments: 0, pendingSalePayments: 0, totalFabrics: 0, totalCustomers: 0 });
   const [changes, setChanges] = useState({});
   const [lowStock, setLowStock] = useState([]);
   const [recentSales, setRecentSales] = useState([]);
@@ -26,14 +26,14 @@ export default function Dashboard() {
       const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
 
       const [salesRes, purchasesRes, fabricsRes, customersRes, thisMoSales, prevMoSales, lowStockRes, recentRes] = await Promise.all([
-        supabase.from('sales').select('total_amount, margin, remaining_amount'),
-        supabase.from('purchases').select('total_amount, remaining_amount'),
+        supabase.from('sales').select('remaining_amount'),
+        supabase.from('purchases').select('remaining_amount'),
         supabase.from('fabrics').select('id', { count: 'exact', head: true }),
         supabase.from('customers').select('id', { count: 'exact', head: true }),
         supabase.from('sales').select('total_amount, margin').gte('sale_date', `${thisMonth}-01`),
         supabase.from('sales').select('total_amount, margin').gte('sale_date', `${prevMonth}-01`).lt('sale_date', `${thisMonth}-01`),
         supabase.from('fabrics').select('name, available_meters').lt('available_meters', 10),
-        supabase.from('sales').select('sale_date, total_amount, notes, customer:customers(name)').order('sale_date', { ascending: false }).limit(5),
+        supabase.from('sales').select('sale_date, total_amount, notes, customer:customers(name)').order('sale_date', { ascending: false }).limit(6),
       ]);
 
       const currSales = thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
@@ -42,8 +42,8 @@ export default function Dashboard() {
       const prevProfit = prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
 
       setStats({
-        totalSales: salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0,
-        totalMargin: salesRes.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0,
+        thisMonthSales: currSales,
+        thisMonthProfit: currProfit,
         pendingSalePayments: salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0,
         pendingPurchasePayments: purchasesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0,
         totalFabrics: fabricsRes.count || 0,
@@ -67,102 +67,101 @@ export default function Dashboard() {
     );
   }
 
-  const cards = [
-    { title: 'Total Sales', value: `₹${stats.totalSales.toLocaleString('en-IN')}`, change: changes.sales, icon: TrendingUp, color: 'bg-primary-500' },
-    { title: 'Total Profit', value: `₹${stats.totalMargin.toLocaleString('en-IN')}`, change: changes.profit, icon: DollarSign, color: 'bg-accent-500' },
-    { title: 'Pay to Suppliers', value: `₹${stats.pendingPurchasePayments.toLocaleString('en-IN')}`, subtitle: 'Pending payments', icon: AlertCircle, color: 'bg-warning-500' },
-    { title: 'Receivables', value: `₹${stats.pendingSalePayments.toLocaleString('en-IN')}`, subtitle: 'Customer dues', icon: TrendingDown, color: 'bg-orange-500' },
-  ];
+  const now = new Date();
+  const monthName = now.toLocaleString('en-IN', { month: 'long' });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 mt-1">Overview of your CRMS</p>
+        <p className="text-gray-500 mt-0.5 text-sm">{monthName} {now.getFullYear()} overview</p>
       </div>
 
       {lowStock.length > 0 && (
-        <div className="bg-warning-50 border border-warning-200 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-warning-600 mt-0.5" />
-            <div>
-              <p className="font-medium text-warning-800">Low Stock Alert</p>
-              <p className="text-sm text-warning-700 mt-1">{lowStock.map(f => `${f.name} (${f.available_meters}m)`).join(', ')}</p>
-            </div>
+        <div className="bg-warning-50 border border-warning-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-warning-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold text-warning-800 text-sm">Low Stock Alert</p>
+            <p className="text-sm text-warning-700 mt-0.5">{lowStock.map(f => `${f.name} (${f.available_meters}m)`).join(' · ')}</p>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {cards.map(card => {
+      {/* This month stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { title: `${monthName} Sales`, value: stats.thisMonthSales, change: changes.sales, icon: TrendingUp, iconBg: 'bg-blue-500', valueBg: 'text-gray-900' },
+          { title: `${monthName} Profit`, value: stats.thisMonthProfit, change: changes.profit, icon: DollarSign, iconBg: 'bg-green-500', valueBg: 'text-green-700' },
+          { title: 'To Pay Suppliers', value: stats.pendingPurchasePayments, icon: ShoppingBag, iconBg: 'bg-orange-500', valueBg: 'text-orange-600', subtitle: 'Pending' },
+          { title: 'To Collect', value: stats.pendingSalePayments, icon: CreditCard, iconBg: 'bg-purple-500', valueBg: 'text-purple-600', subtitle: 'From customers' },
+        ].map(card => {
           const Icon = card.icon;
           return (
-            <div key={card.title} className="card p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">{card.title}</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">{card.value}</p>
-                  {card.change && (
-                    <p className={`text-sm mt-2 flex items-center gap-1 ${card.change.type === 'increase' ? 'text-accent-600' : 'text-red-600'}`}>
-                      {card.change.type === 'increase' ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                      {card.change.value} vs last month
-                    </p>
-                  )}
-                  {card.subtitle && <p className="text-sm text-gray-500 mt-1">{card.subtitle}</p>}
-                </div>
-                <div className={`${card.color} p-3 rounded-lg`}>
-                  <Icon className="w-6 h-6 text-white" />
+            <div key={card.title} className="card p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-medium text-gray-500 leading-tight">{card.title}</p>
+                <div className={`${card.iconBg} p-1.5 rounded-lg`}>
+                  <Icon className="w-3.5 h-3.5 text-white" />
                 </div>
               </div>
+              <p className={`text-xl font-bold ${card.valueBg}`}>₹{card.value.toLocaleString('en-IN')}</p>
+              {card.change && (
+                <p className={`text-xs mt-1 flex items-center gap-0.5 ${card.change.up ? 'text-green-600' : 'text-red-500'}`}>
+                  {card.change.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                  {card.change.value} vs last month
+                </p>
+              )}
+              {card.subtitle && <p className="text-xs text-gray-400 mt-1">{card.subtitle}</p>}
             </div>
           );
         })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card p-6">
-          <div className="flex items-center gap-4">
-            <div className="bg-primary-100 p-4 rounded-xl"><Package className="w-8 h-8 text-primary-600" /></div>
-            <div>
-              <p className="text-sm text-gray-500">Total Fabrics</p>
-              <p className="text-3xl font-bold text-gray-900">{stats.totalFabrics}</p>
-              <p className="text-sm text-gray-500 mt-1">Different varieties</p>
-            </div>
+      {/* Inventory & Customers */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="card p-4 flex items-center gap-3">
+          <div className="bg-primary-100 p-3 rounded-xl shrink-0"><Package className="w-6 h-6 text-primary-600" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Fabric Types</p>
+            <p className="text-2xl font-bold text-gray-900">{stats.totalFabrics}</p>
           </div>
         </div>
-        <div className="card p-6">
-          <div className="flex items-center gap-4">
-            <div className="bg-accent-100 p-4 rounded-xl"><Users className="w-8 h-8 text-accent-600" /></div>
-            <div>
-              <p className="text-sm text-gray-500">Total Customers</p>
-              <p className="text-3xl font-bold text-gray-900">{stats.totalCustomers}</p>
-              <p className="text-sm text-gray-500 mt-1">Registered buyers</p>
-            </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="bg-accent-100 p-3 rounded-xl shrink-0"><Users className="w-6 h-6 text-accent-600" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Customers</p>
+            <p className="text-2xl font-bold text-gray-900">{stats.totalCustomers}</p>
           </div>
         </div>
       </div>
 
       {/* Recent Sales */}
       <div className="card">
-        <div className="p-6 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Sales</h2>
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900">Recent Sales</h2>
+          <span className="text-xs text-gray-400">Last 6</span>
         </div>
-        <div className="divide-y divide-gray-50">
-          {recentSales.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No sales yet</p>
-          ) : recentSales.map(sale => (
-            <div key={sale.id} className="px-6 py-3 flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900 text-sm">{sale.customer?.name || 'Walk-in'}</p>
-                <p className="text-xs text-gray-500">{sale.notes?.split('|')[0]?.replace('Fabric:', '').trim()}</p>
+        {recentSales.length === 0 ? (
+          <div className="py-10 text-center">
+            <TrendingUp className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">No sales yet</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {recentSales.map(sale => (
+              <div key={sale.id} className="px-4 py-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 text-sm truncate">{sale.customer?.name || 'Walk-in'}</p>
+                  <p className="text-xs text-gray-400 truncate">{sale.notes?.split('|')[0]?.replace('Fabric:', '').trim() || '—'}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="font-semibold text-gray-900 text-sm">₹{sale.total_amount.toLocaleString('en-IN')}</p>
+                  <p className="text-xs text-gray-400">{new Date(sale.sale_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="font-semibold text-gray-900 text-sm">₹{sale.total_amount.toLocaleString('en-IN')}</p>
-                <p className="text-xs text-gray-500">{new Date(sale.sale_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

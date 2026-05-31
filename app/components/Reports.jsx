@@ -135,8 +135,8 @@ export default function Reports() {
       {/* Monthly Sales & Profit Chart */}
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Monthly Sales & Profit</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={monthlyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={monthlyData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="month" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={45} />
@@ -151,8 +151,8 @@ export default function Reports() {
       {/* Monthly Purchases Trend */}
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Monthly Purchases Trend</h2>
-        <ResponsiveContainer width="100%" height={250}>
-          <LineChart data={monthlyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={180}>
+          <LineChart data={monthlyData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="month" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={45} />
