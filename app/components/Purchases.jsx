@@ -268,7 +268,7 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-                <input type="date" value={formData.purchase_date} onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })} className="input" />
+                <input type="date" value={formData.purchase_date} onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })} className="input w-full" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
@@ -316,7 +316,7 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
-                <input type="date" value={paymentData.payment_date} onChange={(e) => setPaymentData({ ...paymentData, payment_date: e.target.value })} className="input" />
+                <input type="date" value={paymentData.payment_date} onChange={(e) => setPaymentData({ ...paymentData, payment_date: e.target.value })} className="input w-full" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>

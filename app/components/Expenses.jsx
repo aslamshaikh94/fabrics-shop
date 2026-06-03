@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, Trash2, X, Search, Calendar } from 'lucide-react';
+import { Plus, Trash2, X, Search, Calendar, Pencil } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
 
@@ -17,6 +17,7 @@ export default function Expenses() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -40,22 +41,41 @@ export default function Expenses() {
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('expenses').insert([{
-        title: formData.title,
-        category: formData.category,
-        amount: parseFloat(formData.amount),
-        expense_date: formData.expense_date,
-        notes: formData.notes,
-      }]);
-      if (error) throw error;
+      if (editingId) {
+        const { error } = await supabase.from('expenses').update({
+          title: formData.title, category: formData.category,
+          amount: parseFloat(formData.amount),
+          expense_date: formData.expense_date, notes: formData.notes,
+        }).eq('id', editingId);
+        if (error) throw error;
+        toast('Expense updated');
+      } else {
+        const { error } = await supabase.from('expenses').insert([{
+          title: formData.title, category: formData.category,
+          amount: parseFloat(formData.amount),
+          expense_date: formData.expense_date, notes: formData.notes,
+        }]);
+        if (error) throw error;
+        toast('Expense added');
+      }
       setShowForm(false);
+      setEditingId(null);
       setFormData(emptyForm);
       fetchExpenses();
-      toast('Expense added');
     } catch (err) {
       console.error('Error saving expense:', err);
       toast('Failed to save expense', 'error');
     }
+  }
+
+  function handleEdit(expense) {
+    setFormData({
+      title: expense.title, category: expense.category,
+      amount: expense.amount.toString(),
+      expense_date: expense.expense_date, notes: expense.notes || '',
+    });
+    setEditingId(expense.id);
+    setShowForm(true);
   }
 
   async function handleDelete(id) {
@@ -106,7 +126,7 @@ export default function Expenses() {
           <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
           <p className="text-gray-500 mt-1">Track shop operating expenses</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn btn-primary">
+        <button onClick={() => { setEditingId(null); setFormData(emptyForm); setShowForm(true); }} className="btn btn-primary">
           <Plus className="w-5 h-5 mr-2" />Add Expense
         </button>
       </div>
@@ -141,8 +161,8 @@ export default function Expenses() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
           <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Add Expense</h2>
-              <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+              <h2 className="text-xl font-semibold">{editingId ? 'Edit Expense' : 'Add Expense'}</h2>
+              <button onClick={() => { setShowForm(false); setEditingId(null); }} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -163,15 +183,15 @@ export default function Expenses() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                <input type="date" value={formData.expense_date} onChange={e => setFormData({ ...formData, expense_date: e.target.value })} className="input" />
+                <input type="date" value={formData.expense_date} onChange={e => setFormData({ ...formData, expense_date: e.target.value })} className="input w-full" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                 <textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="input" rows={2} placeholder="Optional notes" />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Add Expense</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="btn btn-secondary flex-1">Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">{editingId ? 'Update Expense' : 'Add Expense'}</button>
               </div>
             </form>
           </div>
@@ -209,7 +229,10 @@ export default function Expenses() {
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-red-600 text-sm">₹{expense.amount.toLocaleString('en-IN')}</td>
                   <td className="px-4 py-3 text-center">
-                    <button onClick={() => setConfirmDelete(expense.id)} className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => handleEdit(expense)} className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"><Pencil className="w-4 h-4" /></button>
+                      <button onClick={() => setConfirmDelete(expense.id)} className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -54,17 +54,22 @@ export default function Shell() {
   const { isAdmin } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark';
+    }
+    return false;
+  });
 
   const navItems = ALL_NAV.filter(item => !item.adminOnly || isAdmin);
   const bottomNavItems = BOTTOM_NAV.filter(item => !item.adminOnly || isAdmin);
 
-  // If current page is not accessible, fall back to dashboard
   const allowedIds = navItems.map(n => n.id);
   const activePage = allowedIds.includes(currentPage) ? currentPage : 'dashboard';
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
 
   function navigate(id) {

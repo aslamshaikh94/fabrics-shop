@@ -256,6 +256,7 @@ export default function Sales() {
         <div className="flex gap-2">
           <button onClick={() => exportCSV(filteredSales.map(s => ({ date: s.sale_date, customer: s.customer?.name || 'Walk-in', notes: s.notes, meters: s.meters, price_per_meter: s.price_per_meter, total: s.total_amount, paid: s.paid_amount, remaining: s.remaining_amount, type: s.payment_type })), 'sales.csv')} className="btn btn-secondary"><Download className="w-4 h-4" /></button>
           <button onClick={() => { setEditingId(null); setFormData(emptyForm); setShowForm(true); }} className="btn btn-primary">
+            <Plus className="w-5 h-5 mr-2" />New Sale
           </button>
         </div>
       </div>
@@ -392,7 +393,7 @@ export default function Sales() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
-                <input type="date" value={paymentData.payment_date} onChange={(e) => setPaymentData({ ...paymentData, payment_date: e.target.value })} className="input" />
+                <input type="date" value={paymentData.payment_date} onChange={(e) => setPaymentData({ ...paymentData, payment_date: e.target.value })} className="input w-full" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
