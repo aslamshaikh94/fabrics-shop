@@ -121,31 +121,30 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Supplier payment breakdown: Total Purchased → Total Paid → Pending */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-gray-500">Total Purchased</p>
-            <div className="bg-warning-500 p-1.5 rounded-lg"><ShoppingBag className="w-3.5 h-3.5 text-white" /></div>
+      {/* Supplier payment breakdown */}
+      <div className="card p-4">
+        <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">Supplier Payments</p>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-xs text-gray-400">Purchased</p>
+            <p className="text-sm font-bold text-gray-900 mt-0.5">₹{stats.totalPurchases.toLocaleString('en-IN')}</p>
           </div>
-          <p className="text-base font-bold text-gray-900">₹{stats.totalPurchases.toLocaleString('en-IN')}</p>
-          <p className="text-xs text-gray-400 mt-0.5">From suppliers</p>
+          <div>
+            <p className="text-xs text-gray-400">Paid</p>
+            <p className="text-sm font-bold text-green-600 mt-0.5">₹{stats.paidPurchasePayments.toLocaleString('en-IN')}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Pending</p>
+            <p className="text-sm font-bold text-orange-600 mt-0.5">₹{stats.pendingPurchasePayments.toLocaleString('en-IN')}</p>
+          </div>
         </div>
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-gray-500">Total Paid</p>
-            <div className="bg-green-500 p-1.5 rounded-lg"><CreditCard className="w-3.5 h-3.5 text-white" /></div>
-          </div>
-          <p className="text-base font-bold text-green-700">₹{stats.paidPurchasePayments.toLocaleString('en-IN')}</p>
-          <p className="text-xs text-gray-400 mt-0.5">To suppliers</p>
+        <div className="mt-3 h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+          <div className="h-2.5 bg-green-500" style={{ width: stats.totalPurchases > 0 ? `${(stats.paidPurchasePayments / stats.totalPurchases) * 100}%` : '0%' }} />
+          <div className="h-2.5 bg-orange-400" style={{ width: stats.totalPurchases > 0 ? `${(stats.pendingPurchasePayments / stats.totalPurchases) * 100}%` : '0%' }} />
         </div>
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-gray-500">Pending</p>
-            <div className="bg-orange-500 p-1.5 rounded-lg"><AlertCircle className="w-3.5 h-3.5 text-white" /></div>
-          </div>
-          <p className="text-base font-bold text-orange-600">₹{stats.pendingPurchasePayments.toLocaleString('en-IN')}</p>
-          <p className="text-xs text-gray-400 mt-0.5">Still to pay</p>
+        <div className="flex items-center gap-3 mt-1.5">
+          <span className="flex items-center gap-1 text-xs text-gray-400"><span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>{stats.totalPurchases > 0 ? Math.round((stats.paidPurchasePayments / stats.totalPurchases) * 100) : 0}% paid</span>
+          <span className="flex items-center gap-1 text-xs text-gray-400"><span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>{stats.totalPurchases > 0 ? Math.round((stats.pendingPurchasePayments / stats.totalPurchases) * 100) : 0}% pending</span>
         </div>
       </div>
 
