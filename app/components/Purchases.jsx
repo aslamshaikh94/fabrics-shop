@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, Pencil, Paperclip, FileText } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
 
@@ -23,6 +23,8 @@ export default function Purchases() {
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [invoiceFile, setInvoiceFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const [formData, setFormData] = useState({
     supplier_id: '', total_amount: '',
     purchase_date: new Date().toISOString().split('T')[0], notes: '',
@@ -57,13 +59,32 @@ export default function Purchases() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setUploading(true);
     try {
+      let invoice_url = editingId
+        ? (purchases.find(p => p.id === editingId)?.invoice_url || '')
+        : '';
+
+      if (invoiceFile) {
+        const ext = invoiceFile.name.split('.').pop();
+        const path = `${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('purchase-invoices')
+          .upload(path, invoiceFile, { upsert: true });
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage
+          .from('purchase-invoices')
+          .getPublicUrl(path);
+        invoice_url = publicUrl;
+      }
+
       if (editingId) {
         const { error } = await supabase.from('purchases').update({
           supplier_id: formData.supplier_id,
           total_amount: parseFloat(formData.total_amount),
           purchase_date: formData.purchase_date,
           notes: formData.notes,
+          invoice_url,
         }).eq('id', editingId);
         if (error) throw error;
         toast('Purchase updated');
@@ -74,17 +95,21 @@ export default function Purchases() {
           purchase_date: formData.purchase_date,
           notes: formData.notes,
           status: 'pending',
+          invoice_url,
         }]);
         if (error) throw error;
         toast('Purchase added successfully');
       }
       setShowForm(false);
       setEditingId(null);
+      setInvoiceFile(null);
       setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' });
       fetchPurchases();
     } catch (error) {
       console.error('Error saving purchase:', error);
       toast('Failed to save purchase', 'error');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -128,6 +153,7 @@ export default function Purchases() {
       purchase_date: purchase.purchase_date,
       notes: purchase.notes,
     });
+    setInvoiceFile(null);
     setEditingId(purchase.id);
     setShowForm(true);
   }
@@ -188,7 +214,7 @@ export default function Purchases() {
           <h1 className="text-2xl font-bold text-gray-900">Purchases</h1>
           <p className="text-gray-500 mt-1">Track purchases and payments to suppliers</p>
         </div>
-        <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' }); }} className="btn btn-primary">
+        <button onClick={() => { setShowForm(true); setEditingId(null); setInvoiceFile(null); setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' }); }} className="btn btn-primary">
           <Plus className="w-5 h-5 mr-2" />New Purchase
         </button>
       </div>
@@ -235,9 +261,24 @@ export default function Purchases() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                 <textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="input" rows={2} placeholder="Invoice no., remarks..." />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Invoice / Bill</label>
+                <label className="flex items-center gap-2 cursor-pointer border border-dashed border-gray-300 rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors">
+                  <Paperclip className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-500 flex-1 truncate">
+                    {invoiceFile ? invoiceFile.name : (editingId && purchases.find(p => p.id === editingId)?.invoice_url ? 'Replace existing invoice' : 'Attach invoice (PDF, image)')}
+                  </span>
+                  <input type="file" accept="image/*,.pdf" className="hidden" onChange={e => setInvoiceFile(e.target.files[0] || null)} />
+                </label>
+                {editingId && purchases.find(p => p.id === editingId)?.invoice_url && !invoiceFile && (
+                  <a href={purchases.find(p => p.id === editingId).invoice_url} target="_blank" rel="noreferrer" className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1">
+                    <FileText className="w-3 h-3" /> View current invoice
+                  </a>
+                )}
+              </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="btn btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">{editingId ? 'Update Purchase' : 'Add Purchase'}</button>
+                <button type="submit" disabled={uploading} className="btn btn-primary flex-1">{uploading ? 'Saving...' : (editingId ? 'Update Purchase' : 'Add Purchase')}</button>
               </div>
             </form>
           </div>
@@ -370,6 +411,9 @@ export default function Purchases() {
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => handleViewPayments(purchase)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="View payments"><Eye className="w-4 h-4" /></button>
                       <button onClick={() => handleEdit(purchase)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="Edit purchase"><Pencil className="w-4 h-4" /></button>
+                      {purchase.invoice_url && (
+                        <a href={purchase.invoice_url} target="_blank" rel="noreferrer" className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600" title="View invoice"><FileText className="w-4 h-4" /></a>
+                      )}
                       {purchase.remaining_amount > 0 && (
                         <button onClick={() => handleAddPayment(purchase)} className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600" title="Add payment"><CreditCard className="w-4 h-4" /></button>
                       )}
