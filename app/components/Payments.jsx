@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Search, Calendar, Filter, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Search, Calendar, Filter, ArrowDownLeft, ArrowUpRight, ShoppingBag } from 'lucide-react';
 
 export default function Payments() {
   const [purchasePayments, setPurchasePayments] = useState([]);
@@ -12,8 +12,30 @@ export default function Payments() {
   const [dateFilter, setDateFilter] = useState('all');
   const [customDateStart, setCustomDateStart] = useState('');
   const [customDateEnd, setCustomDateEnd] = useState('');
+  const [supplierSummary, setSupplierSummary] = useState([]);
+  const [activeTab, setActiveTab] = useState('suppliers');
 
-  useEffect(() => { fetchPayments(); }, []);
+  useEffect(() => { fetchPayments(); fetchSupplierSummary(); }, []);
+
+  async function fetchSupplierSummary() {
+    try {
+      const { data } = await supabase
+        .from('purchases')
+        .select('supplier:suppliers(name), total_amount, paid_amount, remaining_amount');
+      if (!data) return;
+      const map = {};
+      data.forEach(p => {
+        const name = p.supplier?.name || 'Unknown';
+        if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
+        map[name].total += p.total_amount || 0;
+        map[name].paid += p.paid_amount || 0;
+        map[name].pending += p.remaining_amount || 0;
+      });
+      setSupplierSummary(Object.values(map).sort((a, b) => b.pending - a.pending));
+    } catch (err) {
+      console.error('Error fetching supplier summary:', err);
+    }
+  }
 
   async function fetchPayments() {
     try {
@@ -92,6 +114,60 @@ export default function Payments() {
         <p className="text-gray-500 mt-1">Track all payment transactions</p>
       </div>
 
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200">
+        <button onClick={() => setActiveTab('suppliers')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'suppliers' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>Supplier Summary</button>
+        <button onClick={() => setActiveTab('transactions')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'transactions' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>Transactions</button>
+      </div>
+
+      {/* Supplier Summary Tab */}
+      {activeTab === 'suppliers' && (
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ minWidth: '480px' }}>
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Total Purchased</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Paid</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {supplierSummary.map(s => (
+                  <tr key={s.name} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="bg-warning-100 p-1.5 rounded-lg shrink-0"><ShoppingBag className="w-4 h-4 text-warning-600" /></div>
+                        <span className="font-medium text-gray-900">{s.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">₹{s.total.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold text-accent-600">₹{s.paid.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className={s.pending > 0 ? 'font-semibold text-warning-600' : 'text-gray-400'}>₹{s.pending.toLocaleString('en-IN')}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {supplierSummary.length > 0 && (
+                <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                  <tr>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700">Total</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">₹{supplierSummary.reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">₹{supplierSummary.reduce((s, r) => s + r.paid, 0).toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">₹{supplierSummary.reduce((s, r) => s + r.pending, 0).toLocaleString('en-IN')}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+          {supplierSummary.length === 0 && <p className="text-center py-10 text-gray-500 text-sm">No supplier data found</p>}
+        </div>
+      )}
+
+      {/* Transactions Tab */}
+      {activeTab === 'transactions' && <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card p-5">
           <div className="flex items-center justify-between">
@@ -186,6 +262,7 @@ export default function Payments() {
       </div>
 
       {allPayments.length === 0 && <div className="text-center py-12 text-gray-500">No payments found matching your filters</div>}
+      </>}
     </div>
   );
 }
