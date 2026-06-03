@@ -413,13 +413,22 @@ export default function Purchases() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">₹{purchase.total_amount.toLocaleString('en-IN')}</td>
-                  <td className="px-4 py-3 text-right text-gray-600 text-sm">₹{purchase.paid_amount.toLocaleString('en-IN')}</td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    <span className="font-medium text-gray-900">₹{purchase.paid_amount.toLocaleString('en-IN')}</span>
+                  </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span className={purchase.remaining_amount > 0 ? 'text-warning-600 font-semibold' : 'text-gray-500'}>
                       ₹{purchase.remaining_amount.toLocaleString('en-IN')}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center">{statusBadge(purchase.status)}</td>
+                  <td className="px-4 py-3 text-center">
+                    {statusBadge(purchase.status)}
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex w-20 mx-auto mt-1.5">
+                      <div className="h-1.5 bg-accent-500" style={{ width: purchase.total_amount > 0 ? `${(purchase.paid_amount / purchase.total_amount) * 100}%` : '0%' }} />
+                      <div className="h-1.5 bg-warning-400" style={{ width: purchase.total_amount > 0 ? `${(purchase.remaining_amount / purchase.total_amount) * 100}%` : '0%' }} />
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">{purchase.total_amount > 0 ? ((purchase.paid_amount / purchase.total_amount) * 100).toFixed(0) : 0}% paid</p>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => handleViewPayments(purchase)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="View payments"><Eye className="w-4 h-4" /></button>
