@@ -175,13 +175,13 @@ export default function Fabrics() {
 
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-4xl p-4 sm:p-6 m-4 sm:my-8">
+          <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">{editingId ? 'Edit Fabric' : 'Add Fabrics'}</h2>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
                   <select value={formData.supplier_id} onChange={e => setFormData({ ...formData, supplier_id: e.target.value })} className="input">
@@ -191,52 +191,69 @@ export default function Fabrics() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <input type="text" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="input" placeholder="Optional notes" />
+                  <input type="text" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="input" placeholder="Optional" />
                 </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-gray-700">Fabric Items</label>
-                  {!editingId && <button type="button" onClick={() => setRows(prev => [...prev, { ...emptyRow }])} className="text-xs text-primary-600 hover:underline">+ Add row</button>}
+                  {!editingId && (
+                    <button type="button" onClick={() => setRows(prev => [...prev, { ...emptyRow }])} className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium">
+                      <Plus className="w-3.5 h-3.5" /> Add row
+                    </button>
+                  )}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm" style={{ minWidth: '700px' }}>
-                    <thead>
-                      <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
-                        <th className="px-2 py-1 text-left">Name *</th>
-                        <th className="px-2 py-1 text-left w-28">Type</th>
-                        <th className="px-2 py-1 text-left w-28">Color</th>
-                        <th className="px-2 py-1 text-right w-24">Meters</th>
-                        <th className="px-2 py-1 text-right w-28">Buy Price/m</th>
-                        <th className="px-2 py-1 text-right w-28">Sell Price/m</th>
-                        <th className="px-2 py-1 text-left w-32">Barcode</th>
-                        <th className="w-6"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {rows.map((row, idx) => (
-                        <tr key={idx}>
-                          <td className="px-1 py-1"><input required className="input py-1 text-sm" value={row.name} onChange={e => updateRow(idx, 'name', e.target.value)} placeholder="Fabric name" /></td>
-                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={row.type} onChange={e => updateRow(idx, 'type', e.target.value)} placeholder="Cotton..." /></td>
-                          <td className="px-1 py-1"><input className="input py-1 text-sm" value={row.color} onChange={e => updateRow(idx, 'color', e.target.value)} placeholder="Color" /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={row.total_meters} onChange={e => updateRow(idx, 'total_meters', e.target.value)} placeholder="0" /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={row.purchase_price_per_meter} onChange={e => updateRow(idx, 'purchase_price_per_meter', e.target.value)} placeholder="0.00" /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="input py-1 text-sm text-right" value={row.selling_price_per_meter} onChange={e => updateRow(idx, 'selling_price_per_meter', e.target.value)} placeholder="0.00" /></td>
-                          <td className="px-1 py-1">
-                            <div className="flex gap-1">
-                              <input className="input py-1 text-sm w-20" value={row.barcode} onChange={e => updateRow(idx, 'barcode', e.target.value)} placeholder="Code" />
-                              <button type="button" onClick={() => setScanningRowIdx(idx)} className="p-1.5 bg-gray-100 hover:bg-primary-100 rounded text-gray-500 hover:text-primary-600" title="Scan barcode"><ScanLine className="w-4 h-4" /></button>
-                            </div>
-                          </td>
-                          <td className="px-1 py-1">
-                            {rows.length > 1 && <button type="button" onClick={() => setRows(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+
+                {rows.map((row, idx) => (
+                  <div key={idx} className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Item {idx + 1}</span>
+                      {rows.length > 1 && (
+                        <button type="button" onClick={() => setRows(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 p-1">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
+                      <input required className="input bg-white" value={row.name} onChange={e => updateRow(idx, 'name', e.target.value)} placeholder="Fabric name" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                        <input className="input bg-white" value={row.type} onChange={e => updateRow(idx, 'type', e.target.value)} placeholder="Cotton, Silk..." />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Color</label>
+                        <input className="input bg-white" value={row.color} onChange={e => updateRow(idx, 'color', e.target.value)} placeholder="Blue, Red..." />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Meters</label>
+                        <input type="number" step="0.01" className="input bg-white" value={row.total_meters} onChange={e => updateRow(idx, 'total_meters', e.target.value)} placeholder="0" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Buy ₹/m</label>
+                        <input type="number" step="0.01" className="input bg-white" value={row.purchase_price_per_meter} onChange={e => updateRow(idx, 'purchase_price_per_meter', e.target.value)} placeholder="0" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Sell ₹/m</label>
+                        <input type="number" step="0.01" className="input bg-white" value={row.selling_price_per_meter} onChange={e => updateRow(idx, 'selling_price_per_meter', e.target.value)} placeholder="0" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Barcode</label>
+                      <div className="flex gap-2">
+                        <input className="input bg-white flex-1" value={row.barcode} onChange={e => updateRow(idx, 'barcode', e.target.value)} placeholder="Scan or type barcode" />
+                        <button type="button" onClick={() => setScanningRowIdx(idx)} className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 hover:text-primary-600 transition-colors">
+                          <ScanLine className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="flex gap-3 pt-2">
