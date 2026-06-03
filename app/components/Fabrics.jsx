@@ -54,12 +54,17 @@ export default function Fabrics() {
     try {
       if (editingId) {
         const r = rows[0];
+        const existing = fabrics.find(f => f.id === editingId);
+        const oldTotal = existing?.total_meters || 0;
+        const newTotal = parseFloat(r.total_meters) || 0;
+        const diff = newTotal - oldTotal;
+        const newAvailable = Math.max(0, (existing?.available_meters || 0) + diff);
         const payload = {
           name: r.name, type: r.type, color: r.color,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
           selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
-          total_meters: parseFloat(r.total_meters) || 0,
-          available_meters: parseFloat(r.total_meters) || 0,
+          total_meters: newTotal,
+          available_meters: newAvailable,
           supplier_id: formData.supplier_id || null,
           notes: formData.notes,
           barcode: r.barcode || '',

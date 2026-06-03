@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, Pencil, Trash2, X, Search, Phone, MapPin, BookOpen } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Search, Phone, MapPin, BookOpen, MessageCircle } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
@@ -9,6 +9,7 @@ import { useToast } from './Toast';
 export default function Customers() {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
+  const [customerDues, setCustomerDues] = useState({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -17,7 +18,18 @@ export default function Customers() {
   const [ledgerCustomer, setLedgerCustomer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  useEffect(() => { fetchCustomers(); }, []);
+  useEffect(() => { fetchCustomers(); fetchCustomerDues(); }, []);
+
+  async function fetchCustomerDues() {
+    try {
+      const { data } = await supabase.from('sales').select('customer_id, remaining_amount').gt('remaining_amount', 0);
+      const map = {};
+      (data || []).forEach(s => {
+        if (s.customer_id) map[s.customer_id] = (map[s.customer_id] || 0) + s.remaining_amount;
+      });
+      setCustomerDues(map);
+    } catch (err) { console.error(err); }
+  }
 
   async function fetchCustomers() {
     try {
@@ -69,6 +81,16 @@ export default function Customers() {
     } finally {
       setConfirmDelete(null);
     }
+  }
+
+  function handleWhatsApp(customer) {
+    const due = customerDues[customer.id] || 0;
+    const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString('en-IN')}. Please clear at your earliest convenience. Thank you!`;
+    const phone = customer.phone?.replace(/\D/g, '');
+    const url = phone
+      ? `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
   }
 
   function handleEdit(customer) {
@@ -149,6 +171,9 @@ export default function Customers() {
               <div className="flex gap-1">
                 <button onClick={() => setLedgerCustomer(customer)} className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600" title="View Ledger"><BookOpen className="w-4 h-4" /></button>
                 <button onClick={() => handleEdit(customer)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"><Pencil className="w-4 h-4" /></button>
+                {customerDues[customer.id] > 0 && (
+                  <button onClick={() => handleWhatsApp(customer)} className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600" title="Send WhatsApp reminder"><MessageCircle className="w-4 h-4" /></button>
+                )}
                 <button onClick={() => setConfirmDelete(customer.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
               </div>
             </div>
@@ -156,9 +181,9 @@ export default function Customers() {
               {customer.phone && <div className="flex items-center gap-2"><Phone className="w-4 h-4 text-gray-400" /><span>{customer.phone}</span></div>}
               {customer.address && <div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-gray-400" /><span>{customer.address}</span></div>}
             </div>
-            {customer.credit_limit > 0 && (
+            {customerDues[customer.id] > 0 && (
               <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className="text-sm text-gray-500">Credit Limit: <span className="font-semibold text-gray-700">₹{customer.credit_limit.toLocaleString('en-IN')}</span></p>
+                <p className="text-sm text-warning-600 font-semibold">Due: ₹{customerDues[customer.id].toLocaleString('en-IN')}</p>
               </div>
             )}
             {customer.notes && <p className="text-gray-500 italic text-xs mt-2">{customer.notes}</p>}

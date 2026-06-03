@@ -16,10 +16,22 @@ export default function Reports() {
   const [monthlyData, setMonthlyData] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
   const [topFabrics, setTopFabrics] = useState([]);
-  const [summary, setSummary] = useState({ totalSales: 0, totalProfit: 0, totalPurchases: 0, totalReceivables: 0 });
+  const [summary, setSummary] = useState({ totalSales: 0, totalProfit: 0, netProfit: 0, totalPurchases: 0, totalReceivables: 0, totalExpenses: 0 });
   const [year, setYear] = useState(new Date().getFullYear());
+  const [availableYears, setAvailableYears] = useState([new Date().getFullYear()]);
 
+  useEffect(() => { fetchYears(); }, []);
   useEffect(() => { fetchAll(); }, [year]);
+
+  async function fetchYears() {
+    const { data } = await supabase.from('sales').select('sale_date').order('sale_date');
+    if (data?.length) {
+      const years = [...new Set(data.map(s => new Date(s.sale_date).getFullYear()))];
+      const cur = new Date().getFullYear();
+      if (!years.includes(cur)) years.push(cur);
+      setAvailableYears(years.sort((a, b) => b - a));
+    }
+  }
 
   async function fetchAll() {
     setLoading(true);
@@ -27,13 +39,16 @@ export default function Reports() {
       const startDate = `${year}-01-01`;
       const endDate = `${year}-12-31`;
 
-      const [salesRes, purchasesRes] = await Promise.all([
+      const [salesRes, purchasesRes, expensesRes] = await Promise.all([
         supabase.from('sales').select('sale_date, total_amount, margin, remaining_amount, notes, customer:customers(name)').gte('sale_date', startDate).lte('sale_date', endDate),
         supabase.from('purchases').select('purchase_date, total_amount, remaining_amount').gte('purchase_date', startDate).lte('purchase_date', endDate),
+        supabase.from('expenses').select('amount').gte('expense_date', startDate).lte('expense_date', endDate),
       ]);
 
       const sales = salesRes.data || [];
       const purchases = purchasesRes.data || [];
+      const totalExpenses = (expensesRes.data || []).reduce((s, r) => s + (r.amount || 0), 0);
+      const totalMargin = sales.reduce((s, r) => s + (r.margin || 0), 0);
 
       // Monthly aggregation
       const monthly = Array.from({ length: 12 }, (_, i) => ({
@@ -53,9 +68,11 @@ export default function Reports() {
       // Summary
       setSummary({
         totalSales: sales.reduce((s, r) => s + (r.total_amount || 0), 0),
-        totalProfit: sales.reduce((s, r) => s + (r.margin || 0), 0),
+        totalProfit: totalMargin,
+        netProfit: totalMargin - totalExpenses,
         totalPurchases: purchases.reduce((s, r) => s + (r.total_amount || 0), 0),
         totalReceivables: sales.reduce((s, r) => s + (r.remaining_amount || 0), 0),
+        totalExpenses,
       });
 
       // Top customers
@@ -87,7 +104,9 @@ export default function Reports() {
 
   const summaryCards = [
     { title: 'Total Sales', value: fmt(summary.totalSales), icon: TrendingUp, color: 'bg-primary-500' },
-    { title: 'Total Profit', value: fmt(summary.totalProfit), icon: DollarSign, color: 'bg-accent-500' },
+    { title: 'Gross Profit', value: fmt(summary.totalProfit), icon: DollarSign, color: 'bg-accent-500' },
+    { title: 'Total Expenses', value: fmt(summary.totalExpenses), icon: TrendingDown, color: 'bg-red-500' },
+    { title: 'Net Profit', value: fmt(summary.netProfit), icon: DollarSign, color: summary.netProfit >= 0 ? 'bg-green-500' : 'bg-red-500' },
     { title: 'Total Purchases', value: fmt(summary.totalPurchases), icon: ShoppingBag, color: 'bg-warning-500' },
     { title: 'Receivables', value: fmt(summary.totalReceivables), icon: TrendingDown, color: 'bg-orange-500' },
   ];
@@ -108,12 +127,12 @@ export default function Reports() {
           <p className="text-gray-500 mt-1">Business performance overview</p>
         </div>
         <select value={year} onChange={e => setYear(Number(e.target.value))} className="input w-32">
-          {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+          {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {summaryCards.map(card => {
           const Icon = card.icon;
           return (

@@ -1,7 +1,16 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Search, Calendar, Filter, ArrowDownLeft, ArrowUpRight, ShoppingBag } from 'lucide-react';
+import { Search, Calendar, Filter, ArrowDownLeft, ArrowUpRight, ShoppingBag, Users, Download } from 'lucide-react';
+
+function exportCSV(rows, filename) {
+  const keys = Object.keys(rows[0]);
+  const csv = [keys.join(','), ...rows.map(r => keys.map(k => `"${r[k]}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename;
+  a.click();
+}
 
 export default function Payments() {
   const [purchasePayments, setPurchasePayments] = useState([]);
@@ -13,9 +22,28 @@ export default function Payments() {
   const [customDateStart, setCustomDateStart] = useState('');
   const [customDateEnd, setCustomDateEnd] = useState('');
   const [supplierSummary, setSupplierSummary] = useState([]);
+  const [customerSummary, setCustomerSummary] = useState([]);
   const [activeTab, setActiveTab] = useState('suppliers');
 
-  useEffect(() => { fetchPayments(); fetchSupplierSummary(); }, []);
+  useEffect(() => { fetchPayments(); fetchSupplierSummary(); fetchCustomerSummary(); }, []);
+
+  async function fetchCustomerSummary() {
+    try {
+      const { data } = await supabase
+        .from('sales')
+        .select('customer:customers(name), total_amount, paid_amount, remaining_amount');
+      if (!data) return;
+      const map = {};
+      data.forEach(s => {
+        const name = s.customer?.name || 'Walk-in';
+        if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
+        map[name].total += s.total_amount || 0;
+        map[name].paid += s.paid_amount || 0;
+        map[name].pending += s.remaining_amount || 0;
+      });
+      setCustomerSummary(Object.values(map).sort((a, b) => b.pending - a.pending));
+    } catch (err) { console.error(err); }
+  }
 
   async function fetchSupplierSummary() {
     try {
@@ -117,12 +145,17 @@ export default function Payments() {
       {/* Tabs */}
       <div className="flex border-b border-gray-200">
         <button onClick={() => setActiveTab('suppliers')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'suppliers' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>Supplier Summary</button>
+        <button onClick={() => setActiveTab('customers')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'customers' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>Customer Summary</button>
         <button onClick={() => setActiveTab('transactions')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'transactions' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>Transactions</button>
       </div>
 
       {/* Supplier Summary Tab */}
       {activeTab === 'suppliers' && (
         <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-medium text-gray-700">All Suppliers</p>
+            <button onClick={() => exportCSV(supplierSummary, 'supplier-summary.csv')} className="flex items-center gap-1 text-xs text-primary-600 hover:underline"><Download className="w-3.5 h-3.5" />Export</button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full" style={{ minWidth: '480px' }}>
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -166,7 +199,55 @@ export default function Payments() {
         </div>
       )}
 
-      {/* Transactions Tab */}
+      {activeTab === 'customers' && (
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-medium text-gray-700">All Customers</p>
+            <button onClick={() => exportCSV(customerSummary, 'customer-summary.csv')} className="flex items-center gap-1 text-xs text-primary-600 hover:underline"><Download className="w-3.5 h-3.5" />Export</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ minWidth: '480px' }}>
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Total Billed</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Paid</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {customerSummary.map(c => (
+                  <tr key={c.name} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="bg-primary-100 p-1.5 rounded-lg shrink-0"><Users className="w-4 h-4 text-primary-600" /></div>
+                        <span className="font-medium text-gray-900">{c.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">₹{c.total.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold text-accent-600">₹{c.paid.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className={c.pending > 0 ? 'font-semibold text-warning-600' : 'text-gray-400'}>₹{c.pending.toLocaleString('en-IN')}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {customerSummary.length > 0 && (
+                <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                  <tr>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700">Total</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">₹{customerSummary.reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">₹{customerSummary.reduce((s, r) => s + r.paid, 0).toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">₹{customerSummary.reduce((s, r) => s + r.pending, 0).toLocaleString('en-IN')}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+          {customerSummary.length === 0 && <p className="text-center py-10 text-gray-500 text-sm">No customer data found</p>}
+        </div>
+      )}
+
       {activeTab === 'transactions' && <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card p-5">

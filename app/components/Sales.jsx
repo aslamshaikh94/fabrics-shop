@@ -1,7 +1,17 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, ScanLine } from 'lucide-react';
+import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, ScanLine, Pencil, Download } from 'lucide-react';
+
+function exportCSV(rows, filename) {
+  if (!rows.length) return;
+  const keys = Object.keys(rows[0]);
+  const csv = [keys.join(','), ...rows.map(r => keys.map(k => `"${String(r[k] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename;
+  a.click();
+}
 import BarcodeScanner from './BarcodeScanner';
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
@@ -24,12 +34,14 @@ export default function Sales() {
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
-  const [formData, setFormData] = useState({
+  const [editingId, setEditingId] = useState(null);
+  const emptyForm = {
     customer_id: '', customer_name: '', fabric_name: '', fabric_type: '', fabric_color: '',
     meters: '', price_per_meter: '', cost_price_per_meter: '',
     sale_date: new Date().toISOString().split('T')[0],
     payment_type: 'cash', initial_payment: '', notes: '',
-  });
+  };
+  const [formData, setFormData] = useState(emptyForm);
   const [paymentData, setPaymentData] = useState({
     amount: '', payment_date: new Date().toISOString().split('T')[0],
     payment_method: 'cash', reference_number: '', notes: '',
@@ -99,7 +111,7 @@ export default function Sales() {
 
       const salePayload = {
         customer_id: formData.customer_id || null,
-        fabric_id: '00000000-0000-0000-0000-000000000000',
+        fabric_id: null,
         meters,
         price_per_meter: pricePerMeter,
         cost_price_per_meter: costPricePerMeter,
@@ -109,21 +121,25 @@ export default function Sales() {
         notes: `Fabric: ${fabricInfo}${formData.notes ? ` | ${formData.notes}` : ''}`,
       };
 
-      const { data: saleData, error: saleError } = await supabase.from('sales').insert([salePayload]).select().single();
-      if (saleError) throw saleError;
-
-      if (initialPayment > 0 && saleData) {
-        const { error: paymentError } = await supabase.from('sale_payments').insert([{
-          sale_id: saleData.id, amount: initialPayment,
-          payment_date: formData.sale_date, payment_method: 'cash',
-        }]);
-        if (paymentError) throw paymentError;
+      if (editingId) {
+        const { error: updateError } = await supabase.from('sales').update(salePayload).eq('id', editingId);
+        if (updateError) throw updateError;
+        toast('Sale updated successfully');
+      } else {
+        const { data: saleData, error: saleError } = await supabase.from('sales').insert([salePayload]).select().single();
+        if (saleError) throw saleError;
+        if (initialPayment > 0 && saleData) {
+          await supabase.from('sale_payments').insert([{
+            sale_id: saleData.id, amount: initialPayment,
+            payment_date: formData.sale_date, payment_method: 'cash',
+          }]);
+        }
       }
-
       setShowForm(false);
-      setFormData({ customer_id: '', customer_name: '', fabric_name: '', fabric_type: '', fabric_color: '', meters: '', price_per_meter: '', cost_price_per_meter: '', sale_date: new Date().toISOString().split('T')[0], payment_type: 'cash', initial_payment: '', notes: '' });
+      setEditingId(null);
+      setFormData(emptyForm);
       fetchSales();
-      toast('Sale recorded successfully');
+      toast(editingId ? 'Sale updated successfully' : 'Sale recorded successfully');
     } catch (error) {
       console.error('Error saving sale:', error);
       toast('Failed to save sale', 'error');
@@ -161,6 +177,29 @@ export default function Sales() {
     } catch (error) {
       console.error('Error fetching payments:', error);
     }
+  }
+
+  function handleEdit(sale) {
+    const notes = sale.notes || '';
+    const fabricMatch = notes.match(/Fabric:\s*([^(|\n]+)/);
+    const typeMatch = notes.match(/\(([^)]+)\)/);
+    const colorMatch = notes.match(/-\s*([^|\n]+)/);
+    setFormData({
+      customer_id: sale.customer_id || '',
+      customer_name: sale.customer?.name || '',
+      fabric_name: fabricMatch ? fabricMatch[1].trim() : '',
+      fabric_type: typeMatch ? typeMatch[1].trim() : '',
+      fabric_color: colorMatch ? colorMatch[1].trim() : '',
+      meters: sale.meters.toString(),
+      price_per_meter: sale.price_per_meter.toString(),
+      cost_price_per_meter: sale.cost_price_per_meter.toString(),
+      sale_date: sale.sale_date,
+      payment_type: sale.payment_type,
+      initial_payment: '',
+      notes: '',
+    });
+    setEditingId(sale.id);
+    setShowForm(true);
   }
 
   function handleViewPayments(sale) { setSelectedSale(sale); fetchPayments(sale.id); }
@@ -214,9 +253,11 @@ export default function Sales() {
           <h1 className="text-2xl font-bold text-gray-900">Sales</h1>
           <p className="text-gray-500 mt-1">Track sales and customer payments</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn btn-primary">
-          <Plus className="w-5 h-5 mr-2" />New Sale
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => exportCSV(filteredSales.map(s => ({ date: s.sale_date, customer: s.customer?.name || 'Walk-in', notes: s.notes, meters: s.meters, price_per_meter: s.price_per_meter, total: s.total_amount, paid: s.paid_amount, remaining: s.remaining_amount, type: s.payment_type })), 'sales.csv')} className="btn btn-secondary"><Download className="w-4 h-4" /></button>
+          <button onClick={() => { setEditingId(null); setFormData(emptyForm); setShowForm(true); }} className="btn btn-primary">
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4">
@@ -238,8 +279,8 @@ export default function Sales() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
           <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">New Sale</h2>
-              <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+              <h2 className="text-xl font-semibold">{editingId ? 'Edit Sale' : 'New Sale'}</h2>
+              <button onClick={() => { setShowForm(false); setEditingId(null); }} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -322,8 +363,8 @@ export default function Sales() {
                 </div>
               )}
               <div className="flex gap-3 pt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Record Sale</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="btn btn-secondary flex-1">Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">{editingId ? 'Update Sale' : 'Record Sale'}</button>
               </div>
             </form>
           </div>
@@ -457,6 +498,7 @@ export default function Sales() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => handleViewPayments(sale)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="View payments"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => handleEdit(sale)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700" title="Edit sale"><Pencil className="w-4 h-4" /></button>
                       {sale.remaining_amount > 0 && (
                         <button onClick={() => handleAddPayment(sale)} className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600" title="Receive payment"><CreditCard className="w-4 h-4" /></button>
                       )}

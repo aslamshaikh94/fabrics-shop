@@ -1,7 +1,17 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, Pencil, Paperclip, FileText } from 'lucide-react';
+import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, Pencil, Paperclip, FileText, Download } from 'lucide-react';
+
+function exportCSV(rows, filename) {
+  if (!rows.length) return;
+  const keys = Object.keys(rows[0]);
+  const csv = [keys.join(','), ...rows.map(r => keys.map(k => `"${String(r[k] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename;
+  a.click();
+}
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
 
@@ -214,9 +224,12 @@ export default function Purchases() {
           <h1 className="text-2xl font-bold text-gray-900">Purchases</h1>
           <p className="text-gray-500 mt-1">Track purchases and payments to suppliers</p>
         </div>
-        <button onClick={() => { setShowForm(true); setEditingId(null); setInvoiceFile(null); setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' }); }} className="btn btn-primary">
-          <Plus className="w-5 h-5 mr-2" />New Purchase
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => exportCSV(filteredPurchases.map(p => ({ date: p.purchase_date, supplier: p.supplier?.name, total: p.total_amount, paid: p.paid_amount, remaining: p.remaining_amount, status: p.status, notes: p.notes })), 'purchases.csv')} className="btn btn-secondary"><Download className="w-4 h-4" /></button>
+          <button onClick={() => { setShowForm(true); setEditingId(null); setInvoiceFile(null); setFormData({ supplier_id: '', total_amount: '', purchase_date: new Date().toISOString().split('T')[0], notes: '' }); }} className="btn btn-primary">
+            <Plus className="w-5 h-5 mr-2" />New Purchase
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4">
