@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Package, DollarSign, Users, AlertCircle, AlertTriangle, ShoppingBag, CreditCard, ArrowRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, Package, DollarSign, Users, AlertTriangle, AlertCircle, ShoppingBag, CreditCard, Receipt } from 'lucide-react';
 
 function pctChange(curr, prev) {
   if (!prev) return null;
@@ -10,7 +10,7 @@ function pctChange(curr, prev) {
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ thisMonthSales: 0, thisMonthProfit: 0, pendingPurchasePayments: 0, pendingSalePayments: 0, totalFabrics: 0, totalCustomers: 0 });
+  const [stats, setStats] = useState({ thisMonthSales: 0, thisMonthProfit: 0, pendingPurchasePayments: 0, paidPurchasePayments: 0, pendingSalePayments: 0, totalFabrics: 0, totalCustomers: 0, totalPurchases: 0, totalExpenses: 0 });
   const [changes, setChanges] = useState({});
   const [lowStock, setLowStock] = useState([]);
   const [recentSales, setRecentSales] = useState([]);
@@ -25,15 +25,16 @@ export default function Dashboard() {
       const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
 
-      const [salesRes, purchasesRes, fabricsRes, customersRes, thisMoSales, prevMoSales, lowStockRes, recentRes] = await Promise.all([
+      const [salesRes, purchasesRes, fabricsRes, customersRes, thisMoSales, prevMoSales, lowStockRes, recentRes, expensesRes] = await Promise.all([
         supabase.from('sales').select('remaining_amount'),
-        supabase.from('purchases').select('remaining_amount'),
+        supabase.from('purchases').select('total_amount, paid_amount, remaining_amount'),
         supabase.from('fabrics').select('id', { count: 'exact', head: true }),
         supabase.from('customers').select('id', { count: 'exact', head: true }),
         supabase.from('sales').select('total_amount, margin').gte('sale_date', `${thisMonth}-01`),
         supabase.from('sales').select('total_amount, margin').gte('sale_date', `${prevMonth}-01`).lt('sale_date', `${thisMonth}-01`),
         supabase.from('fabrics').select('name, available_meters').lt('available_meters', 10),
         supabase.from('sales').select('sale_date, total_amount, notes, customer:customers(name)').order('sale_date', { ascending: false }).limit(6),
+        supabase.from('expenses').select('amount'),
       ]);
 
       const currSales = thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
@@ -46,8 +47,11 @@ export default function Dashboard() {
         thisMonthProfit: currProfit,
         pendingSalePayments: salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0,
         pendingPurchasePayments: purchasesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0,
+        paidPurchasePayments: purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
         totalFabrics: fabricsRes.count || 0,
         totalCustomers: customersRes.count || 0,
+        totalPurchases: purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0,
+        totalExpenses: expensesRes.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0,
       });
       setChanges({ sales: pctChange(currSales, prevSales), profit: pctChange(currProfit, prevProfit) });
       setLowStock(lowStockRes.data || []);
@@ -92,8 +96,8 @@ export default function Dashboard() {
         {[
           { title: `${monthName} Sales`, value: stats.thisMonthSales, change: changes.sales, icon: TrendingUp, iconBg: 'bg-blue-500', valueBg: 'text-gray-900' },
           { title: `${monthName} Profit`, value: stats.thisMonthProfit, change: changes.profit, icon: DollarSign, iconBg: 'bg-green-500', valueBg: 'text-green-700' },
-          { title: 'To Pay Suppliers', value: stats.pendingPurchasePayments, icon: ShoppingBag, iconBg: 'bg-orange-500', valueBg: 'text-orange-600', subtitle: 'Pending' },
           { title: 'To Collect', value: stats.pendingSalePayments, icon: CreditCard, iconBg: 'bg-purple-500', valueBg: 'text-purple-600', subtitle: 'From customers' },
+          { title: 'Total Expenses', value: stats.totalExpenses, icon: Receipt, iconBg: 'bg-red-500', valueBg: 'text-red-600', subtitle: 'All time' },
         ].map(card => {
           const Icon = card.icon;
           return (
@@ -117,7 +121,35 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Inventory & Customers */}
+      {/* Supplier payment breakdown: Total Purchased → Total Paid → Pending */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-500">Total Purchased</p>
+            <div className="bg-warning-500 p-1.5 rounded-lg"><ShoppingBag className="w-3.5 h-3.5 text-white" /></div>
+          </div>
+          <p className="text-base font-bold text-gray-900">₹{stats.totalPurchases.toLocaleString('en-IN')}</p>
+          <p className="text-xs text-gray-400 mt-0.5">From suppliers</p>
+        </div>
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-500">Total Paid</p>
+            <div className="bg-green-500 p-1.5 rounded-lg"><CreditCard className="w-3.5 h-3.5 text-white" /></div>
+          </div>
+          <p className="text-base font-bold text-green-700">₹{stats.paidPurchasePayments.toLocaleString('en-IN')}</p>
+          <p className="text-xs text-gray-400 mt-0.5">To suppliers</p>
+        </div>
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-500">Pending</p>
+            <div className="bg-orange-500 p-1.5 rounded-lg"><AlertCircle className="w-3.5 h-3.5 text-white" /></div>
+          </div>
+          <p className="text-base font-bold text-orange-600">₹{stats.pendingPurchasePayments.toLocaleString('en-IN')}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Still to pay</p>
+        </div>
+      </div>
+
+      {/* Inventory, Customers */}
       <div className="grid grid-cols-2 gap-3">
         <div className="card p-4 flex items-center gap-3">
           <div className="bg-primary-100 p-3 rounded-xl shrink-0"><Package className="w-6 h-6 text-primary-600" /></div>
