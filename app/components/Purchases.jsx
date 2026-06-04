@@ -839,10 +839,18 @@ export default function Purchases() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {statusBadge(purchase.status)}
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex w-20 mx-auto mt-1.5">
-                      <div className="h-1.5 bg-accent-500" style={{ width: purchase.total_amount > 0 ? `${(purchase.paid_amount / purchase.total_amount) * 100}%` : '0%' }} />
-                      <div className="h-1.5 bg-warning-400" style={{ width: purchase.total_amount > 0 ? `${(purchase.remaining_amount / purchase.total_amount) * 100}%` : '0%' }} />
+                    <div
+                      className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
+                      style={{ minWidth: '64px' }}
+                      title={purchase.total_amount > 0 ? `Paid: ${((purchase.paid_amount / purchase.total_amount) * 100).toFixed(1)}%  |  Pending: ${((purchase.remaining_amount / purchase.total_amount) * 100).toFixed(1)}%` : 'No amount'}
+                    >
+                      {/* Background: paid (green) + pending (orange) */}
+                      <span className="absolute inset-0 bg-warning-200" />
+                      <span className="absolute inset-y-0 left-0 bg-accent-400" style={{ width: purchase.total_amount > 0 ? `${(purchase.paid_amount / purchase.total_amount) * 100}%` : '0%' }} />
+                      {/* Label on top */}
+                      <span className="relative z-10 font-medium" style={{ color: '#111' }}>
+                        {purchase.status.charAt(0).toUpperCase() + purchase.status.slice(1)}
+                      </span>
                     </div>
                   </td>
                   <td className="px-4 py-3">

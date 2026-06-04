@@ -273,18 +273,11 @@ export default function Payments() {
             <table className="w-full" style={{ minWidth: "480px" }}>
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Supplier
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Total Purchased
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Paid
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Pending
-                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Total Purchased</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Paid</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
+                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -312,38 +305,22 @@ export default function Payments() {
                         <span className="font-semibold text-accent-600">
                           ₹{s.paid.toLocaleString("en-IN")}
                         </span>
-                        <span className="block text-xs text-gray-400">
-                          {paidPct}%
-                        </span>
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
-                        <span
-                          className={
-                            s.pending > 0
-                              ? "font-semibold text-warning-600"
-                              : "text-gray-400"
-                          }
-                        >
+                        <span className={s.pending > 0 ? "font-semibold text-warning-600" : "text-gray-400"}>
                           ₹{s.pending.toLocaleString("en-IN")}
                         </span>
-                        <span className="block text-xs text-gray-400">
-                          {pendingPct}%
-                        </span>
                       </td>
-                      <td className="px-4 py-3 w-28">
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex">
-                          <div
-                            className="h-2 bg-accent-500"
-                            style={{ width: `${paidPct}%` }}
-                          />
-                          <div
-                            className="h-2 bg-warning-400"
-                            style={{ width: `${pendingPct}%` }}
-                          />
+                      <td className="px-4 py-3 text-center">
+                        <div
+                          className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
+                          style={{ minWidth: '72px' }}
+                          title={`Paid: ${paidPct}%  |  Pending: ${pendingPct}%`}
+                        >
+                          <span className="absolute inset-0 bg-warning-200" />
+                          <span className="absolute inset-y-0 left-0 bg-accent-400" style={{ width: `${paidPct}%` }} />
+                          <span className="relative z-10 font-medium" style={{ color: '#111' }}>{s.pending > 0 ? (s.paid > 0 ? 'Partial' : 'Pending') : 'Paid'}</span>
                         </div>
-                        <p className="text-xs text-gray-400 mt-0.5 text-right">
-                          {paidPct}% paid
-                        </p>
                       </td>
                     </tr>
                   );
