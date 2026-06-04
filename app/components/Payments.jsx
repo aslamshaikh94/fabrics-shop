@@ -18,7 +18,9 @@ function exportCSV(rows, filename) {
   const keys = Object.keys(rows[0]);
   const csv = [
     keys.join(","),
-    ...rows.map((r) => keys.map((k) => `"${r[k]}"`).join(",")),
+    ...rows.map((r) =>
+      keys.map((k) => `"${String(r[k] ?? "").replace(/"/g, '""')}"`).join(","),
+    ),
   ].join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -26,7 +28,10 @@ function exportCSV(rows, filename) {
   a.click();
 }
 
+import { useToast } from './Toast';
+
 export default function Payments() {
+  const toast = useToast();
   const [purchasePayments, setPurchasePayments] = useState([]);
   const [salePayments, setSalePayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -69,8 +74,10 @@ export default function Payments() {
       fetchPayments();
       fetchSupplierSummary();
       fetchCustomerSummary();
+      toast('Payment updated');
     } catch (err) {
-      console.error("Error updating payment:", err);
+      console.error('Error updating payment:', err);
+      toast('Failed to update payment', 'error');
     }
   }
 

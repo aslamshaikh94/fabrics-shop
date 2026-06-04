@@ -312,6 +312,15 @@ export default function Fabrics() {
                 <p className="text-gray-500">Buy</p>
                 <p className="font-semibold text-gray-900">₹{fabric.purchase_price_per_meter}/m</p>
               </div>
+              <div className="text-center">
+                <p className="text-gray-500">Margin</p>
+                {fabric.purchase_price_per_meter > 0 ? (
+                  <p className={`font-semibold text-sm ${ ((fabric.selling_price_per_meter - fabric.purchase_price_per_meter) / fabric.purchase_price_per_meter * 100) >= 0 ? 'text-accent-600' : 'text-red-500'}`}>
+                    {((fabric.selling_price_per_meter - fabric.purchase_price_per_meter) / fabric.purchase_price_per_meter * 100).toFixed(0)}%
+                  </p>
+                ) : <p className="text-gray-400 text-sm">—</p>}
+                <p className="text-xs text-gray-400">₹{(fabric.selling_price_per_meter - fabric.purchase_price_per_meter).toFixed(0)}/m</p>
+              </div>
               <div className="text-right">
                 <p className="text-gray-500">Sell</p>
                 <p className="font-semibold text-accent-600">₹{fabric.selling_price_per_meter}/m</p>

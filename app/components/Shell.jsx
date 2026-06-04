@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, ShoppingBag, Users, DollarSign, CreditCard,
-  Menu, X, TrendingUp, BarChart2, Package, Receipt, Sun, Moon, LogOut,
+  Menu, X, TrendingUp, BarChart2, Package, Receipt, Sun, Moon, LogOut, Zap,
 } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 import { useAuth } from './AuthGuard';
@@ -15,10 +15,12 @@ import Customers from './Customers';
 import Payments from './Payments';
 import Reports from './Reports';
 import Fabrics from './Fabrics';
+import QuickSale from './QuickSale';
 import Expenses from './Expenses';
 
 const ALL_NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'quicksale', label: 'Quick Sale', icon: Zap },
   { id: 'purchases', label: 'Purchases', icon: ShoppingBag, adminOnly: true },
   { id: 'sales', label: 'Sales', icon: TrendingUp },
   { id: 'payments', label: 'Payments', icon: CreditCard },
@@ -29,17 +31,17 @@ const ALL_NAV = [
   { id: 'reports', label: 'Reports', icon: BarChart2 },
 ];
 
-// Bottom nav shown on mobile — most used pages
 const BOTTOM_NAV = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+  { id: 'quicksale', label: 'Quick Sale', icon: Zap },
   { id: 'sales', label: 'Sales', icon: TrendingUp },
-  { id: 'purchases', label: 'Purchases', icon: ShoppingBag, adminOnly: true },
   { id: 'customers', label: 'Customers', icon: Users },
   { id: 'reports', label: 'Reports', icon: BarChart2 },
 ];
 
 const pages = {
   dashboard: <Dashboard />,
+  quicksale: <QuickSale />,
   purchases: <Purchases />,
   sales: <Sales />,
   suppliers: <Suppliers />,
