@@ -439,6 +439,9 @@ export default function Fabrics() {
                 Sell ₹/m
               </th>
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
+                Total Price
+              </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Margin
               </th>
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
@@ -487,6 +490,14 @@ export default function Fabrics() {
                 <td className="px-4 py-3 text-right">
                   <p className="font-semibold text-accent-600">
                     ₹{fabric.selling_price_per_meter}
+                  </p>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <p className="text-sm font-medium text-gray-900">
+                    ₹
+                    {(
+                      fabric.total_meters * fabric.purchase_price_per_meter
+                    ).toLocaleString("en-IN")}
                   </p>
                 </td>
                 <td className="px-4 py-3 text-right">
