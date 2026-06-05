@@ -80,7 +80,9 @@ export default function Dashboard() {
           .lt("available_meters", 10),
         supabase
           .from("sales")
-          .select("sale_date, total_amount, notes, customer:customers(name)")
+          .select(
+            "id, sale_date, total_amount, notes, customer:customers(name)",
+          )
           .order("sale_date", { ascending: false })
           .limit(6),
         supabase.from("expenses").select("amount"),

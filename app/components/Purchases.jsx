@@ -47,6 +47,7 @@ export default function Purchases() {
   const [invoiceFile, setInvoiceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [invoiceError, setInvoiceError] = useState("");
+  const [viewInvoiceUrl, setViewInvoiceUrl] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
   const [formData, setFormData] = useState({
@@ -841,15 +842,31 @@ export default function Purchases() {
                   <td className="px-4 py-3 text-center">
                     <div
                       className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
-                      style={{ minWidth: '64px' }}
-                      title={purchase.total_amount > 0 ? `Paid: ${((purchase.paid_amount / purchase.total_amount) * 100).toFixed(1)}%  |  Pending: ${((purchase.remaining_amount / purchase.total_amount) * 100).toFixed(1)}%` : 'No amount'}
+                      style={{ minWidth: "64px" }}
+                      title={
+                        purchase.total_amount > 0
+                          ? `Paid: ${((purchase.paid_amount / purchase.total_amount) * 100).toFixed(1)}%  |  Pending: ${((purchase.remaining_amount / purchase.total_amount) * 100).toFixed(1)}%`
+                          : "No amount"
+                      }
                     >
                       {/* Background: paid (green) + pending (orange) */}
                       <span className="absolute inset-0 bg-warning-200" />
-                      <span className="absolute inset-y-0 left-0 bg-accent-400" style={{ width: purchase.total_amount > 0 ? `${(purchase.paid_amount / purchase.total_amount) * 100}%` : '0%' }} />
+                      <span
+                        className="absolute inset-y-0 left-0 bg-accent-400"
+                        style={{
+                          width:
+                            purchase.total_amount > 0
+                              ? `${(purchase.paid_amount / purchase.total_amount) * 100}%`
+                              : "0%",
+                        }}
+                      />
                       {/* Label on top */}
-                      <span className="relative z-10 font-medium" style={{ color: '#111' }}>
-                        {purchase.status.charAt(0).toUpperCase() + purchase.status.slice(1)}
+                      <span
+                        className="relative z-10 font-medium"
+                        style={{ color: "#111" }}
+                      >
+                        {purchase.status.charAt(0).toUpperCase() +
+                          purchase.status.slice(1)}
                       </span>
                     </div>
                   </td>
@@ -870,15 +887,15 @@ export default function Purchases() {
                         <Pencil className="w-4 h-4" />
                       </button>
                       {purchase.invoice_url && (
-                        <a
-                          href={purchase.invoice_url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          onClick={() =>
+                            setViewInvoiceUrl(purchase.invoice_url)
+                          }
                           className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
                           title="View invoice"
                         >
                           <FileText className="w-4 h-4" />
-                        </a>
+                        </button>
                       )}
                       {purchase.remaining_amount > 0 && (
                         <button
@@ -940,6 +957,44 @@ export default function Purchases() {
       {filteredPurchases.length === 0 && (
         <div className="text-center py-12 text-gray-500">
           No purchases found
+        </div>
+      )}
+
+      {/* Invoice Popup */}
+      {viewInvoiceUrl && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] p-4"
+          onClick={() => setViewInvoiceUrl(null)}
+        >
+          <div
+            className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Invoice / Bill</h3>
+              <button
+                onClick={() => setViewInvoiceUrl(null)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-gray-50 max-h-[calc(90vh-60px)] overflow-y-auto">
+              {viewInvoiceUrl.match(/\.(pdf)$/i) ? (
+                <iframe
+                  src={viewInvoiceUrl}
+                  className="w-full h-[70vh] rounded-lg"
+                  title="Invoice PDF"
+                />
+              ) : (
+                <img
+                  src={viewInvoiceUrl}
+                  alt="Invoice"
+                  className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

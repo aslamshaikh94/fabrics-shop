@@ -1,7 +1,17 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Plus, Trash2, X, Search, Calendar, Pencil } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  X,
+  Search,
+  Calendar,
+  Pencil,
+  Paperclip,
+  FileText,
+  ExternalLink,
+} from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
@@ -38,6 +48,10 @@ export default function Expenses() {
   const [filterMonth, setFilterMonth] = useState("");
   const [formData, setFormData] = useState(emptyForm);
   const [formErrors, setFormErrors] = useState({});
+  const [paymentProofFile, setPaymentProofFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [proofError, setProofError] = useState("");
+  const [viewProofUrl, setViewProofUrl] = useState(null);
 
   useEffect(() => {
     fetchExpenses();
@@ -67,7 +81,31 @@ export default function Expenses() {
       return;
     }
     setFormErrors({});
+    setUploading(true);
     try {
+      let payment_proof_url = editingId
+        ? expenses.find((p) => p.id === editingId)?.payment_proof_url || ""
+        : "";
+
+      if (paymentProofFile) {
+        if (paymentProofFile.size > 10 * 1024 * 1024) {
+          setProofError("File size must be under 10MB");
+          toast("File size must be under 10MB", "error");
+          setUploading(false);
+          return;
+        }
+        const ext = paymentProofFile.name.split(".").pop();
+        const path = `expense-proofs/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("expense-proofs")
+          .upload(path, paymentProofFile, { upsert: true });
+        if (uploadError) throw uploadError;
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("expense-proofs").getPublicUrl(path);
+        payment_proof_url = publicUrl;
+      }
+
       if (editingId) {
         const { error } = await supabase
           .from("expenses")
@@ -78,6 +116,7 @@ export default function Expenses() {
             expense_date: formData.expense_date,
             paid_by: formData.paid_by,
             notes: formData.notes,
+            payment_proof_url,
           })
           .eq("id", editingId);
         if (error) throw error;
@@ -91,6 +130,7 @@ export default function Expenses() {
             expense_date: formData.expense_date,
             paid_by: formData.paid_by,
             notes: formData.notes,
+            payment_proof_url,
           },
         ]);
         if (error) throw error;
@@ -100,10 +140,14 @@ export default function Expenses() {
       setEditingId(null);
       setFormData(emptyForm);
       setFormErrors({});
+      setPaymentProofFile(null);
+      setProofError("");
       fetchExpenses();
     } catch (err) {
       console.error("Error saving expense:", err);
       toast("Failed to save expense", "error");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -116,6 +160,8 @@ export default function Expenses() {
       paid_by: expense.paid_by || "",
       notes: expense.notes || "",
     });
+    setPaymentProofFile(null);
+    setProofError("");
     setEditingId(expense.id);
     setShowForm(true);
   }
@@ -175,6 +221,8 @@ export default function Expenses() {
           onClick={() => {
             setEditingId(null);
             setFormData(emptyForm);
+            setPaymentProofFile(null);
+            setProofError("");
             setShowForm(true);
           }}
           className="btn btn-primary"
@@ -348,7 +396,9 @@ export default function Expenses() {
                 <input
                   type="text"
                   value={formData.paid_by}
-                  onChange={(e) => setFormData({ ...formData, paid_by: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, paid_by: e.target.value })
+                  }
                   className="input"
                   placeholder="e.g., Ahmed, Owner..."
                 />
@@ -367,6 +417,52 @@ export default function Expenses() {
                   placeholder="Optional notes"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Payment Proof (Receipt / Bill)
+                </label>
+                <label
+                  className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${proofError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
+                >
+                  <Paperclip className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-500 flex-1 truncate">
+                    {paymentProofFile
+                      ? paymentProofFile.name
+                      : editingId &&
+                          expenses.find((p) => p.id === editingId)
+                            ?.payment_proof_url
+                        ? "Replace existing proof"
+                        : "Upload receipt / bill (PDF, image)"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      setPaymentProofFile(e.target.files[0] || null);
+                      if (e.target.files[0]) setProofError("");
+                    }}
+                  />
+                </label>
+                {proofError && (
+                  <p className="text-error-600 text-sm mt-1">{proofError}</p>
+                )}
+                {editingId &&
+                  expenses.find((p) => p.id === editingId)?.payment_proof_url &&
+                  !paymentProofFile && (
+                    <a
+                      href={
+                        expenses.find((p) => p.id === editingId)
+                          .payment_proof_url
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
+                    >
+                      <FileText className="w-3 h-3" /> View current proof
+                    </a>
+                  )}
+              </div>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -378,8 +474,16 @@ export default function Expenses() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update Expense" : "Add Expense"}
+                <button
+                  type="submit"
+                  disabled={uploading}
+                  className="btn btn-primary flex-1"
+                >
+                  {uploading
+                    ? "Saving..."
+                    : editingId
+                      ? "Update Expense"
+                      : "Add Expense"}
                 </button>
               </div>
             </form>
@@ -390,7 +494,7 @@ export default function Expenses() {
       {/* Expenses List */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full" style={{ minWidth: "500px" }}>
+          <table className="w-full" style={{ minWidth: "580px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -406,6 +510,9 @@ export default function Expenses() {
                   Amount
                 </th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Proof
+                </th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Action
                 </th>
               </tr>
@@ -418,7 +525,11 @@ export default function Expenses() {
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">{expense.title}</p>
-                    {expense.paid_by && <p className="text-xs text-primary-600 mt-0.5">Paid by: {expense.paid_by}</p>}
+                    {expense.paid_by && (
+                      <p className="text-xs text-primary-600 mt-0.5">
+                        Paid by: {expense.paid_by}
+                      </p>
+                    )}
                     {expense.notes && (
                       <p className="text-xs text-gray-500 mt-0.5">
                         {expense.notes}
@@ -443,6 +554,22 @@ export default function Expenses() {
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-red-600 text-sm">
                     ₹{expense.amount.toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {expense.payment_proof_url ? (
+                      <button
+                        onClick={() =>
+                          setViewProofUrl(expense.payment_proof_url)
+                        }
+                        className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline"
+                        title="View payment proof"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        View
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
@@ -480,6 +607,44 @@ export default function Expenses() {
           {searchTerm || filterCategory !== "all" || filterMonth
             ? "No expenses match your filters"
             : "No expenses recorded yet"}
+        </div>
+      )}
+
+      {/* Payment Proof Popup */}
+      {viewProofUrl && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] p-4"
+          onClick={() => setViewProofUrl(null)}
+        >
+          <div
+            className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Payment Proof</h3>
+              <button
+                onClick={() => setViewProofUrl(null)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-gray-50 max-h-[calc(90vh-60px)] overflow-y-auto">
+              {viewProofUrl.match(/\.(pdf)$/i) ? (
+                <iframe
+                  src={viewProofUrl}
+                  className="w-full h-[70vh] rounded-lg"
+                  title="Payment Proof PDF"
+                />
+              ) : (
+                <img
+                  src={viewProofUrl}
+                  alt="Payment proof"
+                  className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -14,6 +14,7 @@ import {
   ScanLine,
   Pencil,
   Download,
+  ChevronDown,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validateSale, validatePayment, hasErrors } from "../utils/validators";
@@ -41,16 +42,23 @@ export default function Sales() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [scanningItemIdx, setScanningItemIdx] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
   const emptyForm = {
     customer_id: "",
     customer_name: "",
-    fabric_id: "",
-    fabric_name: "",
-    meters: "",
-    price_per_meter: "",
-    cost_price_per_meter: "",
+    items: [
+      {
+        fabric_id: "",
+        fabric_name: "",
+        meters: "",
+        price_per_meter: "",
+        cost_price_per_meter: "",
+      },
+    ],
     sale_date: new Date().toISOString().split("T")[0],
     payment_type: "cash",
     initial_payment: "",
@@ -65,11 +73,46 @@ export default function Sales() {
     notes: "",
   });
 
+  const [customerDues, setCustomerDues] = useState({});
+
+  const customerDropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (
+        customerDropdownRef.current &&
+        !customerDropdownRef.current.contains(event.target)
+      ) {
+        setShowCustomerDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   useEffect(() => {
     fetchSales();
     fetchCustomers();
     fetchFabrics();
+    fetchCustomerDues();
   }, []);
+
+  async function fetchCustomerDues() {
+    try {
+      const { data } = await supabase
+        .from("sales")
+        .select("customer_id, remaining_amount")
+        .gt("remaining_amount", 0);
+      const map = {};
+      (data || []).forEach((s) => {
+        if (s.customer_id)
+          map[s.customer_id] = (map[s.customer_id] || 0) + s.remaining_amount;
+      });
+      setCustomerDues(map);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function fetchSales() {
     try {
@@ -115,29 +158,72 @@ export default function Sales() {
       .eq("barcode", code)
       .single();
     if (data) {
-      setFormData((prev) => ({
-        ...prev,
+      updateItem(scanningItemIdx, {
         fabric_id: data.id,
         fabric_name: data.name,
         cost_price_per_meter: data.purchase_price_per_meter.toString(),
         price_per_meter: data.selling_price_per_meter.toString(),
-      }));
+      });
     } else {
-      setFormData((prev) => ({ ...prev, fabric_name: code, fabric_id: "" }));
+      updateItem(scanningItemIdx, { fabric_name: code, fabric_id: "" });
     }
+    setScanningItemIdx(null);
+  }
+
+  function updateItem(idx, fields) {
+    setFormData((prev) => ({
+      ...prev,
+      items: prev.items.map((item, i) =>
+        i === idx ? { ...item, ...fields } : item,
+      ),
+    }));
+  }
+
+  function addItem() {
+    setFormData((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          fabric_id: "",
+          fabric_name: "",
+          meters: "",
+          price_per_meter: "",
+          cost_price_per_meter: "",
+        },
+      ],
+    }));
   }
 
   function calculateTotal() {
-    const meters = parseFloat(formData.meters) || 0;
-    const price = parseFloat(formData.price_per_meter) || 0;
-    return (meters * price).toFixed(2);
+    return formData.items
+      .reduce(
+        (sum, item) =>
+          sum +
+          (parseFloat(item.meters) || 0) *
+            (parseFloat(item.price_per_meter) || 0),
+        0,
+      )
+      .toFixed(2);
   }
 
   function calculateMargin() {
-    const meters = parseFloat(formData.meters) || 0;
-    const sellingPrice = parseFloat(formData.price_per_meter) || 0;
-    const costPrice = parseFloat(formData.cost_price_per_meter) || 0;
-    return (meters * (sellingPrice - costPrice)).toFixed(2);
+    return formData.items
+      .reduce(
+        (sum, item) =>
+          sum +
+          (parseFloat(item.meters) || 0) *
+            ((parseFloat(item.price_per_meter) || 0) -
+              (parseFloat(item.cost_price_per_meter) || 0)),
+        0,
+      )
+      .toFixed(2);
+  }
+
+  function calculateRemaining() {
+    return (
+      parseFloat(calculateTotal()) - (parseFloat(formData.initial_payment) || 0)
+    ).toFixed(2);
   }
 
   async function handleSubmit(e) {
@@ -150,11 +236,24 @@ export default function Sales() {
     }
     setFormErrors({});
     try {
-      const meters = parseFloat(formData.meters);
-      const pricePerMeter = parseFloat(formData.price_per_meter);
-      const costPricePerMeter = parseFloat(formData.cost_price_per_meter) || 0;
       const initialPayment = parseFloat(formData.initial_payment) || 0;
-      const fabricInfo = `${formData.fabric_name}`;
+
+      // Check credit limit for credit/partial sales
+      if (formData.customer_id && formData.payment_type !== "cash") {
+        const customer = customers.find((c) => c.id === formData.customer_id);
+        if (customer?.credit_limit > 0) {
+          const totalAmount = parseFloat(calculateTotal());
+          const newRemaining = totalAmount - initialPayment;
+          const currentDue = customerDues?.[customer.id] || 0;
+          if (currentDue + newRemaining > customer.credit_limit) {
+            toast(
+              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN")}, current dues: ₹${currentDue.toLocaleString("en-IN")}, new would add: ₹${newRemaining.toLocaleString("en-IN")}`,
+              "error",
+            );
+            return;
+          }
+        }
+      }
 
       const salePayload = {
         customer_id: formData.customer_id || null,
@@ -169,9 +268,17 @@ export default function Sales() {
       };
 
       if (editingId) {
+        const totalAmount = parseFloat(calculateTotal());
+        const marginAmount = parseFloat(calculateMargin());
+        const remainingAmount = parseFloat(calculateRemaining());
         const { error: updateError } = await supabase
           .from("sales")
-          .update(salePayload)
+          .update({
+            ...salePayload,
+            total_amount: totalAmount,
+            margin: marginAmount,
+            remaining_amount: remainingAmount,
+          })
           .eq("id", editingId);
         if (updateError) throw updateError;
         toast("Sale updated successfully");
@@ -264,11 +371,15 @@ export default function Sales() {
     setFormData({
       customer_id: sale.customer_id || "",
       customer_name: sale.customer?.name || "",
-      fabric_id: sale.fabric_id || "",
-      fabric_name: fabricMatch ? fabricMatch[1].trim() : "",
-      meters: sale.meters.toString(),
-      price_per_meter: sale.price_per_meter.toString(),
-      cost_price_per_meter: sale.cost_price_per_meter.toString(),
+      items: [
+        {
+          fabric_id: sale.fabric_id || "",
+          fabric_name: fabricMatch ? fabricMatch[1].trim() : "",
+          meters: sale.meters.toString(),
+          price_per_meter: sale.price_per_meter.toString(),
+          cost_price_per_meter: sale.cost_price_per_meter.toString(),
+        },
+      ],
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
       initial_payment: "",
@@ -437,238 +548,397 @@ export default function Sales() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer
-                </label>
-                <select
-                  value={formData.customer_id}
-                  onChange={(e) => {
-                    const c = customers.find((c) => c.id === e.target.value);
-                    setFormData({
-                      ...formData,
-                      customer_id: e.target.value,
-                      customer_name: c?.name || "",
-                    });
-                  }}
-                  className="input"
-                >
-                  <option value="">Walk-in customer</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="border-t border-gray-200 pt-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">
-                  Fabric Details
-                </h3>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Select from Inventory
+              {/* Customer Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Customer
+                  </span>
+                </div>
+                <div className="relative" ref={customerDropdownRef}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Search or Select Customer
                   </label>
-                  <select
-                    value={formData.fabric_id}
-                    onChange={(e) => {
-                      const f = fabrics.find((f) => f.id === e.target.value);
-                      if (f) {
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={
+                        showCustomerDropdown
+                          ? customerSearch
+                          : formData.customer_name || ""
+                      }
+                      onChange={(e) => {
+                        setCustomerSearch(e.target.value);
                         setFormData({
                           ...formData,
-                          fabric_id: f.id,
-                          fabric_name: f.name,
-                          cost_price_per_meter:
-                            f.purchase_price_per_meter.toString(),
-                          price_per_meter: f.selling_price_per_meter.toString(),
+                          customer_id: "",
+                          customer_name: e.target.value,
                         });
-                      } else {
-                        setFormData({ ...formData, fabric_id: "" });
-                      }
-                    }}
-                    className="input"
-                  >
-                    <option value="">
-                      -- Manual Entry / Not in Inventory --
-                    </option>
-                    {fabrics.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fabric Name *
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={formData.fabric_name}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            fabric_name: e.target.value,
-                          })
-                        }
-                        className="input"
-                        placeholder="e.g., Cotton Silk"
+                        setShowCustomerDropdown(true);
+                      }}
+                      onFocus={() => {
+                        setCustomerSearch(formData.customer_name || "");
+                        setShowCustomerDropdown(true);
+                      }}
+                      className="input bg-white pr-10"
+                      placeholder="Type to search or leave blank for Walk-in"
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {formData.customer_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData({
+                              ...formData,
+                              customer_id: "",
+                              customer_name: "",
+                            });
+                            setCustomerSearch("");
+                          }}
+                          className="text-gray-400 hover:text-gray-600 p-0.5"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                      <ChevronDown
+                        className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowScanner(true)}
-                        className="px-3 bg-gray-100 hover:bg-primary-100 border border-gray-200 rounded-lg text-gray-500 hover:text-primary-600"
-                        title="Scan barcode"
-                      >
-                        <ScanLine className="w-5 h-5" />
-                      </button>
                     </div>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Meters *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      min="0.01"
-                      value={formData.meters}
-                      onChange={(e) =>
-                        setFormData({ ...formData, meters: e.target.value })
-                      }
-                      className="input"
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Price/m *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      value={formData.price_per_meter}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          price_per_meter: e.target.value,
-                        })
-                      }
-                      className="input"
-                      placeholder="₹0"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Cost Price/m
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.cost_price_per_meter}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          cost_price_per_meter: e.target.value,
-                        })
-                      }
-                      className="input"
-                      placeholder="₹0 (for margin calc)"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Payment Type *
-                    </label>
-                    <select
-                      value={formData.payment_type}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          payment_type: e.target.value,
-                        })
-                      }
-                      className="input"
-                    >
-                      <option value="cash">Full Cash</option>
-                      <option value="partial">Partial</option>
-                      <option value="credit">Full Credit</option>
-                    </select>
-                  </div>
+
+                  {showCustomerDropdown && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                      {customers
+                        .filter((c) =>
+                          c.name
+                            .toLowerCase()
+                            .includes(customerSearch.toLowerCase()),
+                        )
+                        .map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                customer_id: c.id,
+                                customer_name: c.name,
+                              });
+                              setCustomerSearch(c.name);
+                              setShowCustomerDropdown(false);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${formData.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""}`}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      {customers.filter((c) =>
+                        c.name
+                          .toLowerCase()
+                          .includes(customerSearch.toLowerCase()),
+                      ).length === 0 && (
+                        <div className="px-3 py-2.5 text-sm text-gray-400 italic">
+                          {customerSearch
+                            ? `Add "${customerSearch}" as new customer`
+                            : "No customers found"}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-              {formData.payment_type !== "cash" && (
+
+              {/* Fabric Details Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Fabric Items
+                  </label>
+                  {!editingId && (
+                    <button
+                      type="button"
+                      onClick={addItem}
+                      className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add item
+                    </button>
+                  )}
+                </div>
+
+                {formData.items.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase">
+                        Item {idx + 1}
+                      </span>
+                      {formData.items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              items: prev.items.filter((_, i) => i !== idx),
+                            }))
+                          }
+                          className="text-gray-400 hover:text-red-500"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Select or Scan
+                      </label>
+                      <div className="flex gap-2">
+                        <select
+                          value={item.fabric_id}
+                          onChange={(e) => {
+                            const f = fabrics.find(
+                              (f) => f.id === e.target.value,
+                            );
+                            if (f) {
+                              updateItem(idx, {
+                                fabric_id: f.id,
+                                fabric_name: f.name,
+                                cost_price_per_meter:
+                                  f.purchase_price_per_meter.toString(),
+                                price_per_meter:
+                                  f.selling_price_per_meter.toString(),
+                              });
+                            } else {
+                              updateItem(idx, { fabric_id: "" });
+                            }
+                          }}
+                          className="input bg-white flex-1"
+                        >
+                          <option value="">-- Manual Entry --</option>
+                          {fabrics.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanningItemIdx(idx);
+                            setShowScanner(true);
+                          }}
+                          className="px-3 bg-white border border-gray-300 hover:bg-primary-50 rounded-lg text-gray-500"
+                        >
+                          <ScanLine className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {item.fabric_id ? (
+                      <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
+                        <div>
+                          <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
+                            Selected
+                          </p>
+                          <p className="text-sm font-semibold text-primary-900">
+                            {item.fabric_name}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
+                            Cost
+                          </p>
+                          <p className="text-sm font-semibold text-primary-900">
+                            ₹{item.cost_price_per_meter}/m
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Fabric Name *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={item.fabric_name}
+                          onChange={(e) =>
+                            updateItem(idx, { fabric_name: e.target.value })
+                          }
+                          className="input bg-white"
+                          placeholder="e.g., Cotton Silk"
+                        />
+                      </div>
+                    )}
+                    <div
+                      className={`grid ${item.fabric_id ? "grid-cols-2" : "grid-cols-3"} gap-2`}
+                    >
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Meters *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          min="0.01"
+                          value={item.meters}
+                          onChange={(e) =>
+                            updateItem(idx, { meters: e.target.value })
+                          }
+                          className="input bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Price ₹/m *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={item.price_per_meter}
+                          onChange={(e) =>
+                            updateItem(idx, { price_per_meter: e.target.value })
+                          }
+                          className="input bg-white"
+                        />
+                      </div>
+                      {!item.fabric_id && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">
+                            Cost ₹/m
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={item.cost_price_per_meter}
+                            onChange={(e) =>
+                              updateItem(idx, {
+                                cost_price_per_meter: e.target.value,
+                              })
+                            }
+                            className="input bg-white"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Payment Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Payment
+                  </span>
+                </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Initial Payment
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Payment Type *
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ["cash", "Full Cash"],
+                      ["partial", "Partial"],
+                      ["credit", "Full Credit"],
+                    ].map(([v, l]) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            payment_type: v,
+                          })
+                        }
+                        className={`py-2 rounded-xl text-sm font-medium border transition-all ${
+                          formData.payment_type === v
+                            ? "bg-primary-600 text-white border-primary-600"
+                            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {formData.payment_type !== "cash" && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Initial Payment
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.initial_payment}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          initial_payment: e.target.value,
+                        })
+                      }
+                      className="input bg-white"
+                      placeholder="Amount received now"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Date & Notes Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Details
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Sale Date
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={formData.initial_payment}
+                    type="date"
+                    value={formData.sale_date}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        initial_payment: e.target.value,
-                      })
+                      setFormData({ ...formData, sale_date: e.target.value })
                     }
-                    className="input"
-                    placeholder="Amount received now"
+                    className="input bg-white"
                   />
                 </div>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Sale Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.sale_date}
-                  onChange={(e) =>
-                    setFormData({ ...formData, sale_date: e.target.value })
-                  }
-                  className="input"
-                />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Additional Notes
+                  </label>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) =>
+                      setFormData({ ...formData, notes: e.target.value })
+                    }
+                    className="input bg-white"
+                    rows={2}
+                    placeholder="Optional notes..."
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Additional Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                />
-              </div>
-              {formData.meters && formData.price_per_meter && (
-                <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+
+              {/* Totals Summary */}
+              {parseFloat(calculateTotal()) > 0 && (
+                <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Total Amount:</span>
                     <span className="font-semibold">₹{calculateTotal()}</span>
                   </div>
-                  {formData.cost_price_per_meter && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Margin:</span>
-                      <span className="font-semibold text-accent-600">
-                        ₹{calculateMargin()}
-                      </span>
-                    </div>
-                  )}
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Total Margin:</span>
+                    <span className="font-semibold text-accent-600">
+                      ₹{calculateMargin()}
+                    </span>
+                  </div>
                 </div>
               )}
-              <div className="flex gap-3 pt-4">
+              <div className="flex gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => {
