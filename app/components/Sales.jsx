@@ -27,6 +27,7 @@ export default function Sales() {
   const toast = useToast();
   const [sales, setSales] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [fabrics, setFabrics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
@@ -45,9 +46,8 @@ export default function Sales() {
   const emptyForm = {
     customer_id: "",
     customer_name: "",
+    fabric_id: "",
     fabric_name: "",
-    fabric_type: "",
-    fabric_color: "",
     meters: "",
     price_per_meter: "",
     cost_price_per_meter: "",
@@ -68,6 +68,7 @@ export default function Sales() {
   useEffect(() => {
     fetchSales();
     fetchCustomers();
+    fetchFabrics();
   }, []);
 
   async function fetchSales() {
@@ -97,6 +98,15 @@ export default function Sales() {
     }
   }
 
+  async function fetchFabrics() {
+    try {
+      const { data } = await supabase.from("fabrics").select("*").order("name");
+      setFabrics(data || []);
+    } catch (error) {
+      console.error("Error fetching fabrics:", error);
+    }
+  }
+
   async function handleBarcodeScan(code) {
     setShowScanner(false);
     const { data } = await supabase
@@ -107,14 +117,13 @@ export default function Sales() {
     if (data) {
       setFormData((prev) => ({
         ...prev,
+        fabric_id: data.id,
         fabric_name: data.name,
-        fabric_type: data.type,
-        fabric_color: data.color,
         cost_price_per_meter: data.purchase_price_per_meter.toString(),
         price_per_meter: data.selling_price_per_meter.toString(),
       }));
     } else {
-      setFormData((prev) => ({ ...prev, fabric_name: code }));
+      setFormData((prev) => ({ ...prev, fabric_name: code, fabric_id: "" }));
     }
   }
 
@@ -145,11 +154,11 @@ export default function Sales() {
       const pricePerMeter = parseFloat(formData.price_per_meter);
       const costPricePerMeter = parseFloat(formData.cost_price_per_meter) || 0;
       const initialPayment = parseFloat(formData.initial_payment) || 0;
-      const fabricInfo = `${formData.fabric_name}${formData.fabric_type ? ` (${formData.fabric_type})` : ""}${formData.fabric_color ? ` - ${formData.fabric_color}` : ""}`;
+      const fabricInfo = `${formData.fabric_name}`;
 
       const salePayload = {
         customer_id: formData.customer_id || null,
-        fabric_id: null,
+        fabric_id: formData.fabric_id || null,
         meters,
         price_per_meter: pricePerMeter,
         cost_price_per_meter: costPricePerMeter,
@@ -252,14 +261,11 @@ export default function Sales() {
   function handleEdit(sale) {
     const notes = sale.notes || "";
     const fabricMatch = notes.match(/Fabric:\s*([^(|\n]+)/);
-    const typeMatch = notes.match(/\(([^)]+)\)/);
-    const colorMatch = notes.match(/-\s*([^|\n]+)/);
     setFormData({
       customer_id: sale.customer_id || "",
       customer_name: sale.customer?.name || "",
+      fabric_id: sale.fabric_id || "",
       fabric_name: fabricMatch ? fabricMatch[1].trim() : "",
-      fabric_type: typeMatch ? typeMatch[1].trim() : "",
-      fabric_color: colorMatch ? colorMatch[1].trim() : "",
       meters: sale.meters.toString(),
       price_per_meter: sale.price_per_meter.toString(),
       cost_price_per_meter: sale.cost_price_per_meter.toString(),
@@ -459,6 +465,39 @@ export default function Sales() {
                 <h3 className="text-sm font-medium text-gray-700 mb-3">
                   Fabric Details
                 </h3>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Select from Inventory
+                  </label>
+                  <select
+                    value={formData.fabric_id}
+                    onChange={(e) => {
+                      const f = fabrics.find((f) => f.id === e.target.value);
+                      if (f) {
+                        setFormData({
+                          ...formData,
+                          fabric_id: f.id,
+                          fabric_name: f.name,
+                          cost_price_per_meter:
+                            f.purchase_price_per_meter.toString(),
+                          price_per_meter: f.selling_price_per_meter.toString(),
+                        });
+                      } else {
+                        setFormData({ ...formData, fabric_id: "" });
+                      }
+                    }}
+                    className="input"
+                  >
+                    <option value="">
+                      -- Manual Entry / Not in Inventory --
+                    </option>
+                    {fabrics.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -488,42 +527,8 @@ export default function Sales() {
                       </button>
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Type
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.fabric_type}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          fabric_type: e.target.value,
-                        })
-                      }
-                      className="input"
-                      placeholder="e.g., Cotton, Silk"
-                    />
-                  </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Color
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.fabric_color}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          fabric_color: e.target.value,
-                        })
-                      }
-                      className="input"
-                      placeholder="e.g., Blue"
-                    />
-                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Meters *

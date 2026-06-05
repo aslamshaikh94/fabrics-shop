@@ -22,6 +22,7 @@ const emptyForm = {
   category: "Other",
   amount: "",
   expense_date: new Date().toISOString().split("T")[0],
+  paid_by: "",
   notes: "",
 };
 
@@ -75,6 +76,7 @@ export default function Expenses() {
             category: formData.category,
             amount: parseFloat(formData.amount),
             expense_date: formData.expense_date,
+            paid_by: formData.paid_by,
             notes: formData.notes,
           })
           .eq("id", editingId);
@@ -87,6 +89,7 @@ export default function Expenses() {
             category: formData.category,
             amount: parseFloat(formData.amount),
             expense_date: formData.expense_date,
+            paid_by: formData.paid_by,
             notes: formData.notes,
           },
         ]);
@@ -110,6 +113,7 @@ export default function Expenses() {
       category: expense.category,
       amount: expense.amount.toString(),
       expense_date: expense.expense_date,
+      paid_by: expense.paid_by || "",
       notes: expense.notes || "",
     });
     setEditingId(expense.id);
@@ -339,6 +343,18 @@ export default function Expenses() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Paid By
+                </label>
+                <input
+                  type="text"
+                  value={formData.paid_by}
+                  onChange={(e) => setFormData({ ...formData, paid_by: e.target.value })}
+                  className="input"
+                  placeholder="e.g., Ahmed, Owner..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Notes
                 </label>
                 <textarea
@@ -402,6 +418,7 @@ export default function Expenses() {
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">{expense.title}</p>
+                    {expense.paid_by && <p className="text-xs text-primary-600 mt-0.5">Paid by: {expense.paid_by}</p>}
                     {expense.notes && (
                       <p className="text-xs text-gray-500 mt-0.5">
                         {expense.notes}
