@@ -14,21 +14,8 @@ import {
   X,
 } from "lucide-react";
 
-function exportCSV(rows, filename) {
-  const keys = Object.keys(rows[0]);
-  const csv = [
-    keys.join(","),
-    ...rows.map((r) =>
-      keys.map((k) => `"${String(r[k] ?? "").replace(/"/g, '""')}"`).join(","),
-    ),
-  ].join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a.download = filename;
-  a.click();
-}
-
-import { useToast } from './Toast';
+import { useToast } from "./Toast";
+import { exportCSV } from "../utils/export";
 
 export default function Payments() {
   const toast = useToast();
@@ -74,10 +61,10 @@ export default function Payments() {
       fetchPayments();
       fetchSupplierSummary();
       fetchCustomerSummary();
-      toast('Payment updated');
+      toast("Payment updated");
     } catch (err) {
-      console.error('Error updating payment:', err);
-      toast('Failed to update payment', 'error');
+      console.error("Error updating payment:", err);
+      toast("Failed to update payment", "error");
     }
   }
 
@@ -273,11 +260,21 @@ export default function Payments() {
             <table className="w-full" style={{ minWidth: "480px" }}>
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Total Purchased</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Paid</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Supplier
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total Purchased
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Paid
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Pending
+                  </th>
+                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Progress
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -307,19 +304,37 @@ export default function Payments() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
-                        <span className={s.pending > 0 ? "font-semibold text-warning-600" : "text-gray-400"}>
+                        <span
+                          className={
+                            s.pending > 0
+                              ? "font-semibold text-warning-600"
+                              : "text-gray-400"
+                          }
+                        >
                           ₹{s.pending.toLocaleString("en-IN")}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <div
                           className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
-                          style={{ minWidth: '72px' }}
+                          style={{ minWidth: "72px" }}
                           title={`Paid: ${paidPct}%  |  Pending: ${pendingPct}%`}
                         >
                           <span className="absolute inset-0 bg-warning-200" />
-                          <span className="absolute inset-y-0 left-0 bg-accent-400" style={{ width: `${paidPct}%` }} />
-                          <span className="relative z-10 font-medium" style={{ color: '#111' }}>{s.pending > 0 ? (s.paid > 0 ? 'Partial' : 'Pending') : 'Paid'}</span>
+                          <span
+                            className="absolute inset-y-0 left-0 bg-accent-400"
+                            style={{ width: `${paidPct}%` }}
+                          />
+                          <span
+                            className="relative z-10 font-medium"
+                            style={{ color: "#111" }}
+                          >
+                            {s.pending > 0
+                              ? s.paid > 0
+                                ? "Partial"
+                                : "Pending"
+                              : "Paid"}
+                          </span>
                         </div>
                       </td>
                     </tr>

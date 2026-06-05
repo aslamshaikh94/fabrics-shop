@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -14,6 +14,7 @@ import {
   ScanLine,
   Pencil,
   Download,
+  ChevronDown,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validateSale, validatePayment, hasErrors } from "../utils/validators";
@@ -41,6 +42,8 @@ export default function Sales() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
   const emptyForm = {
@@ -65,11 +68,46 @@ export default function Sales() {
     notes: "",
   });
 
+  const [customerDues, setCustomerDues] = useState({});
+
+  const customerDropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (
+        customerDropdownRef.current &&
+        !customerDropdownRef.current.contains(event.target)
+      ) {
+        setShowCustomerDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   useEffect(() => {
     fetchSales();
     fetchCustomers();
     fetchFabrics();
+    fetchCustomerDues();
   }, []);
+
+  async function fetchCustomerDues() {
+    try {
+      const { data } = await supabase
+        .from("sales")
+        .select("customer_id, remaining_amount")
+        .gt("remaining_amount", 0);
+      const map = {};
+      (data || []).forEach((s) => {
+        if (s.customer_id)
+          map[s.customer_id] = (map[s.customer_id] || 0) + s.remaining_amount;
+      });
+      setCustomerDues(map);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function fetchSales() {
     try {
@@ -140,6 +178,12 @@ export default function Sales() {
     return (meters * (sellingPrice - costPrice)).toFixed(2);
   }
 
+  function calculateRemaining() {
+    const total = parseFloat(calculateTotal()) || 0;
+    const initial = parseFloat(formData.initial_payment) || 0;
+    return (total - initial).toFixed(2);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     const errors = validateSale(formData);
@@ -156,6 +200,24 @@ export default function Sales() {
       const initialPayment = parseFloat(formData.initial_payment) || 0;
       const fabricInfo = `${formData.fabric_name}`;
 
+      // Check credit limit for credit/partial sales
+      if (formData.customer_id && formData.payment_type !== "cash") {
+        const customer = customers.find((c) => c.id === formData.customer_id);
+        if (customer?.credit_limit > 0) {
+          const totalAmount = meters * pricePerMeter;
+          const initialPayment = parseFloat(formData.initial_payment) || 0;
+          const newRemaining = totalAmount - initialPayment;
+          const currentDue = customerDues?.[customer.id] || 0;
+          if (currentDue + newRemaining > customer.credit_limit) {
+            toast(
+              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN")}, current dues: ₹${currentDue.toLocaleString("en-IN")}, new would add: ₹${newRemaining.toLocaleString("en-IN")}`,
+              "error",
+            );
+            return;
+          }
+        }
+      }
+
       const salePayload = {
         customer_id: formData.customer_id || null,
         fabric_id: formData.fabric_id || null,
@@ -169,9 +231,17 @@ export default function Sales() {
       };
 
       if (editingId) {
+        const totalAmount = parseFloat(calculateTotal());
+        const marginAmount = parseFloat(calculateMargin());
+        const remainingAmount = parseFloat(calculateRemaining());
         const { error: updateError } = await supabase
           .from("sales")
-          .update(salePayload)
+          .update({
+            ...salePayload,
+            total_amount: totalAmount,
+            margin: marginAmount,
+            remaining_amount: remainingAmount,
+          })
           .eq("id", editingId);
         if (updateError) throw updateError;
         toast("Sale updated successfully");
@@ -437,36 +507,115 @@ export default function Sales() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer
-                </label>
-                <select
-                  value={formData.customer_id}
-                  onChange={(e) => {
-                    const c = customers.find((c) => c.id === e.target.value);
-                    setFormData({
-                      ...formData,
-                      customer_id: e.target.value,
-                      customer_name: c?.name || "",
-                    });
-                  }}
-                  className="input"
-                >
-                  <option value="">Walk-in customer</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+              {/* Customer Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Customer
+                  </span>
+                </div>
+                <div className="relative" ref={customerDropdownRef}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Search or Select Customer
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={
+                        showCustomerDropdown
+                          ? customerSearch
+                          : formData.customer_name || ""
+                      }
+                      onChange={(e) => {
+                        setCustomerSearch(e.target.value);
+                        setFormData({
+                          ...formData,
+                          customer_id: "",
+                          customer_name: e.target.value,
+                        });
+                        setShowCustomerDropdown(true);
+                      }}
+                      onFocus={() => {
+                        setCustomerSearch(formData.customer_name || "");
+                        setShowCustomerDropdown(true);
+                      }}
+                      className="input bg-white pr-10"
+                      placeholder="Type to search or leave blank for Walk-in"
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {formData.customer_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData({
+                              ...formData,
+                              customer_id: "",
+                              customer_name: "",
+                            });
+                            setCustomerSearch("");
+                          }}
+                          className="text-gray-400 hover:text-gray-600 p-0.5"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                      <ChevronDown
+                        className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
+                      />
+                    </div>
+                  </div>
+
+                  {showCustomerDropdown && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                      {customers
+                        .filter((c) =>
+                          c.name
+                            .toLowerCase()
+                            .includes(customerSearch.toLowerCase()),
+                        )
+                        .map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                customer_id: c.id,
+                                customer_name: c.name,
+                              });
+                              setCustomerSearch(c.name);
+                              setShowCustomerDropdown(false);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${formData.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""}`}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      {customers.filter((c) =>
+                        c.name
+                          .toLowerCase()
+                          .includes(customerSearch.toLowerCase()),
+                      ).length === 0 && (
+                        <div className="px-3 py-2.5 text-sm text-gray-400 italic">
+                          {customerSearch
+                            ? `Add "${customerSearch}" as new customer`
+                            : "No customers found"}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="border-t border-gray-200 pt-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">
-                  Fabric Details
-                </h3>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+
+              {/* Fabric Details Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Fabric Details
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
                     Select from Inventory
                   </label>
                   <select
@@ -486,7 +635,7 @@ export default function Sales() {
                         setFormData({ ...formData, fabric_id: "" });
                       }
                     }}
-                    className="input"
+                    className="input bg-white"
                   >
                     <option value="">
                       -- Manual Entry / Not in Inventory --
@@ -498,39 +647,37 @@ export default function Sales() {
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fabric Name *
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={formData.fabric_name}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            fabric_name: e.target.value,
-                          })
-                        }
-                        className="input"
-                        placeholder="e.g., Cotton Silk"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowScanner(true)}
-                        className="px-3 bg-gray-100 hover:bg-primary-100 border border-gray-200 rounded-lg text-gray-500 hover:text-primary-600"
-                        title="Scan barcode"
-                      >
-                        <ScanLine className="w-5 h-5" />
-                      </button>
-                    </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Fabric Name *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={formData.fabric_name}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          fabric_name: e.target.value,
+                        })
+                      }
+                      className="input bg-white flex-1"
+                      placeholder="e.g., Cotton Silk"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowScanner(true)}
+                      className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 hover:text-primary-600 transition-colors"
+                      title="Scan barcode"
+                    >
+                      <ScanLine className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-4">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
                       Meters *
                     </label>
                     <input
@@ -542,13 +689,13 @@ export default function Sales() {
                       onChange={(e) =>
                         setFormData({ ...formData, meters: e.target.value })
                       }
-                      className="input"
+                      className="input bg-white"
                       placeholder="0"
                     />
                   </div>
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Price/m *
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Price ₹/m *
                     </label>
                     <input
                       type="number"
@@ -561,15 +708,13 @@ export default function Sales() {
                           price_per_meter: e.target.value,
                         })
                       }
-                      className="input"
+                      className="input bg-white"
                       placeholder="₹0"
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Cost Price/m
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Cost ₹/m
                     </label>
                     <input
                       type="number"
@@ -581,79 +726,111 @@ export default function Sales() {
                           cost_price_per_meter: e.target.value,
                         })
                       }
-                      className="input"
-                      placeholder="₹0 (for margin calc)"
+                      className="input bg-white"
+                      placeholder="₹0"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Payment Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Payment
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Payment Type *
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ["cash", "Full Cash"],
+                      ["partial", "Partial"],
+                      ["credit", "Full Credit"],
+                    ].map(([v, l]) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            payment_type: v,
+                          })
+                        }
+                        className={`py-2 rounded-xl text-sm font-medium border transition-all ${
+                          formData.payment_type === v
+                            ? "bg-primary-600 text-white border-primary-600"
+                            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {formData.payment_type !== "cash" && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Payment Type *
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Initial Payment
                     </label>
-                    <select
-                      value={formData.payment_type}
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.initial_payment}
                       onChange={(e) =>
                         setFormData({
                           ...formData,
-                          payment_type: e.target.value,
+                          initial_payment: e.target.value,
                         })
                       }
-                      className="input"
-                    >
-                      <option value="cash">Full Cash</option>
-                      <option value="partial">Partial</option>
-                      <option value="credit">Full Credit</option>
-                    </select>
+                      className="input bg-white"
+                      placeholder="Amount received now"
+                    />
                   </div>
-                </div>
+                )}
               </div>
-              {formData.payment_type !== "cash" && (
+
+              {/* Date & Notes Section */}
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Details
+                  </span>
+                </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Initial Payment
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Sale Date
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={formData.initial_payment}
+                    type="date"
+                    value={formData.sale_date}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        initial_payment: e.target.value,
-                      })
+                      setFormData({ ...formData, sale_date: e.target.value })
                     }
-                    className="input"
-                    placeholder="Amount received now"
+                    className="input bg-white"
                   />
                 </div>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Sale Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.sale_date}
-                  onChange={(e) =>
-                    setFormData({ ...formData, sale_date: e.target.value })
-                  }
-                  className="input"
-                />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Additional Notes
+                  </label>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) =>
+                      setFormData({ ...formData, notes: e.target.value })
+                    }
+                    className="input bg-white"
+                    rows={2}
+                    placeholder="Optional notes..."
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Additional Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                />
-              </div>
+
+              {/* Totals Summary */}
               {formData.meters && formData.price_per_meter && (
-                <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+                <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Total Amount:</span>
                     <span className="font-semibold">₹{calculateTotal()}</span>
@@ -668,7 +845,7 @@ export default function Sales() {
                   )}
                 </div>
               )}
-              <div className="flex gap-3 pt-4">
+              <div className="flex gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => {
