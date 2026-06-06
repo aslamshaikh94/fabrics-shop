@@ -75,8 +75,8 @@ export default function Sales() {
   const [itemJustAdded, setItemJustAdded] = useState(false);
   function makeEmptyForm() {
     return {
-      customer_id: "",
-      customer_name: "",
+      customer_id: null,
+      customer_name: "Walk-in Customer",
       items: [
         {
           fabric_id: "",
@@ -323,7 +323,13 @@ export default function Sales() {
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
           payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${formData.notes ? ` | ${formData.notes}` : ""}`,
+          notes: `Fabric: ${item.fabric_name}${
+            !formData.customer_id &&
+            formData.customer_name &&
+            formData.customer_name !== "Walk-in Customer"
+              ? ` (Name: ${formData.customer_name})`
+              : ""
+          }${formData.notes ? ` | ${formData.notes}` : ""}`,
         };
         const { error: updateError } = await supabase
           .from("sales")
@@ -333,6 +339,12 @@ export default function Sales() {
       } else {
         // Generate a unique group ID for this sale transaction
         const saleGroupId = generateUUID();
+        const walkInNameInfo =
+          !formData.customer_id &&
+          formData.customer_name &&
+          formData.customer_name !== "Walk-in Customer"
+            ? ` (Name: ${formData.customer_name})`
+            : "";
         // Insert one sale row per item — each row gets its own meters/price/margin
         const itemNotes = formData.items.map((it) => it.fabric_name).join(", ");
         const salePayloads = formData.items.map((item) => ({
@@ -343,7 +355,7 @@ export default function Sales() {
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
           payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${formData.notes ? ` | ${formData.notes}` : ""}`,
+          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}${formData.notes ? ` | ${formData.notes}` : ""}`,
           sale_group_id: saleGroupId,
         }));
 
@@ -445,18 +457,33 @@ export default function Sales() {
       return;
     }
     setPaymentErrors({});
+
     try {
-      const { error } = await supabase.from("sale_payments").insert([
-        {
-          sale_id: selectedSale.id,
-          amount: parseFloat(paymentData.amount),
+      // Distribute payment across items in the group
+      let remainingToPay = parseFloat(paymentData.amount);
+      const paymentInserts = [];
+
+      for (const item of selectedSale.items || []) {
+        if (remainingToPay <= 0) break;
+        if (item.remaining_amount <= 0) continue;
+
+        const pay = Math.min(remainingToPay, item.remaining_amount);
+        paymentInserts.push({
+          sale_id: item.id,
+          amount: pay,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
           reference_number: paymentData.reference_number,
           notes: paymentData.notes,
-        },
-      ]);
+        });
+        remainingToPay -= pay;
+      }
+
+      const { error } = await supabase
+        .from("sale_payments")
+        .insert(paymentInserts);
       if (error) throw error;
+
       setShowPaymentForm(false);
       setPaymentData({
         amount: "",
@@ -466,7 +493,7 @@ export default function Sales() {
         notes: "",
       });
       fetchSales();
-      fetchPayments(selectedSale.id);
+      fetchPayments(selectedSale.items.map((i) => i.id));
       toast("Payment recorded");
     } catch (error) {
       console.error("Error saving payment:", error);
@@ -474,12 +501,12 @@ export default function Sales() {
     }
   }
 
-  async function fetchPayments(saleId) {
+  async function fetchPayments(saleIds) {
     try {
       const { data } = await supabase
         .from("sale_payments")
         .select("*")
-        .eq("sale_id", saleId)
+        .in("sale_id", Array.isArray(saleIds) ? saleIds : [saleIds])
         .order("payment_date", { ascending: false });
       setPayments(data || []);
     } catch (error) {
@@ -511,12 +538,12 @@ export default function Sales() {
     setShowForm(true);
   }
 
-  function handleViewPayments(sale) {
-    setSelectedSale(sale);
-    fetchPayments(sale.id);
+  function handleViewPayments(group) {
+    setSelectedSale(group);
+    fetchPayments(group.items.map((i) => i.id));
   }
-  function handleAddPayment(sale) {
-    setSelectedSale(sale);
+  function handleAddPayment(group) {
+    setSelectedSale(group);
     setShowPaymentForm(true);
   }
 
@@ -799,7 +826,7 @@ export default function Sales() {
                         setShowCustomerDropdown(true);
                       }}
                       className="input bg-white pr-10"
-                      placeholder="Type to search or leave blank for Walk-in"
+                      placeholder="Type to search or select 'Walk-in Customer'"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       {formData.customer_id && (
@@ -826,6 +853,21 @@ export default function Sales() {
 
                   {showCustomerDropdown && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            customer_id: null,
+                            customer_name: "Walk-in Customer",
+                          });
+                          setCustomerSearch("Walk-in Customer");
+                          setShowCustomerDropdown(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${!formData.customer_id && formData.customer_name === "Walk-in Customer" ? "bg-primary-50 text-primary-700 font-medium" : ""}`}
+                      >
+                        Walk-in Customer
+                      </button>
                       {customers
                         .filter((c) =>
                           c.name
@@ -864,12 +906,37 @@ export default function Sales() {
                     </div>
                   )}
                 </div>
+                {!formData.customer_id && (
+                  <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Walk-in Customer Name
+                    </label>
+                    <input
+                      type="text"
+                      value={
+                        formData.customer_name === "Walk-in Customer"
+                          ? ""
+                          : formData.customer_name
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData({
+                          ...formData,
+                          customer_name: val || "Walk-in Customer",
+                        });
+                        setCustomerSearch(val);
+                      }}
+                      className="input bg-white"
+                      placeholder="Type specific name (e.g. John Doe)"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Fabric Details Section */}
               <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wide">
                     Fabric Items
                   </label>
                   {formData.items.length > 1 && !editingId && (
@@ -1291,7 +1358,15 @@ export default function Sales() {
                   {selectedSale.customer?.name || "Walk-in"}
                 </span>
               </p>
-              <p className="text-sm text-gray-600 mt-1">{selectedSale.notes}</p>
+              <p className="text-sm text-gray-600 mt-1 italic">
+                {selectedSale.items
+                  ?.map(
+                    (it) =>
+                      it.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() ||
+                      "Item",
+                  )
+                  .join(", ")}
+              </p>
               <p className="text-sm text-gray-600 mt-2">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
@@ -1410,7 +1485,15 @@ export default function Sales() {
                   {selectedSale.customer?.name || "Walk-in"}
                 </span>
               </p>
-              <p className="text-sm text-gray-600 mt-1">{selectedSale.notes}</p>
+              <p className="text-sm text-gray-600 mt-1 italic">
+                {selectedSale.items
+                  ?.map(
+                    (it) =>
+                      it.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() ||
+                      "Item",
+                  )
+                  .join(", ")}
+              </p>
               <div className="flex justify-between mt-2 pt-2 border-t border-gray-200">
                 <span className="text-sm">
                   Total:{" "}
@@ -1569,7 +1652,7 @@ export default function Sales() {
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleViewPayments(group.items[0])}
+                        onClick={() => handleViewPayments(group)}
                         className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
                         title="View payments"
                       >
@@ -1577,7 +1660,7 @@ export default function Sales() {
                       </button>
                       {group.remaining_amount > 0 && (
                         <button
-                          onClick={() => handleAddPayment(group.items[0])}
+                          onClick={() => handleAddPayment(group)}
                           className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
                           title="Receive payment"
                         >
@@ -1827,9 +1910,7 @@ export default function Sales() {
             {/* Action Buttons */}
             <div className="flex gap-3">
               <button
-                onClick={() =>
-                  handleViewPayments(selectedGroupForDetails.items[0])
-                }
+                onClick={() => handleViewPayments(selectedGroupForDetails)}
                 className="flex-1 btn btn-secondary"
               >
                 <CreditCard className="w-4 h-4 mr-2" />
