@@ -1,22 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  Plus,
-  CreditCard,
-  X,
-  Search,
-  Calendar,
-  Eye,
-  Trash2,
-  ChevronLeft,
-  ChevronRight,
-  ScanLine,
-  Pencil,
-  CheckCircle,
-  Download,
-  ChevronDown,
-} from "lucide-react";
+import { Plus, CreditCard, X, Search, Calendar, Eye, Trash2, ChevronLeft, ChevronRight, ScanLine, Pencil, CircleCheck as CheckCircle, Download, ChevronDown } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validateSale, validatePayment, hasErrors } from "../utils/validators";
 import BarcodeScanner from "./BarcodeScanner";
@@ -50,24 +35,26 @@ export default function Sales() {
   const [fabricSearch, setFabricSearch] = useState("");
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
-  const emptyForm = {
-    customer_id: "",
-    customer_name: "",
-    items: [
-      {
-        fabric_id: "",
-        fabric_name: "",
-        meters: "",
-        price_per_meter: "",
-        cost_price_per_meter: "",
-      },
-    ],
-    sale_date: new Date().toISOString().split("T")[0],
-    payment_type: "cash",
-    initial_payment: "",
-    notes: "",
-  };
-  const [formData, setFormData] = useState(emptyForm);
+  function makeEmptyForm() {
+    return {
+      customer_id: "",
+      customer_name: "",
+      items: [
+        {
+          fabric_id: "",
+          fabric_name: "",
+          meters: "",
+          price_per_meter: "",
+          cost_price_per_meter: "",
+        },
+      ],
+      sale_date: new Date().toISOString().split("T")[0],
+      payment_type: "cash",
+      initial_payment: "",
+      notes: "",
+    };
+  }
+  const [formData, setFormData] = useState(makeEmptyForm);
   const [paymentData, setPaymentData] = useState({
     amount: "",
     payment_date: new Date().toISOString().split("T")[0],
@@ -243,19 +230,8 @@ export default function Sales() {
     }
     setFormErrors({});
     try {
-      const initialPayment = parseFloat(formData.initial_payment) || 0;
       const totalAmount = parseFloat(calculateTotal());
-      const marginAmount = parseFloat(calculateMargin());
-      const remainingAmount = parseFloat(calculateRemaining());
-
-      const firstItem = formData.items[0] || {};
-      const meters = parseFloat(firstItem.meters) || 0;
-      const pricePerMeter = parseFloat(firstItem.price_per_meter) || 0;
-      const costPricePerMeter = parseFloat(firstItem.cost_price_per_meter) || 0;
-      const fabricInfo =
-        formData.items.length > 1
-          ? `${firstItem.fabric_name} (+${formData.items.length - 1} more)`
-          : firstItem.fabric_name;
+      const initialPayment = parseFloat(formData.initial_payment) || 0;
 
       // Check credit limit for credit/partial sales
       if (formData.customer_id && formData.payment_type !== "cash") {
@@ -273,45 +249,90 @@ export default function Sales() {
         }
       }
 
-      const salePayload = {
-        customer_id: formData.customer_id || null,
-        fabric_id: firstItem.fabric_id || null,
-        meters,
-        price_per_meter: pricePerMeter,
-        cost_price_per_meter: costPricePerMeter,
-        sale_date: formData.sale_date,
-        payment_type: formData.payment_type,
-        status: formData.payment_type === "cash" ? "completed" : "partial",
-        notes: `Fabric: ${fabricInfo}${formData.notes ? ` | ${formData.notes}` : ""}`,
-      };
-
       if (editingId) {
+        // Editing only supports single-item (the form shows one item when editing)
+        const item = formData.items[0] || {};
+        const salePayload = {
+          customer_id: formData.customer_id || null,
+          fabric_id: item.fabric_id || null,
+          meters: parseFloat(item.meters) || 0,
+          price_per_meter: parseFloat(item.price_per_meter) || 0,
+          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+          sale_date: formData.sale_date,
+          payment_type: formData.payment_type,
+          notes: `Fabric: ${item.fabric_name}${formData.notes ? ` | ${formData.notes}` : ""}`,
+        };
         const { error: updateError } = await supabase
           .from("sales")
           .update(salePayload)
           .eq("id", editingId);
         if (updateError) throw updateError;
       } else {
-        const { data: saleData, error: saleError } = await supabase
+        // Insert one sale row per item — each row gets its own meters/price/margin
+        const itemNotes = formData.items.map((it) => it.fabric_name).join(", ");
+        const salePayloads = formData.items.map((item) => ({
+          customer_id: formData.customer_id || null,
+          fabric_id: item.fabric_id || null,
+          meters: parseFloat(item.meters) || 0,
+          price_per_meter: parseFloat(item.price_per_meter) || 0,
+          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+          sale_date: formData.sale_date,
+          payment_type: formData.payment_type,
+          notes: `Fabric: ${item.fabric_name}${formData.notes ? ` | ${formData.notes}` : ""}`,
+        }));
+
+        const { data: saleRows, error: saleError } = await supabase
           .from("sales")
-          .insert([salePayload])
-          .select()
-          .single();
+          .insert(salePayloads)
+          .select();
         if (saleError) throw saleError;
-        if (initialPayment > 0 && saleData) {
-          await supabase.from("sale_payments").insert([
-            {
-              sale_id: saleData.id,
-              amount: initialPayment,
+
+        // Record payments based on payment type
+        if (saleRows && saleRows.length > 0) {
+          if (formData.payment_type === "cash") {
+            // Full cash: pay each item in full
+            const paymentInserts = saleRows.map((row) => ({
+              sale_id: row.id,
+              amount: row.meters * row.price_per_meter,
               payment_date: formData.sale_date,
               payment_method: "cash",
-            },
-          ]);
+            }));
+            const { error: payErr } = await supabase
+              .from("sale_payments")
+              .insert(paymentInserts);
+            if (payErr) throw payErr;
+          } else if (initialPayment > 0) {
+            // Partial / credit with initial payment: distribute across items
+            let remaining = initialPayment;
+            const paymentInserts = [];
+            for (const row of saleRows) {
+              const itemTotal = row.meters * row.price_per_meter;
+              const pay = Math.min(remaining, itemTotal);
+              if (pay > 0) {
+                paymentInserts.push({
+                  sale_id: row.id,
+                  amount: pay,
+                  payment_date: formData.sale_date,
+                  payment_method: "cash",
+                });
+                remaining -= pay;
+              }
+              if (remaining <= 0) break;
+            }
+            if (paymentInserts.length > 0) {
+              const { error: payErr } = await supabase
+                .from("sale_payments")
+                .insert(paymentInserts);
+              if (payErr) throw payErr;
+            }
+          }
+          // Full credit with no initial payment: no payments to insert
         }
       }
+
       setShowForm(false);
       setEditingId(null);
-      setFormData(emptyForm);
+      setFormData(makeEmptyForm());
       fetchSales();
       toast(
         editingId ? "Sale updated successfully" : "Sale recorded successfully",
@@ -491,7 +512,7 @@ export default function Sales() {
           <button
             onClick={() => {
               setEditingId(null);
-              setFormData(emptyForm);
+              setFormData(makeEmptyForm());
               setShowForm(true);
             }}
             className="btn btn-primary"
