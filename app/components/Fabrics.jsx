@@ -19,7 +19,7 @@ const emptyRow = {
   name: "",
   total_meters: "",
   purchase_price_per_meter: "",
-  selling_price_per_meter: "",
+  quantity: "",
   barcode: "",
 };
 const emptyForm = { supplier_id: "" };
@@ -91,10 +91,10 @@ export default function Fabrics() {
         const payload = {
           name: r.name,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
-          selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
           total_meters: newTotal,
           available_meters: newAvailable,
           supplier_id: formData.supplier_id || null,
+          quantity: r.quantity || "",
           barcode: r.barcode || "",
         };
         const { error } = await supabase
@@ -108,10 +108,10 @@ export default function Fabrics() {
         const payloads = validRows.map((r) => ({
           name: r.name,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
-          selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
           total_meters: parseFloat(r.total_meters) || 0,
           available_meters: parseFloat(r.total_meters) || 0,
           supplier_id: formData.supplier_id || null,
+          quantity: r.quantity || "",
           barcode: r.barcode || "",
         }));
         const { error } = await supabase.from("fabrics").insert(payloads);
@@ -151,8 +151,8 @@ export default function Fabrics() {
       {
         name: fabric.name,
         purchase_price_per_meter: fabric.purchase_price_per_meter.toString(),
-        selling_price_per_meter: fabric.selling_price_per_meter.toString(),
         total_meters: fabric.total_meters.toString(),
+        quantity: fabric.quantity || "",
         barcode: fabric.barcode || "",
       },
     ]);
@@ -296,19 +296,36 @@ export default function Fabrics() {
                         </button>
                       )}
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        Name *
-                      </label>
-                      <input
-                        required
-                        className="input bg-white"
-                        value={row.name}
-                        onChange={(e) => updateRow(idx, "name", e.target.value)}
-                        placeholder="Fabric name"
-                      />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Name *
+                        </label>
+                        <input
+                          required
+                          className="input bg-white"
+                          value={row.name}
+                          onChange={(e) =>
+                            updateRow(idx, "name", e.target.value)
+                          }
+                          placeholder="Fabric name"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Quantity
+                        </label>
+                        <input
+                          className="input bg-white"
+                          value={row.quantity}
+                          onChange={(e) =>
+                            updateRow(idx, "quantity", e.target.value)
+                          }
+                          placeholder="e.g. 10 Rolls"
+                        />
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">
                           Meters
@@ -337,25 +354,6 @@ export default function Fabrics() {
                             updateRow(
                               idx,
                               "purchase_price_per_meter",
-                              e.target.value,
-                            )
-                          }
-                          placeholder="0"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Sell ₹/m
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="input bg-white"
-                          value={row.selling_price_per_meter}
-                          onChange={(e) =>
-                            updateRow(
-                              idx,
-                              "selling_price_per_meter",
                               e.target.value,
                             )
                           }
@@ -424,6 +422,9 @@ export default function Fabrics() {
                 Name
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                Quantity
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Supplier
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
@@ -436,13 +437,7 @@ export default function Fabrics() {
                 Buy ₹/m
               </th>
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
-                Sell ₹/m
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Total Price
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
-                Margin
               </th>
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Actions
@@ -457,6 +452,11 @@ export default function Fabrics() {
               >
                 <td className="px-4 py-3">
                   <p className="font-medium text-gray-900">{fabric.name}</p>
+                </td>
+                <td className="px-4 py-3">
+                  <p className="text-sm text-gray-600">
+                    {fabric.quantity || "—"}
+                  </p>
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-sm text-gray-600">
@@ -488,42 +488,12 @@ export default function Fabrics() {
                   </p>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <p className="font-semibold text-accent-600">
-                    ₹{fabric.selling_price_per_meter}
-                  </p>
-                </td>
-                <td className="px-4 py-3 text-right">
                   <p className="text-sm font-medium text-gray-900">
                     ₹
                     {(
                       fabric.total_meters * fabric.purchase_price_per_meter
                     ).toLocaleString("en-IN")}
                   </p>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {fabric.purchase_price_per_meter > 0 ? (
-                    <p
-                      className={`text-sm font-semibold ${
-                        ((fabric.selling_price_per_meter -
-                          fabric.purchase_price_per_meter) /
-                          fabric.purchase_price_per_meter) *
-                          100 >=
-                        0
-                          ? "text-accent-600"
-                          : "text-red-500"
-                      }`}
-                    >
-                      {(
-                        ((fabric.selling_price_per_meter -
-                          fabric.purchase_price_per_meter) /
-                          fabric.purchase_price_per_meter) *
-                        100
-                      ).toFixed(0)}
-                      %
-                    </p>
-                  ) : (
-                    <p className="text-sm text-gray-400">—</p>
-                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">

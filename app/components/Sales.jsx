@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ScanLine,
   Pencil,
+  CheckCircle,
   Download,
   ChevronDown,
 } from "lucide-react";
@@ -45,6 +46,8 @@ export default function Sales() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [scanningItemIdx, setScanningItemIdx] = useState(null);
+  const [activeFabricDropdown, setActiveFabricDropdown] = useState(null);
+  const [fabricSearch, setFabricSearch] = useState("");
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
   const emptyForm = {
@@ -84,6 +87,10 @@ export default function Sales() {
         !customerDropdownRef.current.contains(event.target)
       ) {
         setShowCustomerDropdown(false);
+      }
+
+      if (!event.target.closest(".fabric-dropdown-container")) {
+        setActiveFabricDropdown(null);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -162,7 +169,7 @@ export default function Sales() {
         fabric_id: data.id,
         fabric_name: data.name,
         cost_price_per_meter: data.purchase_price_per_meter.toString(),
-        price_per_meter: data.selling_price_per_meter.toString(),
+        price_per_meter: (data.selling_price_per_meter || "").toString(),
       });
     } else {
       updateItem(scanningItemIdx, { fabric_name: code, fabric_id: "" });
@@ -668,7 +675,7 @@ export default function Sales() {
                 {formData.items.map((item, idx) => (
                   <div
                     key={idx}
-                    className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50"
+                    className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50 fabric-dropdown-container"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold text-gray-400 uppercase">
@@ -689,61 +696,118 @@ export default function Sales() {
                         </button>
                       )}
                     </div>
-                    <div>
+                    <div className="relative">
                       <label className="block text-xs font-medium text-gray-600 mb-1">
-                        Select or Scan
+                        Search or Select Fabric *
                       </label>
                       <div className="flex gap-2">
-                        <select
-                          value={item.fabric_id}
-                          onChange={(e) => {
-                            const f = fabrics.find(
-                              (f) => f.id === e.target.value,
-                            );
-                            if (f) {
-                              updateItem(idx, {
-                                fabric_id: f.id,
-                                fabric_name: f.name,
-                                cost_price_per_meter:
-                                  f.purchase_price_per_meter.toString(),
-                                price_per_meter:
-                                  f.selling_price_per_meter.toString(),
-                              });
-                            } else {
-                              updateItem(idx, { fabric_id: "" });
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            value={
+                              activeFabricDropdown === idx
+                                ? fabricSearch
+                                : item.fabric_name || ""
                             }
-                          }}
-                          className="input bg-white flex-1"
-                        >
-                          <option value="">-- Manual Entry --</option>
-                          {fabrics.map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.name}
-                            </option>
-                          ))}
-                        </select>
+                            onChange={(e) => {
+                              setFabricSearch(e.target.value);
+                              updateItem(idx, {
+                                fabric_id: "",
+                                fabric_name: e.target.value,
+                              });
+                              setActiveFabricDropdown(idx);
+                            }}
+                            onFocus={() => {
+                              setFabricSearch(item.fabric_name || "");
+                              setActiveFabricDropdown(idx);
+                            }}
+                            className="input bg-white pr-10"
+                            placeholder="Search inventory or type name"
+                            required
+                          />
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                            {item.fabric_id && (
+                              <div
+                                className="w-2 h-2 rounded-full bg-accent-500"
+                                title="Linked to inventory"
+                              />
+                            )}
+                            <ChevronDown
+                              className={`w-4 h-4 text-gray-400 transition-transform ${activeFabricDropdown === idx ? "rotate-180" : ""}`}
+                            />
+                          </div>
+
+                          {activeFabricDropdown === idx && (
+                            <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                              {fabrics
+                                .filter((f) =>
+                                  f.name
+                                    .toLowerCase()
+                                    .includes(fabricSearch.toLowerCase()),
+                                )
+                                .map((f) => (
+                                  <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => {
+                                      updateItem(idx, {
+                                        fabric_id: f.id,
+                                        fabric_name: f.name,
+                                        cost_price_per_meter:
+                                          f.purchase_price_per_meter.toString(),
+                                        price_per_meter: (
+                                          f.selling_price_per_meter || ""
+                                        ).toString(),
+                                      });
+                                      setActiveFabricDropdown(null);
+                                    }}
+                                    className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                                  >
+                                    <div className="flex justify-between items-center">
+                                      <span>{f.name}</span>
+                                      <span className="text-[10px] text-gray-400">
+                                        {f.available_meters}m
+                                      </span>
+                                    </div>
+                                  </button>
+                                ))}
+                              {fabrics.filter((f) =>
+                                f.name
+                                  .toLowerCase()
+                                  .includes(fabricSearch.toLowerCase()),
+                              ).length === 0 && (
+                                <div className="px-3 py-2.5 text-xs text-gray-400 italic">
+                                  No matching fabrics found
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <button
                           type="button"
                           onClick={() => {
                             setScanningItemIdx(idx);
                             setShowScanner(true);
                           }}
-                          className="px-3 bg-white border border-gray-300 hover:bg-primary-50 rounded-lg text-gray-500"
+                          className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
                         >
                           <ScanLine className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
 
-                    {item.fabric_id ? (
+                    {item.fabric_id && (
                       <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
-                        <div>
-                          <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                            Selected
-                          </p>
-                          <p className="text-sm font-semibold text-primary-900">
-                            {item.fabric_name}
-                          </p>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4 text-accent-500" />
+                          <div>
+                            <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
+                              Linked Inventory
+                            </p>
+                            <p className="text-sm font-semibold text-primary-900">
+                              {item.fabric_name}
+                            </p>
+                          </div>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
@@ -753,22 +817,6 @@ export default function Sales() {
                             ₹{item.cost_price_per_meter}/m
                           </p>
                         </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Fabric Name *
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={item.fabric_name}
-                          onChange={(e) =>
-                            updateItem(idx, { fabric_name: e.target.value })
-                          }
-                          className="input bg-white"
-                          placeholder="e.g., Cotton Silk"
-                        />
                       </div>
                     )}
                     <div

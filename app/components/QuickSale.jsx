@@ -48,7 +48,7 @@ export default function QuickSale() {
 
   function selectFabric(fabric) {
     setSelectedFabric(fabric);
-    setPrice(fabric.selling_price_per_meter.toString());
+    setPrice((fabric.selling_price_per_meter || "").toString());
     setSearch("");
   }
 
@@ -225,7 +225,9 @@ export default function QuickSale() {
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-semibold text-accent-600">
-                            ₹{f.selling_price_per_meter}/m
+                            {f.selling_price_per_meter
+                              ? `₹${f.selling_price_per_meter}/m`
+                              : "Price not set"}
                           </p>
                           <p className="text-xs text-gray-400">
                             {f.available_meters}m left
