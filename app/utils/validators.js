@@ -4,22 +4,36 @@ export const validateSale = (formData) => {
   const errors = {};
   if (!formData.customer_id && !formData.customer_name)
     errors.customer = "Customer is required";
-  if (!formData.fabric_name || formData.fabric_name.trim() === "")
-    errors.fabric_name = "Fabric name is required";
-  if (!formData.meters || parseFloat(formData.meters) <= 0)
-    errors.meters = "Meters must be greater than 0";
-  if (!formData.price_per_meter || parseFloat(formData.price_per_meter) < 0)
-    errors.price_per_meter = "Price must be 0 or greater";
+
+  const firstItem = formData.items && formData.items[0];
   if (
-    formData.cost_price_per_meter &&
-    parseFloat(formData.cost_price_per_meter) < 0
+    !firstItem ||
+    !firstItem.fabric_name ||
+    firstItem.fabric_name.trim() === ""
+  )
+    errors.fabric_name = "Fabric name is required";
+  if (!firstItem || !firstItem.meters || parseFloat(firstItem.meters) <= 0)
+    errors.meters = "Meters must be greater than 0";
+  if (
+    !firstItem ||
+    !firstItem.price_per_meter ||
+    parseFloat(firstItem.price_per_meter) < 0
+  )
+    errors.price_per_meter = "Price must be 0 or greater";
+
+  if (
+    firstItem &&
+    firstItem.cost_price_per_meter &&
+    parseFloat(firstItem.cost_price_per_meter) < 0
   )
     errors.cost_price_per_meter = "Cost price must be 0 or greater";
+
   if (!formData.sale_date) errors.sale_date = "Sale date is required";
   if (!formData.payment_type) errors.payment_type = "Payment type is required";
   if (
     formData.payment_type !== "cash" &&
-    (!formData.initial_payment || parseFloat(formData.initial_payment) < 0)
+    formData.initial_payment &&
+    parseFloat(formData.initial_payment) < 0
   ) {
     errors.initial_payment = "Initial payment must be 0 or greater";
   }

@@ -262,17 +262,6 @@ export default function Fabrics() {
                   <label className="text-sm font-medium text-gray-700">
                     Fabric Items
                   </label>
-                  {!editingId && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRows((prev) => [...prev, { ...emptyRow }])
-                      }
-                      className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add row
-                    </button>
-                  )}
                 </div>
 
                 {rows.map((row, idx) => (
@@ -385,6 +374,17 @@ export default function Fabrics() {
                     </div>
                   </div>
                 ))}
+                {!editingId && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRows((prev) => [...prev, { ...emptyRow }])
+                    }
+                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add row
+                  </button>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">

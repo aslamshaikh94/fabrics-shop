@@ -244,12 +244,23 @@ export default function Sales() {
     setFormErrors({});
     try {
       const initialPayment = parseFloat(formData.initial_payment) || 0;
+      const totalAmount = parseFloat(calculateTotal());
+      const marginAmount = parseFloat(calculateMargin());
+      const remainingAmount = parseFloat(calculateRemaining());
+
+      const firstItem = formData.items[0] || {};
+      const meters = parseFloat(firstItem.meters) || 0;
+      const pricePerMeter = parseFloat(firstItem.price_per_meter) || 0;
+      const costPricePerMeter = parseFloat(firstItem.cost_price_per_meter) || 0;
+      const fabricInfo =
+        formData.items.length > 1
+          ? `${firstItem.fabric_name} (+${formData.items.length - 1} more)`
+          : firstItem.fabric_name;
 
       // Check credit limit for credit/partial sales
       if (formData.customer_id && formData.payment_type !== "cash") {
         const customer = customers.find((c) => c.id === formData.customer_id);
         if (customer?.credit_limit > 0) {
-          const totalAmount = parseFloat(calculateTotal());
           const newRemaining = totalAmount - initialPayment;
           const currentDue = customerDues?.[customer.id] || 0;
           if (currentDue + newRemaining > customer.credit_limit) {
@@ -264,7 +275,7 @@ export default function Sales() {
 
       const salePayload = {
         customer_id: formData.customer_id || null,
-        fabric_id: formData.fabric_id || null,
+        fabric_id: firstItem.fabric_id || null,
         meters,
         price_per_meter: pricePerMeter,
         cost_price_per_meter: costPricePerMeter,
@@ -275,20 +286,11 @@ export default function Sales() {
       };
 
       if (editingId) {
-        const totalAmount = parseFloat(calculateTotal());
-        const marginAmount = parseFloat(calculateMargin());
-        const remainingAmount = parseFloat(calculateRemaining());
         const { error: updateError } = await supabase
           .from("sales")
-          .update({
-            ...salePayload,
-            total_amount: totalAmount,
-            margin: marginAmount,
-            remaining_amount: remainingAmount,
-          })
+          .update(salePayload)
           .eq("id", editingId);
         if (updateError) throw updateError;
-        toast("Sale updated successfully");
       } else {
         const { data: saleData, error: saleError } = await supabase
           .from("sales")
@@ -661,15 +663,6 @@ export default function Sales() {
                   <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     Fabric Items
                   </label>
-                  {!editingId && (
-                    <button
-                      type="button"
-                      onClick={addItem}
-                      className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add item
-                    </button>
-                  )}
                 </div>
 
                 {formData.items.map((item, idx) => (
@@ -874,6 +867,15 @@ export default function Sales() {
                     </div>
                   </div>
                 ))}
+                {!editingId && (
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add item
+                  </button>
+                )}
               </div>
 
               {/* Payment Section */}
