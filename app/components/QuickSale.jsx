@@ -261,6 +261,7 @@ export default function QuickSale() {
                     className="input"
                     placeholder="0"
                     autoFocus
+                    onWheel={(e) => e.target.blur()}
                   />
                 </div>
                 <div>
@@ -275,6 +276,7 @@ export default function QuickSale() {
                     onChange={(e) => setPrice(e.target.value)}
                     className="input"
                     placeholder="₹0"
+                    onWheel={(e) => e.target.blur()}
                   />
                 </div>
               </div>

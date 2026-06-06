@@ -11,17 +11,21 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  Paperclip,
   ScanLine,
   Pencil,
   CircleCheck as CheckCircle,
   Download,
   ChevronDown,
+  History,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validateSale, validatePayment, hasErrors } from "../utils/validators";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import FileUpload from "./FileUpload";
+import { formatCurrency, formatDate } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -89,7 +93,7 @@ export default function Sales() {
       sale_date: new Date().toISOString().split("T")[0],
       payment_type: "cash",
       initial_payment: "",
-      notes: "",
+      invoice_file: null,
     };
   }
   const [formData, setFormData] = useState(makeEmptyForm);
@@ -292,9 +296,26 @@ export default function Sales() {
       return;
     }
     setFormErrors({});
+    setLoading(true); // Assuming a saving state is needed
     try {
       const totalAmount = parseFloat(calculateTotal());
       const initialPayment = parseFloat(formData.initial_payment) || 0;
+
+      let invoice_url = "";
+      if (formData.invoice_file) {
+        const ext = formData.invoice_file.name.split(".").pop();
+        const path = `sales-invoices/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("sales-invoices")
+          .upload(path, formData.invoice_file);
+
+        if (uploadError) throw uploadError;
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("sales-invoices").getPublicUrl(path);
+        invoice_url = publicUrl;
+      }
 
       // Check credit limit for credit/partial sales
       if (formData.customer_id && formData.payment_type !== "cash") {
@@ -329,7 +350,8 @@ export default function Sales() {
             formData.customer_name !== "Walk-in Customer"
               ? ` (Name: ${formData.customer_name})`
               : ""
-          }${formData.notes ? ` | ${formData.notes}` : ""}`,
+          }`,
+          invoice_url,
         };
         const { error: updateError } = await supabase
           .from("sales")
@@ -355,8 +377,9 @@ export default function Sales() {
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
           payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}${formData.notes ? ` | ${formData.notes}` : ""}`,
+          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
           sale_group_id: saleGroupId,
+          invoice_url,
         }));
 
         let saleRows;
@@ -532,7 +555,7 @@ export default function Sales() {
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
       initial_payment: "",
-      notes: "",
+      invoice_file: null,
     });
     setEditingId(sale.id);
     setShowForm(true);
@@ -1149,6 +1172,7 @@ export default function Sales() {
                               updateItem(currentIdx, { meters: e.target.value })
                             }
                             className="input bg-white"
+                            onWheel={(e) => e.target.blur()}
                           />
                         </div>
                         <div>
@@ -1166,6 +1190,7 @@ export default function Sales() {
                               })
                             }
                             className="input bg-white"
+                            onWheel={(e) => e.target.blur()}
                           />
                         </div>
                         {!item.fabric_id && (
@@ -1183,6 +1208,7 @@ export default function Sales() {
                                 })
                               }
                               className="input bg-white"
+                              onWheel={(e) => e.target.blur()}
                             />
                           </div>
                         )}
@@ -1226,6 +1252,8 @@ export default function Sales() {
                           setFormData({
                             ...formData,
                             payment_type: v,
+                            initial_payment:
+                              v === "partial" ? formData.initial_payment : "",
                           })
                         }
                         className={`py-2 rounded-xl text-sm font-medium border transition-all ${
@@ -1239,7 +1267,7 @@ export default function Sales() {
                     ))}
                   </div>
                 </div>
-                {formData.payment_type !== "cash" && (
+                {formData.payment_type === "partial" && (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">
                       Initial Payment
@@ -1256,20 +1284,21 @@ export default function Sales() {
                       }
                       className="input bg-white"
                       placeholder="Amount received now"
+                      onWheel={(e) => e.target.blur()}
                     />
                   </div>
                 )}
               </div>
 
               {/* Date & Notes Section */}
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Details
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                    Details & Documents
                   </span>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                     Sale Date
                   </label>
                   <input
@@ -1278,21 +1307,16 @@ export default function Sales() {
                     onChange={(e) =>
                       setFormData({ ...formData, sale_date: e.target.value })
                     }
-                    className="input bg-white"
+                    className="input bg-white dark:bg-gray-800 dark:text-white dark:border-gray-600"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Additional Notes
-                  </label>
-                  <textarea
-                    value={formData.notes}
-                    onChange={(e) =>
-                      setFormData({ ...formData, notes: e.target.value })
+                  <FileUpload
+                    label="Bill/Invoice"
+                    file={formData.invoice_file}
+                    onFileChange={(f) =>
+                      setFormData({ ...formData, invoice_file: f })
                     }
-                    className="input bg-white"
-                    rows={2}
-                    placeholder="Optional notes..."
                   />
                 </div>
               </div>
@@ -1302,12 +1326,14 @@ export default function Sales() {
                 <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Total Amount:</span>
-                    <span className="font-semibold">₹{calculateTotal()}</span>
+                    <span className="font-semibold">
+                      {formatCurrency(calculateTotal())}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Total Margin:</span>
                     <span className="font-semibold text-accent-600">
-                      ₹{calculateMargin()}
+                      {formatCurrency(calculateMargin())}
                     </span>
                   </div>
                 </div>
@@ -1390,6 +1416,7 @@ export default function Sales() {
                   }
                   className="input"
                   placeholder="0.00"
+                  onWheel={(e) => e.target.blur()}
                 />
               </div>
               <div>
@@ -1605,11 +1632,7 @@ export default function Sales() {
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(group.sale_date).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
+                      {formatDate(group.sale_date)}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600 text-sm">
@@ -1618,7 +1641,13 @@ export default function Sales() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600 text-sm">
-                    {group.items.reduce((sum, item) => sum + item.meters, 0)}m
+                    {group.items
+                      .reduce(
+                        (sum, item) => sum + (parseFloat(item.meters) || 0),
+                        0,
+                      )
+                      .toFixed(2)}
+                    m
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
                     ₹{group.total_amount.toLocaleString("en-IN")}
@@ -1656,7 +1685,7 @@ export default function Sales() {
                         className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
                         title="View payments"
                       >
-                        <CreditCard className="w-4 h-4" />
+                        <History className="w-4 h-4" />
                       </button>
                       {group.remaining_amount > 0 && (
                         <button
@@ -1865,10 +1894,12 @@ export default function Sales() {
                     Total Meters
                   </p>
                   <p className="text-xl font-bold text-gray-900">
-                    {selectedGroupForDetails.items.reduce(
-                      (sum, item) => sum + item.meters,
-                      0,
-                    )}
+                    {selectedGroupForDetails.items
+                      .reduce(
+                        (sum, item) => sum + (parseFloat(item.meters) || 0),
+                        0,
+                      )
+                      .toFixed(2)}
                     m
                   </p>
                 </div>
@@ -1913,7 +1944,7 @@ export default function Sales() {
                 onClick={() => handleViewPayments(selectedGroupForDetails)}
                 className="flex-1 btn btn-secondary"
               >
-                <CreditCard className="w-4 h-4 mr-2" />
+                <History className="w-4 h-4 mr-2" />
                 View Payments
               </button>
               <button
@@ -2076,6 +2107,7 @@ export default function Sales() {
                     className="input bg-white"
                     placeholder="0.00"
                     required
+                    onWheel={(e) => e.target.blur()}
                   />
                 </div>
                 <div>
@@ -2095,6 +2127,7 @@ export default function Sales() {
                     className="input bg-white"
                     placeholder="0.00"
                     required
+                    onWheel={(e) => e.target.blur()}
                   />
                 </div>
               </div>
@@ -2115,6 +2148,7 @@ export default function Sales() {
                   }
                   className="input bg-white"
                   placeholder="0.00"
+                  onWheel={(e) => e.target.blur()}
                 />
               </div>
 

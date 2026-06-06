@@ -11,10 +11,14 @@ import {
   Paperclip,
   FileText,
   ExternalLink,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+
+const PAGE_SIZE = 10;
 
 const CATEGORIES = [
   "Rent",
@@ -46,6 +50,7 @@ export default function Expenses() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterMonth, setFilterMonth] = useState("");
+  const [page, setPage] = useState(1);
   const [formData, setFormData] = useState(emptyForm);
   const [formErrors, setFormErrors] = useState({});
   const [paymentProofFile, setPaymentProofFile] = useState(null);
@@ -56,6 +61,10 @@ export default function Expenses() {
   useEffect(() => {
     fetchExpenses();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterCategory, filterMonth]);
 
   async function fetchExpenses() {
     try {
@@ -188,6 +197,9 @@ export default function Expenses() {
     const matchMonth = !filterMonth || e.expense_date.startsWith(filterMonth);
     return matchSearch && matchCat && matchMonth;
   });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const totalFiltered = filtered.reduce((s, e) => s + (e.amount || 0), 0);
   const totalAll = expenses.reduce((s, e) => s + (e.amount || 0), 0);
@@ -363,6 +375,7 @@ export default function Expenses() {
                     }}
                     className={`input ${formErrors.amount ? "border-error-400" : ""}`}
                     placeholder="₹0.00"
+                    onWheel={(e) => e.target.blur()}
                   />
                   {formErrors.amount && (
                     <p className="text-error-600 text-sm mt-1">
@@ -518,7 +531,7 @@ export default function Expenses() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtered.map((expense) => (
+              {paginated.map((expense) => (
                 <tr
                   key={expense.id}
                   className="hover:bg-gray-50 transition-colors"
@@ -593,6 +606,30 @@ export default function Expenses() {
           </table>
         </div>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-2">
+          <p className="text-sm text-gray-500">
+            {filtered.length} expenses — page {page} of {totalPages}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <ConfirmModal

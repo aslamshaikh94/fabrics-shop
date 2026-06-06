@@ -10,11 +10,15 @@ import {
   Phone,
   MapPin,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { validateSupplier, hasErrors } from "../utils/validators";
 import SupplierLedger from "./SupplierLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+
+const PAGE_SIZE = 9;
 
 export default function Suppliers() {
   const toast = useToast();
@@ -23,6 +27,7 @@ export default function Suppliers() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -36,6 +41,10 @@ export default function Suppliers() {
   useEffect(() => {
     fetchSuppliers();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm]);
 
   async function fetchSuppliers() {
     try {
@@ -114,6 +123,12 @@ export default function Suppliers() {
     (s) =>
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.phone.includes(searchTerm),
+  );
+
+  const totalPages = Math.ceil(filteredSuppliers.length / PAGE_SIZE);
+  const paginated = filteredSuppliers.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
   );
 
   if (loading)
@@ -308,6 +323,30 @@ export default function Suppliers() {
           </div>
         ))}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-2">
+          <p className="text-sm text-gray-500">
+            {filteredSuppliers.length} suppliers — page {page} of {totalPages}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {ledgerSupplier && (
         <SupplierLedger
