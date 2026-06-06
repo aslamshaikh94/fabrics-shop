@@ -422,6 +422,9 @@ export default function Fabrics() {
                 Name
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                Barcode
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Quantity
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
@@ -452,6 +455,11 @@ export default function Fabrics() {
               >
                 <td className="px-4 py-3">
                   <p className="font-medium text-gray-900">{fabric.name}</p>
+                </td>
+                <td className="px-4 py-3">
+                  <p className="text-sm text-gray-600 font-mono">
+                    {fabric.barcode || "—"}
+                  </p>
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-sm text-gray-600">

@@ -5,28 +5,32 @@ export const validateSale = (formData) => {
   if (!formData.customer_id && !formData.customer_name)
     errors.customer = "Customer is required";
 
-  const firstItem = formData.items && formData.items[0];
-  if (
-    !firstItem ||
-    !firstItem.fabric_name ||
-    firstItem.fabric_name.trim() === ""
-  )
-    errors.fabric_name = "Fabric name is required";
-  if (!firstItem || !firstItem.meters || parseFloat(firstItem.meters) <= 0)
-    errors.meters = "Meters must be greater than 0";
-  if (
-    !firstItem ||
-    !firstItem.price_per_meter ||
-    parseFloat(firstItem.price_per_meter) < 0
-  )
-    errors.price_per_meter = "Price must be 0 or greater";
-
-  if (
-    firstItem &&
-    firstItem.cost_price_per_meter &&
-    parseFloat(firstItem.cost_price_per_meter) < 0
-  )
-    errors.cost_price_per_meter = "Cost price must be 0 or greater";
+  // Validate ALL items, not just the first one
+  if (!formData.items || formData.items.length === 0) {
+    errors.items = "At least one item is required";
+  } else {
+    // Check each item
+    for (let i = 0; i < formData.items.length; i++) {
+      const item = formData.items[i];
+      if (!item.fabric_name || item.fabric_name.trim() === "") {
+        errors[`fabric_name_${i}`] = `Item ${i + 1}: Fabric name is required`;
+      }
+      if (!item.meters || parseFloat(item.meters) <= 0) {
+        errors[`meters_${i}`] = `Item ${i + 1}: Meters must be greater than 0`;
+      }
+      if (!item.price_per_meter || parseFloat(item.price_per_meter) < 0) {
+        errors[`price_per_meter_${i}`] =
+          `Item ${i + 1}: Price must be 0 or greater`;
+      }
+      if (
+        item.cost_price_per_meter &&
+        parseFloat(item.cost_price_per_meter) < 0
+      ) {
+        errors[`cost_price_per_meter_${i}`] =
+          `Item ${i + 1}: Cost price must be 0 or greater`;
+      }
+    }
+  }
 
   if (!formData.sale_date) errors.sale_date = "Sale date is required";
   if (!formData.payment_type) errors.payment_type = "Payment type is required";
