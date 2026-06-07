@@ -31,9 +31,9 @@ export default function Dashboard() {
     totalCustomers: 0,
     totalPurchases: 0,
     totalExpenses: 0,
+    inventoryValue: 0,
   });
   const [changes, setChanges] = useState({});
-  const [lowStock, setLowStock] = useState([]);
   const [recentSales, setRecentSales] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -55,7 +55,6 @@ export default function Dashboard() {
         customersRes,
         thisMoSales,
         prevMoSales,
-        lowStockRes,
         recentRes,
         expensesRes,
       ] = await Promise.all([
@@ -63,7 +62,9 @@ export default function Dashboard() {
         supabase
           .from("purchases")
           .select("total_amount, paid_amount, remaining_amount"),
-        supabase.from("fabrics").select("id", { count: "exact", head: true }),
+        supabase
+          .from("fabrics")
+          .select("available_meters, purchase_price_per_meter"),
         supabase.from("customers").select("id", { count: "exact", head: true }),
         supabase
           .from("sales")
@@ -75,10 +76,6 @@ export default function Dashboard() {
           .gte("sale_date", `${prevMonth}-01`)
           .lt("sale_date", `${thisMonth}-01`),
         supabase
-          .from("fabrics")
-          .select("name, available_meters")
-          .lt("available_meters", 10),
-        supabase
           .from("sales")
           .select(
             "id, sale_date, total_amount, notes, customer:customers(name)",
@@ -87,6 +84,12 @@ export default function Dashboard() {
           .limit(6),
         supabase.from("expenses").select("amount"),
       ]);
+
+      const invValue =
+        fabricsRes.data?.reduce(
+          (s, f) => s + (f.available_meters * f.purchase_price_per_meter || 0),
+          0,
+        ) || 0;
 
       const currSales =
         thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
@@ -110,7 +113,8 @@ export default function Dashboard() {
           ) || 0,
         paidPurchasePayments:
           purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
-        totalFabrics: fabricsRes.count || 0,
+        totalFabrics: fabricsRes.data?.length || 0,
+        inventoryValue: invValue,
         totalCustomers: customersRes.count || 0,
         totalPurchases:
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
@@ -122,7 +126,6 @@ export default function Dashboard() {
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
       });
-      setLowStock(lowStockRes.data || []);
       setRecentSales(recentRes.data || []);
     } catch (err) {
       console.error("Error fetching stats:", err);
@@ -150,22 +153,6 @@ export default function Dashboard() {
           {monthName} {now.getFullYear()} overview
         </p>
       </div>
-
-      {lowStock.length > 0 && (
-        <div className="bg-warning-50 border border-warning-200 rounded-xl p-4 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-warning-600 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-semibold text-warning-800 text-sm">
-              Low Stock Alert
-            </p>
-            <p className="text-sm text-warning-700 mt-0.5">
-              {lowStock
-                .map((f) => `${f.name} (${f.available_meters}m)`)
-                .join(" · ")}
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* This month stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -235,6 +222,40 @@ export default function Dashboard() {
             </div>
           );
         })}
+      </div>
+
+      {/* Inventory Value breakdown */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Current Stock Value (at Cost)
+          </p>
+          <div className="bg-primary-100 p-1.5 rounded-lg">
+            <Package className="w-4 h-4 text-primary-600" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
+          <div>
+            <p className="text-xs text-gray-400">Base Cost</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">
+              ₹{stats.inventoryValue.toLocaleString("en-IN")}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">IGST (5%)</p>
+            <p className="text-lg font-bold text-gray-500 mt-0.5">
+              + ₹{(stats.inventoryValue * 0.05).toLocaleString("en-IN")}
+            </p>
+          </div>
+          <div className="col-span-2 sm:col-span-1 pt-3 sm:pt-0 border-t sm:border-0 border-gray-100">
+            <p className="text-xs text-primary-600 font-medium">
+              Total Value with GST
+            </p>
+            <p className="text-2xl font-black text-primary-700 mt-0.5">
+              ₹{(stats.inventoryValue * 1.05).toLocaleString("en-IN")}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Supplier payment breakdown */}

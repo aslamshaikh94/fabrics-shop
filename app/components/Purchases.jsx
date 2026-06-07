@@ -444,6 +444,7 @@ export default function Purchases() {
                   }}
                   className={`input ${formErrors.total_amount ? "border-error-400" : ""}`}
                   placeholder="₹0.00"
+                  onWheel={(e) => e.target.blur()}
                 />
                 {formErrors.total_amount && (
                   <p className="text-error-600 text-sm mt-1">
@@ -594,6 +595,7 @@ export default function Purchases() {
                   }}
                   className={`input ${paymentErrors.amount ? "border-error-400" : ""}`}
                   placeholder="0.00"
+                  onWheel={(e) => e.target.blur()}
                 />
                 {paymentErrors.amount && (
                   <p className="text-error-600 text-sm mt-1">

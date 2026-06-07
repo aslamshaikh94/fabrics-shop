@@ -10,10 +10,14 @@ import {
   Package,
   AlertTriangle,
   ScanLine,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+
+const PAGE_SIZE = 10;
 
 const emptyRow = {
   name: "",
@@ -31,6 +35,8 @@ export default function Fabrics() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterSupplier, setFilterSupplier] = useState("all");
+  const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const toast = useToast();
   const [formData, setFormData] = useState(emptyForm);
@@ -41,6 +47,10 @@ export default function Fabrics() {
     fetchFabrics();
     fetchSuppliers();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterSupplier]);
 
   async function fetchFabrics() {
     try {
@@ -160,9 +170,17 @@ export default function Fabrics() {
     setShowForm(true);
   }
 
-  const filtered = fabrics.filter((f) =>
-    f.name.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+  const filtered = fabrics.filter((f) => {
+    const matchesSearch = f.name
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase());
+    const matchesSupplier =
+      filterSupplier === "all" || f.supplier_id === filterSupplier;
+    return matchesSearch && matchesSupplier;
+  });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const lowStock = fabrics.filter((f) => f.available_meters < 10);
 
@@ -211,15 +229,29 @@ export default function Fabrics() {
         </div>
       )}
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search fabrics..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input pl-10"
-        />
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search fabrics..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="input pl-10"
+          />
+        </div>
+        <select
+          value={filterSupplier}
+          onChange={(e) => setFilterSupplier(e.target.value)}
+          className="input w-full sm:w-48"
+        >
+          <option value="all">All Suppliers</option>
+          {suppliers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {showForm && (
@@ -262,17 +294,6 @@ export default function Fabrics() {
                   <label className="text-sm font-medium text-gray-700">
                     Fabric Items
                   </label>
-                  {!editingId && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRows((prev) => [...prev, { ...emptyRow }])
-                      }
-                      className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add row
-                    </button>
-                  )}
                 </div>
 
                 {rows.map((row, idx) => (
@@ -339,6 +360,7 @@ export default function Fabrics() {
                             updateRow(idx, "total_meters", e.target.value)
                           }
                           placeholder="0"
+                          onWheel={(e) => e.target.blur()}
                         />
                       </div>
                       <div>
@@ -358,6 +380,7 @@ export default function Fabrics() {
                             )
                           }
                           placeholder="0"
+                          onWheel={(e) => e.target.blur()}
                         />
                       </div>
                     </div>
@@ -385,6 +408,17 @@ export default function Fabrics() {
                     </div>
                   </div>
                 ))}
+                {!editingId && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRows((prev) => [...prev, { ...emptyRow }])
+                    }
+                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add row
+                  </button>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -422,6 +456,9 @@ export default function Fabrics() {
                 Name
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                Barcode
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Quantity
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
@@ -445,13 +482,18 @@ export default function Fabrics() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((fabric) => (
+            {paginated.map((fabric) => (
               <tr
                 key={fabric.id}
                 className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
               >
                 <td className="px-4 py-3">
                   <p className="font-medium text-gray-900">{fabric.name}</p>
+                </td>
+                <td className="px-4 py-3">
+                  <p className="text-sm text-gray-600 font-mono">
+                    {fabric.barcode || "—"}
+                  </p>
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-sm text-gray-600">
@@ -518,6 +560,30 @@ export default function Fabrics() {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-2">
+          <p className="text-sm text-gray-500">
+            {filtered.length} fabrics — page {page} of {totalPages}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <ConfirmModal

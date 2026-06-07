@@ -11,19 +11,32 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  Paperclip,
   ScanLine,
   Pencil,
-  CheckCircle,
+  CircleCheck as CheckCircle,
   Download,
   ChevronDown,
+  History,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validateSale, validatePayment, hasErrors } from "../utils/validators";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import FileUpload from "./FileUpload";
+import { formatCurrency, formatDate } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
+
+// Generate a UUID for grouping sales items from the same transaction
+function generateUUID() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 export default function Sales() {
   const toast = useToast();
@@ -50,24 +63,40 @@ export default function Sales() {
   const [fabricSearch, setFabricSearch] = useState("");
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
-  const emptyForm = {
-    customer_id: "",
-    customer_name: "",
-    items: [
-      {
-        fabric_id: "",
-        fabric_name: "",
-        meters: "",
-        price_per_meter: "",
-        cost_price_per_meter: "",
-      },
-    ],
-    sale_date: new Date().toISOString().split("T")[0],
-    payment_type: "cash",
-    initial_payment: "",
-    notes: "",
-  };
-  const [formData, setFormData] = useState(emptyForm);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
+  const [showAddItemForm, setShowAddItemForm] = useState(false);
+  const [newItemForm, setNewItemForm] = useState({
+    fabric_id: "",
+    fabric_name: "",
+    meters: "",
+    price_per_meter: "",
+    cost_price_per_meter: "",
+  });
+  const [activeNewItemFabricDropdown, setActiveNewItemFabricDropdown] =
+    useState(false);
+  const [newItemFabricSearch, setNewItemFabricSearch] = useState("");
+  const [itemJustAdded, setItemJustAdded] = useState(false);
+  function makeEmptyForm() {
+    return {
+      customer_id: null,
+      customer_name: "Walk-in Customer",
+      items: [
+        {
+          fabric_id: "",
+          fabric_name: "",
+          meters: "",
+          price_per_meter: "",
+          cost_price_per_meter: "",
+        },
+      ],
+      sale_date: new Date().toISOString().split("T")[0],
+      payment_type: "cash",
+      initial_payment: "",
+      invoice_file: null,
+    };
+  }
+  const [formData, setFormData] = useState(makeEmptyForm);
   const [paymentData, setPaymentData] = useState({
     amount: "",
     payment_date: new Date().toISOString().split("T")[0],
@@ -91,6 +120,10 @@ export default function Sales() {
 
       if (!event.target.closest(".fabric-dropdown-container")) {
         setActiveFabricDropdown(null);
+      }
+
+      if (!event.target.closest(".new-item-fabric-dropdown-container")) {
+        setActiveNewItemFabricDropdown(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -165,14 +198,32 @@ export default function Sales() {
       .eq("barcode", code)
       .single();
     if (data) {
-      updateItem(scanningItemIdx, {
-        fabric_id: data.id,
-        fabric_name: data.name,
-        cost_price_per_meter: data.purchase_price_per_meter.toString(),
-        price_per_meter: (data.selling_price_per_meter || "").toString(),
-      });
+      if (scanningItemIdx === "new") {
+        setNewItemForm((prev) => ({
+          ...prev,
+          fabric_id: data.id,
+          fabric_name: data.name,
+          cost_price_per_meter: data.purchase_price_per_meter.toString(),
+          price_per_meter: (data.selling_price_per_meter || "").toString(),
+        }));
+      } else {
+        updateItem(scanningItemIdx, {
+          fabric_id: data.id,
+          fabric_name: data.name,
+          cost_price_per_meter: data.purchase_price_per_meter.toString(),
+          price_per_meter: (data.selling_price_per_meter || "").toString(),
+        });
+      }
     } else {
-      updateItem(scanningItemIdx, { fabric_name: code, fabric_id: "" });
+      if (scanningItemIdx === "new") {
+        setNewItemForm((prev) => ({
+          ...prev,
+          fabric_name: code,
+          fabric_id: "",
+        }));
+      } else {
+        updateItem(scanningItemIdx, { fabric_name: code, fabric_id: "" });
+      }
     }
     setScanningItemIdx(null);
   }
@@ -187,6 +238,7 @@ export default function Sales() {
   }
 
   function addItem() {
+    setItemJustAdded(true);
     setFormData((prev) => ({
       ...prev,
       items: [
@@ -200,6 +252,8 @@ export default function Sales() {
         },
       ],
     }));
+    // Reset the flag after a short delay to allow re-render
+    setTimeout(() => setItemJustAdded(false), 100);
   }
 
   function calculateTotal() {
@@ -242,14 +296,31 @@ export default function Sales() {
       return;
     }
     setFormErrors({});
+    setLoading(true); // Assuming a saving state is needed
     try {
+      const totalAmount = parseFloat(calculateTotal());
       const initialPayment = parseFloat(formData.initial_payment) || 0;
+
+      let invoice_url = "";
+      if (formData.invoice_file) {
+        const ext = formData.invoice_file.name.split(".").pop();
+        const path = `sales-invoices/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("sales-invoices")
+          .upload(path, formData.invoice_file);
+
+        if (uploadError) throw uploadError;
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("sales-invoices").getPublicUrl(path);
+        invoice_url = publicUrl;
+      }
 
       // Check credit limit for credit/partial sales
       if (formData.customer_id && formData.payment_type !== "cash") {
         const customer = customers.find((c) => c.id === formData.customer_id);
         if (customer?.credit_limit > 0) {
-          const totalAmount = parseFloat(calculateTotal());
           const newRemaining = totalAmount - initialPayment;
           const currentDue = customerDues?.[customer.id] || 0;
           if (currentDue + newRemaining > customer.credit_limit) {
@@ -262,61 +333,140 @@ export default function Sales() {
         }
       }
 
-      const salePayload = {
-        customer_id: formData.customer_id || null,
-        fabric_id: formData.fabric_id || null,
-        meters,
-        price_per_meter: pricePerMeter,
-        cost_price_per_meter: costPricePerMeter,
-        sale_date: formData.sale_date,
-        payment_type: formData.payment_type,
-        status: formData.payment_type === "cash" ? "completed" : "partial",
-        notes: `Fabric: ${fabricInfo}${formData.notes ? ` | ${formData.notes}` : ""}`,
-      };
-
       if (editingId) {
-        const totalAmount = parseFloat(calculateTotal());
-        const marginAmount = parseFloat(calculateMargin());
-        const remainingAmount = parseFloat(calculateRemaining());
+        // Editing only supports single-item (the form shows one item when editing)
+        const item = formData.items[0] || {};
+        const salePayload = {
+          customer_id: formData.customer_id || null,
+          fabric_id: item.fabric_id || null,
+          meters: parseFloat(item.meters) || 0,
+          price_per_meter: parseFloat(item.price_per_meter) || 0,
+          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+          sale_date: formData.sale_date,
+          payment_type: formData.payment_type,
+          notes: `Fabric: ${item.fabric_name}${
+            !formData.customer_id &&
+            formData.customer_name &&
+            formData.customer_name !== "Walk-in Customer"
+              ? ` (Name: ${formData.customer_name})`
+              : ""
+          }`,
+          invoice_url,
+        };
         const { error: updateError } = await supabase
           .from("sales")
-          .update({
-            ...salePayload,
-            total_amount: totalAmount,
-            margin: marginAmount,
-            remaining_amount: remainingAmount,
-          })
+          .update(salePayload)
           .eq("id", editingId);
         if (updateError) throw updateError;
-        toast("Sale updated successfully");
       } else {
-        const { data: saleData, error: saleError } = await supabase
+        // Generate a unique group ID for this sale transaction
+        const saleGroupId = generateUUID();
+        const walkInNameInfo =
+          !formData.customer_id &&
+          formData.customer_name &&
+          formData.customer_name !== "Walk-in Customer"
+            ? ` (Name: ${formData.customer_name})`
+            : "";
+        // Insert one sale row per item — each row gets its own meters/price/margin
+        const itemNotes = formData.items.map((it) => it.fabric_name).join(", ");
+        const salePayloads = formData.items.map((item) => ({
+          customer_id: formData.customer_id || null,
+          fabric_id: item.fabric_id || null,
+          meters: parseFloat(item.meters) || 0,
+          price_per_meter: parseFloat(item.price_per_meter) || 0,
+          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+          sale_date: formData.sale_date,
+          payment_type: formData.payment_type,
+          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
+          sale_group_id: saleGroupId,
+          invoice_url,
+        }));
+
+        let saleRows;
+        let saleError;
+
+        // Try inserting with sale_group_id first
+        const { data: data1, error: error1 } = await supabase
           .from("sales")
-          .insert([salePayload])
-          .select()
-          .single();
+          .insert(salePayloads)
+          .select();
+
+        // If it fails due to unknown column, retry without sale_group_id
+        if (error1 && error1.message?.includes("column")) {
+          const payloadsWithoutGroup = salePayloads.map(
+            ({ sale_group_id, ...rest }) => rest,
+          );
+          const { data: data2, error: error2 } = await supabase
+            .from("sales")
+            .insert(payloadsWithoutGroup)
+            .select();
+          saleRows = data2;
+          saleError = error2;
+        } else {
+          saleRows = data1;
+          saleError = error1;
+        }
+
         if (saleError) throw saleError;
-        if (initialPayment > 0 && saleData) {
-          await supabase.from("sale_payments").insert([
-            {
-              sale_id: saleData.id,
-              amount: initialPayment,
+
+        // Record payments based on payment type
+        if (saleRows && saleRows.length > 0) {
+          if (formData.payment_type === "cash") {
+            // Full cash: pay each item in full
+            const paymentInserts = saleRows.map((row) => ({
+              sale_id: row.id,
+              amount: row.meters * row.price_per_meter,
               payment_date: formData.sale_date,
               payment_method: "cash",
-            },
-          ]);
+            }));
+            const { error: payErr } = await supabase
+              .from("sale_payments")
+              .insert(paymentInserts);
+            if (payErr) throw payErr;
+          } else if (initialPayment > 0) {
+            // Partial / credit with initial payment: distribute across items
+            let remaining = initialPayment;
+            const paymentInserts = [];
+            for (const row of saleRows) {
+              const itemTotal = row.meters * row.price_per_meter;
+              const pay = Math.min(remaining, itemTotal);
+              if (pay > 0) {
+                paymentInserts.push({
+                  sale_id: row.id,
+                  amount: pay,
+                  payment_date: formData.sale_date,
+                  payment_method: "cash",
+                });
+                remaining -= pay;
+              }
+              if (remaining <= 0) break;
+            }
+            if (paymentInserts.length > 0) {
+              const { error: payErr } = await supabase
+                .from("sale_payments")
+                .insert(paymentInserts);
+              if (payErr) throw payErr;
+            }
+          }
+          // Full credit with no initial payment: no payments to insert
         }
       }
+
       setShowForm(false);
       setEditingId(null);
-      setFormData(emptyForm);
+      setFormData(makeEmptyForm());
       fetchSales();
       toast(
         editingId ? "Sale updated successfully" : "Sale recorded successfully",
       );
     } catch (error) {
       console.error("Error saving sale:", error);
-      toast("Failed to save sale", "error");
+      console.error("Error details:", error?.message || JSON.stringify(error));
+      toast(
+        error?.message ||
+          "Failed to save sale. Please check the form and try again.",
+        "error",
+      );
     }
   }
 
@@ -330,18 +480,33 @@ export default function Sales() {
       return;
     }
     setPaymentErrors({});
+
     try {
-      const { error } = await supabase.from("sale_payments").insert([
-        {
-          sale_id: selectedSale.id,
-          amount: parseFloat(paymentData.amount),
+      // Distribute payment across items in the group
+      let remainingToPay = parseFloat(paymentData.amount);
+      const paymentInserts = [];
+
+      for (const item of selectedSale.items || []) {
+        if (remainingToPay <= 0) break;
+        if (item.remaining_amount <= 0) continue;
+
+        const pay = Math.min(remainingToPay, item.remaining_amount);
+        paymentInserts.push({
+          sale_id: item.id,
+          amount: pay,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
           reference_number: paymentData.reference_number,
           notes: paymentData.notes,
-        },
-      ]);
+        });
+        remainingToPay -= pay;
+      }
+
+      const { error } = await supabase
+        .from("sale_payments")
+        .insert(paymentInserts);
       if (error) throw error;
+
       setShowPaymentForm(false);
       setPaymentData({
         amount: "",
@@ -351,7 +516,7 @@ export default function Sales() {
         notes: "",
       });
       fetchSales();
-      fetchPayments(selectedSale.id);
+      fetchPayments(selectedSale.items.map((i) => i.id));
       toast("Payment recorded");
     } catch (error) {
       console.error("Error saving payment:", error);
@@ -359,12 +524,12 @@ export default function Sales() {
     }
   }
 
-  async function fetchPayments(saleId) {
+  async function fetchPayments(saleIds) {
     try {
       const { data } = await supabase
         .from("sale_payments")
         .select("*")
-        .eq("sale_id", saleId)
+        .in("sale_id", Array.isArray(saleIds) ? saleIds : [saleIds])
         .order("payment_date", { ascending: false });
       setPayments(data || []);
     } catch (error) {
@@ -390,32 +555,97 @@ export default function Sales() {
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
       initial_payment: "",
-      notes: "",
+      invoice_file: null,
     });
     setEditingId(sale.id);
     setShowForm(true);
   }
 
-  function handleViewPayments(sale) {
-    setSelectedSale(sale);
-    fetchPayments(sale.id);
+  function handleViewPayments(group) {
+    setSelectedSale(group);
+    fetchPayments(group.items.map((i) => i.id));
   }
-  function handleAddPayment(sale) {
-    setSelectedSale(sale);
+  function handleAddPayment(group) {
+    setSelectedSale(group);
     setShowPaymentForm(true);
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(deleteInfo) {
     try {
-      const { error } = await supabase.from("sales").delete().eq("id", id);
-      if (error) throw error;
-      toast("Sale deleted");
+      if (deleteInfo.isGroup) {
+        // Delete all sales in the group
+        const { error: deletePaymentsError } = await supabase
+          .from("sale_payments")
+          .delete()
+          .in("sale_id", deleteInfo.saleIds);
+        if (deletePaymentsError) throw deletePaymentsError;
+
+        const { error } = await supabase
+          .from("sales")
+          .delete()
+          .in("id", deleteInfo.saleIds);
+        if (error) throw error;
+        toast("Sales group deleted");
+      } else {
+        // Single sale deletion
+        const { error } = await supabase
+          .from("sales")
+          .delete()
+          .eq("id", deleteInfo);
+        if (error) throw error;
+        toast("Sale deleted");
+      }
       fetchSales();
     } catch (err) {
       console.error("Error deleting sale:", err);
       toast("Failed to delete sale", "error");
     } finally {
       setConfirmDelete(null);
+    }
+  }
+
+  async function handleAddItemToSale(e) {
+    e.preventDefault();
+    if (
+      !selectedGroupForDetails ||
+      !newItemForm.meters ||
+      !newItemForm.price_per_meter ||
+      !newItemForm.fabric_name
+    ) {
+      toast("Please fill in all required fields", "error");
+      return;
+    }
+
+    try {
+      const salePayload = {
+        customer_id: selectedGroupForDetails.customer_id || null,
+        fabric_id: newItemForm.fabric_id || null,
+        meters: parseFloat(newItemForm.meters) || 0,
+        price_per_meter: parseFloat(newItemForm.price_per_meter) || 0,
+        cost_price_per_meter: parseFloat(newItemForm.cost_price_per_meter) || 0,
+        sale_date: selectedGroupForDetails.sale_date,
+        payment_type: selectedGroupForDetails.payment_type,
+        notes: `Fabric: ${newItemForm.fabric_name}`,
+      };
+
+      const { error } = await supabase.from("sales").insert([salePayload]);
+      if (error) throw error;
+
+      setShowAddItemForm(false);
+      setNewItemForm({
+        fabric_id: "",
+        fabric_name: "",
+        meters: "",
+        price_per_meter: "",
+        cost_price_per_meter: "",
+      });
+      setActiveNewItemFabricDropdown(false);
+      setNewItemFabricSearch("");
+      fetchSales();
+      toast("Item added successfully");
+    } catch (error) {
+      console.error("Error adding item:", error);
+      toast("Failed to add item", "error");
     }
   }
 
@@ -431,8 +661,39 @@ export default function Sales() {
     return matchesSearch && matchesType && matchesFrom && matchesTo;
   });
 
-  const totalPages = Math.ceil(filteredSales.length / PAGE_SIZE);
-  const paginated = filteredSales.slice(
+  // Group sales by sale_group_id (each separate "New Sale" gets its own group)
+  const groupedSales = filteredSales.reduce((acc, sale) => {
+    // Use sale_group_id if available, otherwise use individual id (for legacy data without sale_group_id)
+    const key = sale.sale_group_id || sale.id;
+    if (!acc[key]) {
+      acc[key] = {
+        id: key,
+        customer_id: sale.customer_id,
+        customer: sale.customer,
+        sale_date: sale.sale_date,
+        payment_type: sale.payment_type,
+        items: [],
+        total_amount: 0,
+        margin: 0,
+        remaining_amount: 0,
+        paid_amount: 0,
+        firstSaleId: sale.id,
+      };
+    }
+    acc[key].items.push(sale);
+    acc[key].total_amount += sale.total_amount;
+    acc[key].margin += sale.margin;
+    acc[key].remaining_amount += sale.remaining_amount;
+    acc[key].paid_amount += sale.paid_amount;
+    return acc;
+  }, {});
+
+  const groupedArray = Object.values(groupedSales).sort(
+    (a, b) => new Date(b.sale_date) - new Date(a.sale_date),
+  );
+
+  const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
+  const paginated = groupedArray.slice(
     (page - 1) * PAGE_SIZE,
     page * PAGE_SIZE,
   );
@@ -489,7 +750,7 @@ export default function Sales() {
           <button
             onClick={() => {
               setEditingId(null);
-              setFormData(emptyForm);
+              setFormData(makeEmptyForm());
               setShowForm(true);
             }}
             className="btn btn-primary"
@@ -588,7 +849,7 @@ export default function Sales() {
                         setShowCustomerDropdown(true);
                       }}
                       className="input bg-white pr-10"
-                      placeholder="Type to search or leave blank for Walk-in"
+                      placeholder="Type to search or select 'Walk-in Customer'"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       {formData.customer_id && (
@@ -615,6 +876,21 @@ export default function Sales() {
 
                   {showCustomerDropdown && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            customer_id: null,
+                            customer_name: "Walk-in Customer",
+                          });
+                          setCustomerSearch("Walk-in Customer");
+                          setShowCustomerDropdown(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${!formData.customer_id && formData.customer_name === "Walk-in Customer" ? "bg-primary-50 text-primary-700 font-medium" : ""}`}
+                      >
+                        Walk-in Customer
+                      </button>
                       {customers
                         .filter((c) =>
                           c.name
@@ -653,35 +929,75 @@ export default function Sales() {
                     </div>
                   )}
                 </div>
+                {!formData.customer_id && (
+                  <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Walk-in Customer Name
+                    </label>
+                    <input
+                      type="text"
+                      value={
+                        formData.customer_name === "Walk-in Customer"
+                          ? ""
+                          : formData.customer_name
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData({
+                          ...formData,
+                          customer_name: val || "Walk-in Customer",
+                        });
+                        setCustomerSearch(val);
+                      }}
+                      className="input bg-white"
+                      placeholder="Type specific name (e.g. John Doe)"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Fabric Details Section */}
               <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wide">
                     Fabric Items
                   </label>
-                  {!editingId && (
-                    <button
-                      type="button"
-                      onClick={addItem}
-                      className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add item
-                    </button>
+                  {formData.items.length > 1 && !editingId && (
+                    <span className="text-xs font-medium text-white bg-accent-500 px-2.5 py-1.5 rounded-full">
+                      {formData.items.length - 1} added
+                    </span>
                   )}
                 </div>
 
-                {formData.items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50 fabric-dropdown-container"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">
-                        Item {idx + 1}
-                      </span>
-                      {formData.items.length > 1 && (
+                {/* Display Added Items List (all except the last one) */}
+                {formData.items.length > 1 && !editingId && (
+                  <div className="space-y-2 mb-3 pb-3 border-b border-gray-200">
+                    {formData.items.slice(0, -1).map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-center justify-between"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 rounded-full bg-green-600" />
+                            <p className="font-semibold text-gray-900">
+                              {item.fabric_name || `Item ${idx + 1}`}
+                            </p>
+                            <span className="text-xs text-gray-700 font-medium">
+                              {item.meters}m @ ₹{item.price_per_meter}/m
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-700 font-medium">
+                            Total: ₹
+                            {(
+                              parseFloat(item.meters) *
+                              parseFloat(item.price_per_meter)
+                            ).toLocaleString("en-IN", {
+                              maximumFractionDigits: 2,
+                            })}
+                            {item.fabric_id && " • Inventory linked"}
+                          </p>
+                        </div>
                         <button
                           type="button"
                           onClick={() =>
@@ -690,190 +1006,226 @@ export default function Sales() {
                               items: prev.items.filter((_, i) => i !== idx),
                             }))
                           }
-                          className="text-gray-400 hover:text-red-500"
+                          className="ml-2 p-2 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
+                          title="Remove item"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <X className="w-4 h-4" />
                         </button>
-                      )}
-                    </div>
-                    <div className="relative">
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        Search or Select Fabric *
-                      </label>
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <input
-                            type="text"
-                            value={
-                              activeFabricDropdown === idx
-                                ? fabricSearch
-                                : item.fabric_name || ""
-                            }
-                            onChange={(e) => {
-                              setFabricSearch(e.target.value);
-                              updateItem(idx, {
-                                fabric_id: "",
-                                fabric_name: e.target.value,
-                              });
-                              setActiveFabricDropdown(idx);
-                            }}
-                            onFocus={() => {
-                              setFabricSearch(item.fabric_name || "");
-                              setActiveFabricDropdown(idx);
-                            }}
-                            className="input bg-white pr-10"
-                            placeholder="Search inventory or type name"
-                            required
-                          />
-                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                            {item.fabric_id && (
-                              <div
-                                className="w-2 h-2 rounded-full bg-accent-500"
-                                title="Linked to inventory"
-                              />
-                            )}
-                            <ChevronDown
-                              className={`w-4 h-4 text-gray-400 transition-transform ${activeFabricDropdown === idx ? "rotate-180" : ""}`}
-                            />
-                          </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                          {activeFabricDropdown === idx && (
-                            <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-                              {fabrics
-                                .filter((f) =>
+                {/* Current Item Being Edited Form */}
+                {(() => {
+                  const currentIdx = formData.items.length - 1;
+                  const item = formData.items[currentIdx];
+                  return (
+                    <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-white fabric-dropdown-container">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-gray-900 uppercase bg-gray-100 px-2 py-1 rounded">
+                          {editingId
+                            ? `Edit Sale`
+                            : `New Item ${formData.items.length}`}
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <label className="block text-xs font-bold text-gray-900 mb-1">
+                          Search or Select Fabric *
+                        </label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              value={
+                                activeFabricDropdown === currentIdx
+                                  ? fabricSearch
+                                  : item.fabric_name || ""
+                              }
+                              onChange={(e) => {
+                                setFabricSearch(e.target.value);
+                                updateItem(currentIdx, {
+                                  fabric_id: "",
+                                  fabric_name: e.target.value,
+                                });
+                                setActiveFabricDropdown(currentIdx);
+                              }}
+                              onFocus={() => {
+                                // Only open dropdown on actual user focus, not on auto-focus from re-render
+                                if (!itemJustAdded) {
+                                  setFabricSearch(item.fabric_name || "");
+                                  setActiveFabricDropdown(currentIdx);
+                                }
+                              }}
+                              className="input bg-white pr-10"
+                              placeholder="Search inventory or type name"
+                              required
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                              {item.fabric_id && (
+                                <div
+                                  className="w-2 h-2 rounded-full bg-accent-500"
+                                  title="Linked to inventory"
+                                />
+                              )}
+                              <ChevronDown
+                                className={`w-4 h-4 text-gray-600 transition-transform ${activeFabricDropdown === currentIdx ? "rotate-180" : ""}`}
+                              />
+                            </div>
+
+                            {activeFabricDropdown === currentIdx && (
+                              <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                                {fabrics
+                                  .filter((f) =>
+                                    f.name
+                                      .toLowerCase()
+                                      .includes(fabricSearch.toLowerCase()),
+                                  )
+                                  .map((f) => (
+                                    <button
+                                      key={f.id}
+                                      type="button"
+                                      onClick={() => {
+                                        updateItem(currentIdx, {
+                                          fabric_id: f.id,
+                                          fabric_name: f.name,
+                                          cost_price_per_meter:
+                                            f.purchase_price_per_meter.toString(),
+                                          price_per_meter: (
+                                            f.selling_price_per_meter || ""
+                                          ).toString(),
+                                        });
+                                        setActiveFabricDropdown(null);
+                                      }}
+                                      className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                                    >
+                                      <div className="flex justify-between items-center">
+                                        <span>{f.name}</span>
+                                        <span className="text-[10px] text-gray-400">
+                                          {f.available_meters}m
+                                        </span>
+                                      </div>
+                                    </button>
+                                  ))}
+                                {fabrics.filter((f) =>
                                   f.name
                                     .toLowerCase()
                                     .includes(fabricSearch.toLowerCase()),
-                                )
-                                .map((f) => (
-                                  <button
-                                    key={f.id}
-                                    type="button"
-                                    onClick={() => {
-                                      updateItem(idx, {
-                                        fabric_id: f.id,
-                                        fabric_name: f.name,
-                                        cost_price_per_meter:
-                                          f.purchase_price_per_meter.toString(),
-                                        price_per_meter: (
-                                          f.selling_price_per_meter || ""
-                                        ).toString(),
-                                      });
-                                      setActiveFabricDropdown(null);
-                                    }}
-                                    className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
-                                  >
-                                    <div className="flex justify-between items-center">
-                                      <span>{f.name}</span>
-                                      <span className="text-[10px] text-gray-400">
-                                        {f.available_meters}m
-                                      </span>
-                                    </div>
-                                  </button>
-                                ))}
-                              {fabrics.filter((f) =>
-                                f.name
-                                  .toLowerCase()
-                                  .includes(fabricSearch.toLowerCase()),
-                              ).length === 0 && (
-                                <div className="px-3 py-2.5 text-xs text-gray-400 italic">
-                                  No matching fabrics found
-                                </div>
-                              )}
-                            </div>
-                          )}
+                                ).length === 0 && (
+                                  <div className="px-3 py-2.5 text-xs text-gray-400 italic">
+                                    No matching fabrics found
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScanningItemIdx(currentIdx);
+                              setShowScanner(true);
+                            }}
+                            className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
+                          >
+                            <ScanLine className="w-4 h-4" />
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScanningItemIdx(idx);
-                            setShowScanner(true);
-                          }}
-                          className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
-                        >
-                          <ScanLine className="w-4 h-4" />
-                        </button>
                       </div>
-                    </div>
 
-                    {item.fabric_id && (
-                      <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 text-accent-500" />
-                          <div>
+                      {item.fabric_id && (
+                        <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-accent-500" />
+                            <div>
+                              <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
+                                Linked Inventory
+                              </p>
+                              <p className="text-sm font-semibold text-primary-900">
+                                {item.fabric_name}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
                             <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                              Linked Inventory
+                              Cost
                             </p>
                             <p className="text-sm font-semibold text-primary-900">
-                              {item.fabric_name}
+                              ₹{item.cost_price_per_meter}/m
                             </p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                            Cost
-                          </p>
-                          <p className="text-sm font-semibold text-primary-900">
-                            ₹{item.cost_price_per_meter}/m
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    <div
-                      className={`grid ${item.fabric_id ? "grid-cols-2" : "grid-cols-3"} gap-2`}
-                    >
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Meters *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          min="0.01"
-                          value={item.meters}
-                          onChange={(e) =>
-                            updateItem(idx, { meters: e.target.value })
-                          }
-                          className="input bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Price ₹/m *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          value={item.price_per_meter}
-                          onChange={(e) =>
-                            updateItem(idx, { price_per_meter: e.target.value })
-                          }
-                          className="input bg-white"
-                        />
-                      </div>
-                      {!item.fabric_id && (
+                      )}
+                      <div
+                        className={`grid ${item.fabric_id ? "grid-cols-2" : "grid-cols-3"} gap-2`}
+                      >
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">
-                            Cost ₹/m
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Meters *
                           </label>
                           <input
                             type="number"
                             step="0.01"
-                            value={item.cost_price_per_meter}
+                            required
+                            min="0.01"
+                            value={item.meters}
                             onChange={(e) =>
-                              updateItem(idx, {
-                                cost_price_per_meter: e.target.value,
+                              updateItem(currentIdx, { meters: e.target.value })
+                            }
+                            className="input bg-white"
+                            onWheel={(e) => e.target.blur()}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Price ₹/m *
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            required
+                            value={item.price_per_meter}
+                            onChange={(e) =>
+                              updateItem(currentIdx, {
+                                price_per_meter: e.target.value,
                               })
                             }
                             className="input bg-white"
+                            onWheel={(e) => e.target.blur()}
                           />
                         </div>
-                      )}
+                        {!item.fabric_id && (
+                          <div>
+                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                              Cost ₹/m
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={item.cost_price_per_meter}
+                              onChange={(e) =>
+                                updateItem(currentIdx, {
+                                  cost_price_per_meter: e.target.value,
+                                })
+                              }
+                              className="input bg-white"
+                              onWheel={(e) => e.target.blur()}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })()}
+
+                {!editingId && (
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="w-full btn btn-primary flex items-center justify-center gap-2 text-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Add Item
+                  </button>
+                )}
               </div>
 
               {/* Payment Section */}
@@ -900,6 +1252,8 @@ export default function Sales() {
                           setFormData({
                             ...formData,
                             payment_type: v,
+                            initial_payment:
+                              v === "partial" ? formData.initial_payment : "",
                           })
                         }
                         className={`py-2 rounded-xl text-sm font-medium border transition-all ${
@@ -913,7 +1267,7 @@ export default function Sales() {
                     ))}
                   </div>
                 </div>
-                {formData.payment_type !== "cash" && (
+                {formData.payment_type === "partial" && (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">
                       Initial Payment
@@ -930,20 +1284,21 @@ export default function Sales() {
                       }
                       className="input bg-white"
                       placeholder="Amount received now"
+                      onWheel={(e) => e.target.blur()}
                     />
                   </div>
                 )}
               </div>
 
               {/* Date & Notes Section */}
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Details
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                    Details & Documents
                   </span>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                     Sale Date
                   </label>
                   <input
@@ -952,21 +1307,16 @@ export default function Sales() {
                     onChange={(e) =>
                       setFormData({ ...formData, sale_date: e.target.value })
                     }
-                    className="input bg-white"
+                    className="input bg-white dark:bg-gray-800 dark:text-white dark:border-gray-600"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Additional Notes
-                  </label>
-                  <textarea
-                    value={formData.notes}
-                    onChange={(e) =>
-                      setFormData({ ...formData, notes: e.target.value })
+                  <FileUpload
+                    label="Bill/Invoice"
+                    file={formData.invoice_file}
+                    onFileChange={(f) =>
+                      setFormData({ ...formData, invoice_file: f })
                     }
-                    className="input bg-white"
-                    rows={2}
-                    placeholder="Optional notes..."
                   />
                 </div>
               </div>
@@ -976,12 +1326,14 @@ export default function Sales() {
                 <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Total Amount:</span>
-                    <span className="font-semibold">₹{calculateTotal()}</span>
+                    <span className="font-semibold">
+                      {formatCurrency(calculateTotal())}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Total Margin:</span>
                     <span className="font-semibold text-accent-600">
-                      ₹{calculateMargin()}
+                      {formatCurrency(calculateMargin())}
                     </span>
                   </div>
                 </div>
@@ -1032,7 +1384,15 @@ export default function Sales() {
                   {selectedSale.customer?.name || "Walk-in"}
                 </span>
               </p>
-              <p className="text-sm text-gray-600 mt-1">{selectedSale.notes}</p>
+              <p className="text-sm text-gray-600 mt-1 italic">
+                {selectedSale.items
+                  ?.map(
+                    (it) =>
+                      it.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() ||
+                      "Item",
+                  )
+                  .join(", ")}
+              </p>
               <p className="text-sm text-gray-600 mt-2">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
@@ -1056,6 +1416,7 @@ export default function Sales() {
                   }
                   className="input"
                   placeholder="0.00"
+                  onWheel={(e) => e.target.blur()}
                 />
               </div>
               <div>
@@ -1151,7 +1512,15 @@ export default function Sales() {
                   {selectedSale.customer?.name || "Walk-in"}
                 </span>
               </p>
-              <p className="text-sm text-gray-600 mt-1">{selectedSale.notes}</p>
+              <p className="text-sm text-gray-600 mt-1 italic">
+                {selectedSale.items
+                  ?.map(
+                    (it) =>
+                      it.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() ||
+                      "Item",
+                  )
+                  .join(", ")}
+              </p>
               <div className="flex justify-between mt-2 pt-2 border-t border-gray-200">
                 <span className="text-sm">
                   Total:{" "}
@@ -1221,13 +1590,16 @@ export default function Sales() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Customer / Fabric
+                  Customer
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Date
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Meters
+                  Items
+                </th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Total Meters
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Total
@@ -1247,75 +1619,77 @@ export default function Sales() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {paginated.map((sale) => (
+              {paginated.map((group) => (
                 <tr
-                  key={sale.id}
+                  key={group.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">
-                      {sale.customer?.name || "Walk-in"}
+                      {group.customer?.name || "Walk-in"}
                     </p>
-                    {sale.notes && (
-                      <p className="text-sm text-gray-500 max-w-xs truncate">
-                        {sale.notes}
-                      </p>
-                    )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(sale.sale_date).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
+                      {formatDate(group.sale_date)}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600 text-sm">
-                    {sale.meters}m
+                    <span className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700">
+                      {group.items.length}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-600 text-sm">
+                    {group.items
+                      .reduce(
+                        (sum, item) => sum + (parseFloat(item.meters) || 0),
+                        0,
+                      )
+                      .toFixed(2)}
+                    m
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
-                    ₹{sale.total_amount.toLocaleString("en-IN")}
+                    ₹{group.total_amount.toLocaleString("en-IN")}
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span className="text-accent-600 font-medium">
-                      ₹{sale.margin.toLocaleString("en-IN")}
+                      ₹{group.margin.toLocaleString("en-IN")}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span
                       className={
-                        sale.remaining_amount > 0
+                        group.remaining_amount > 0
                           ? "text-warning-600 font-semibold"
                           : "text-gray-500"
                       }
                     >
-                      ₹{sale.remaining_amount.toLocaleString("en-IN")}
+                      ₹{group.remaining_amount.toLocaleString("en-IN")}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {paymentBadge(sale.payment_type)}
+                    {paymentBadge(group.payment_type)}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button
-                        onClick={() => handleViewPayments(sale)}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="View payments"
+                        onClick={() => setSelectedGroupForDetails(group)}
+                        className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
+                        title="View details"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleEdit(sale)}
+                        onClick={() => handleViewPayments(group)}
                         className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="Edit sale"
+                        title="View payments"
                       >
-                        <Pencil className="w-4 h-4" />
+                        <History className="w-4 h-4" />
                       </button>
-                      {sale.remaining_amount > 0 && (
+                      {group.remaining_amount > 0 && (
                         <button
-                          onClick={() => handleAddPayment(sale)}
+                          onClick={() => handleAddPayment(group)}
                           className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
                           title="Receive payment"
                         >
@@ -1323,7 +1697,13 @@ export default function Sales() {
                         </button>
                       )}
                       <button
-                        onClick={() => setConfirmDelete(sale.id)}
+                        onClick={() =>
+                          setConfirmDelete({
+                            isGroup: true,
+                            saleIds: group.items.map((item) => item.id),
+                            itemCount: group.items.length,
+                          })
+                        }
                         className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
                         title="Delete sale"
                       >
@@ -1341,7 +1721,7 @@ export default function Sales() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-2">
           <p className="text-sm text-gray-500">
-            {filteredSales.length} records — page {page} of {totalPages}
+            {groupedArray.length} sales groups — page {page} of {totalPages}
           </p>
           <div className="flex gap-2">
             <button
@@ -1362,15 +1742,478 @@ export default function Sales() {
         </div>
       )}
 
+      {selectedGroupForDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Sale Items</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {selectedGroupForDetails.customer?.name || "Walk-in"} •{" "}
+                  {new Date(
+                    selectedGroupForDetails.sale_date,
+                  ).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedGroupForDetails(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Customer Info Card */}
+            <div className="bg-gradient-to-r from-primary-50 to-blue-50 rounded-lg p-4 mb-6 border border-primary-100">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Customer
+                  </p>
+                  <p className="font-semibold text-gray-900">
+                    {selectedGroupForDetails.customer?.name || "Walk-in"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Date
+                  </p>
+                  <p className="font-semibold text-gray-900">
+                    {new Date(
+                      selectedGroupForDetails.sale_date,
+                    ).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Items
+                  </p>
+                  <p className="font-semibold text-primary-600">
+                    {selectedGroupForDetails.items.length}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Type
+                  </p>
+                  <p className="font-semibold">
+                    {paymentBadge(selectedGroupForDetails.payment_type)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Items Section */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Items ({selectedGroupForDetails.items.length})
+                </h3>
+                <button
+                  onClick={() => setShowAddItemForm(true)}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Item
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {selectedGroupForDetails.items.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1">
+                        <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
+                          Item {idx + 1}
+                        </p>
+                        <p className="font-semibold text-gray-900">
+                          {item.notes
+                            ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
+                            ?.trim() || "N/A"}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          handleEdit(item);
+                          setSelectedGroupForDetails(null);
+                        }}
+                        className="ml-2 p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600 transition-colors"
+                        title="Edit item"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Meters</p>
+                        <p className="font-semibold text-gray-900">
+                          {item.meters}m
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Price/M</p>
+                        <p className="font-semibold text-gray-900">
+                          ₹{item.price_per_meter.toLocaleString("en-IN")}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Total</p>
+                        <p className="font-semibold text-gray-900">
+                          ₹{item.total_amount.toLocaleString("en-IN")}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Margin</p>
+                        <p className="font-semibold text-accent-600">
+                          ₹{item.margin.toLocaleString("en-IN")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Summary Section */}
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-6">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Total Meters
+                  </p>
+                  <p className="text-xl font-bold text-gray-900">
+                    {selectedGroupForDetails.items
+                      .reduce(
+                        (sum, item) => sum + (parseFloat(item.meters) || 0),
+                        0,
+                      )
+                      .toFixed(2)}
+                    m
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Total Amount
+                  </p>
+                  <p className="text-xl font-bold text-gray-900">
+                    ₹
+                    {selectedGroupForDetails.total_amount.toLocaleString(
+                      "en-IN",
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Total Margin
+                  </p>
+                  <p className="text-xl font-bold text-accent-600">
+                    ₹{selectedGroupForDetails.margin.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                    Remaining
+                  </p>
+                  <p
+                    className={`text-xl font-bold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
+                  >
+                    ₹
+                    {selectedGroupForDetails.remaining_amount.toLocaleString(
+                      "en-IN",
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleViewPayments(selectedGroupForDetails)}
+                className="flex-1 btn btn-secondary"
+              >
+                <History className="w-4 h-4 mr-2" />
+                View Payments
+              </button>
+              <button
+                onClick={() => setSelectedGroupForDetails(null)}
+                className="flex-1 btn btn-primary"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddItemForm && selectedGroupForDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Add Item to Sale</h2>
+              <button
+                onClick={() => {
+                  setShowAddItemForm(false);
+                  setActiveNewItemFabricDropdown(false);
+                  setNewItemFabricSearch("");
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
+              <p className="text-sm text-blue-900">
+                Adding item for{" "}
+                <span className="font-semibold">
+                  {selectedGroupForDetails.customer?.name || "Walk-in"}
+                </span>{" "}
+                on{" "}
+                <span className="font-semibold">
+                  {new Date(
+                    selectedGroupForDetails.sale_date,
+                  ).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </span>
+              </p>
+            </div>
+
+            <form onSubmit={handleAddItemToSale} className="space-y-4">
+              <div className="relative new-item-fabric-dropdown-container">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Fabric Name *
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={
+                        activeNewItemFabricDropdown
+                          ? newItemFabricSearch
+                          : newItemForm.fabric_name || ""
+                      }
+                      onChange={(e) => {
+                        setNewItemFabricSearch(e.target.value);
+                        setNewItemForm({
+                          ...newItemForm,
+                          fabric_id: "",
+                          fabric_name: e.target.value,
+                        });
+                        setActiveNewItemFabricDropdown(true);
+                      }}
+                      onFocus={() => {
+                        setNewItemFabricSearch(newItemForm.fabric_name || "");
+                        setActiveNewItemFabricDropdown(true);
+                      }}
+                      className="input bg-white flex-1 pr-10"
+                      placeholder="Search inventory or type name"
+                      required
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <ChevronDown
+                        className={`w-4 h-4 text-gray-400 transition-transform ${activeNewItemFabricDropdown ? "rotate-180" : ""}`}
+                      />
+                    </div>
+
+                    {activeNewItemFabricDropdown && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                        {fabrics
+                          .filter((f) =>
+                            f.name
+                              .toLowerCase()
+                              .includes(newItemFabricSearch.toLowerCase()),
+                          )
+                          .map((f) => (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => {
+                                setNewItemForm({
+                                  ...newItemForm,
+                                  fabric_id: f.id,
+                                  fabric_name: f.name,
+                                  cost_price_per_meter:
+                                    f.purchase_price_per_meter.toString(),
+                                  price_per_meter: (
+                                    f.selling_price_per_meter || ""
+                                  ).toString(),
+                                });
+                                setActiveNewItemFabricDropdown(false);
+                              }}
+                              className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                            >
+                              <div className="flex justify-between items-center">
+                                <span>{f.name}</span>
+                                <span className="text-[10px] text-gray-400">
+                                  {f.available_meters}m
+                                </span>
+                              </div>
+                            </button>
+                          ))}
+                        {fabrics.filter((f) =>
+                          f.name
+                            .toLowerCase()
+                            .includes(newItemFabricSearch.toLowerCase()),
+                        ).length === 0 && (
+                          <div className="px-3 py-2.5 text-xs text-gray-400 italic">
+                            No matching fabrics found
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setScanningItemIdx("new")}
+                    className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Meters *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={newItemForm.meters}
+                    onChange={(e) =>
+                      setNewItemForm({
+                        ...newItemForm,
+                        meters: e.target.value,
+                      })
+                    }
+                    className="input bg-white"
+                    placeholder="0.00"
+                    required
+                    onWheel={(e) => e.target.blur()}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Price/Meter ₹ *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newItemForm.price_per_meter}
+                    onChange={(e) =>
+                      setNewItemForm({
+                        ...newItemForm,
+                        price_per_meter: e.target.value,
+                      })
+                    }
+                    className="input bg-white"
+                    placeholder="0.00"
+                    required
+                    onWheel={(e) => e.target.blur()}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Cost/Meter ₹
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={newItemForm.cost_price_per_meter}
+                  onChange={(e) =>
+                    setNewItemForm({
+                      ...newItemForm,
+                      cost_price_per_meter: e.target.value,
+                    })
+                  }
+                  className="input bg-white"
+                  placeholder="0.00"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+
+              {newItemForm.meters && newItemForm.price_per_meter && (
+                <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Item Total:</span>
+                    <span className="font-semibold">
+                      ₹
+                      {(
+                        parseFloat(newItemForm.meters) *
+                        parseFloat(newItemForm.price_per_meter)
+                      ).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  {newItemForm.cost_price_per_meter && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Margin:</span>
+                      <span className="font-semibold text-accent-600">
+                        ₹
+                        {(
+                          parseFloat(newItemForm.meters) *
+                          (parseFloat(newItemForm.price_per_meter) -
+                            parseFloat(newItemForm.cost_price_per_meter))
+                        ).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddItemForm(false);
+                    setActiveNewItemFabricDropdown(false);
+                    setNewItemFabricSearch("");
+                  }}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Add Item
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {confirmDelete && (
         <ConfirmModal
-          message="This will permanently delete the sale and all its payments."
+          message={
+            confirmDelete.isGroup
+              ? `This will permanently delete all ${confirmDelete.itemCount} items in this sales group and all their payments.`
+              : "This will permanently delete the sale and all its payments."
+          }
           onConfirm={() => handleDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
       )}
 
-      {filteredSales.length === 0 && (
+      {groupedArray.length === 0 && (
         <div className="text-center py-12 text-gray-500">No sales found</div>
       )}
     </div>

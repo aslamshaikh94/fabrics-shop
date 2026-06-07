@@ -12,10 +12,14 @@ import {
   Download,
   Pencil,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { useToast } from "./Toast";
 import { exportCSV } from "../utils/export";
+
+const PAGE_SIZE = 10;
 
 export default function Payments() {
   const toast = useToast();
@@ -27,6 +31,7 @@ export default function Payments() {
   const [dateFilter, setDateFilter] = useState("all");
   const [customDateStart, setCustomDateStart] = useState("");
   const [customDateEnd, setCustomDateEnd] = useState("");
+  const [page, setPage] = useState(1);
   const [supplierSummary, setSupplierSummary] = useState([]);
   const [customerSummary, setCustomerSummary] = useState([]);
   const [activeTab, setActiveTab] = useState("transactions");
@@ -38,6 +43,16 @@ export default function Payments() {
     fetchSupplierSummary();
     fetchCustomerSummary();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [
+    searchTerm,
+    paymentTypeFilter,
+    dateFilter,
+    customDateStart,
+    customDateEnd,
+  ]);
 
   async function handleEditPayment(e) {
     e.preventDefault();
@@ -201,6 +216,12 @@ export default function Payments() {
         return p.party.toLowerCase().includes(searchTerm.toLowerCase());
       return true;
     });
+
+  const totalPages = Math.ceil(allPayments.length / PAGE_SIZE);
+  const paginatedPayments = allPayments.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   const totalPaid = paymentsMade.reduce((sum, p) => sum + p.amount, 0);
   const totalReceived = paymentsReceived.reduce((sum, p) => sum + p.amount, 0);
@@ -582,7 +603,7 @@ export default function Payments() {
           </div>
 
           <div className="space-y-3">
-            {allPayments.map((payment) => {
+            {paginatedPayments.map((payment) => {
               return (
                 <div
                   key={`${payment.type}-${payment.id}`}
@@ -662,6 +683,30 @@ export default function Payments() {
             })}
           </div>
 
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-2 pt-4">
+              <p className="text-sm text-gray-500">
+                {allPayments.length} transactions — page {page} of {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {allPayments.length === 0 && (
             <div className="text-center py-12 text-gray-500">
               No payments found matching your filters
@@ -702,6 +747,7 @@ export default function Payments() {
                     setEditForm({ ...editForm, amount: e.target.value })
                   }
                   className="input"
+                  onWheel={(e) => e.target.blur()}
                 />
               </div>
               <div>
