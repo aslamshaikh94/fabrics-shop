@@ -57,6 +57,7 @@ export default function Dashboard() {
         prevMoSales,
         recentRes,
         expensesRes,
+        thisMoExpenses,
       ] = await Promise.all([
         supabase.from("sales").select("remaining_amount"),
         supabase
@@ -83,6 +84,10 @@ export default function Dashboard() {
           .order("sale_date", { ascending: false })
           .limit(6),
         supabase.from("expenses").select("amount"),
+        supabase
+          .from("expenses")
+          .select("amount")
+          .gte("expense_date", `${thisMonth}-01`),
       ]);
 
       const invValue =
@@ -99,6 +104,8 @@ export default function Dashboard() {
         thisMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
       const prevProfit =
         prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
+      const currMonthExpenses =
+        thisMoExpenses.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0;
 
       setStats({
         thisMonthSales: currSales,
@@ -119,8 +126,7 @@ export default function Dashboard() {
         totalPurchases:
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
           0,
-        totalExpenses:
-          expensesRes.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0,
+        totalExpenses: currMonthExpenses,
       });
       setChanges({
         sales: pctChange(currSales, prevSales),
@@ -187,7 +193,7 @@ export default function Dashboard() {
             icon: Receipt,
             iconBg: "bg-red-500",
             valueBg: "text-red-600",
-            subtitle: "All time",
+            subtitle: `${monthName} ${now.getFullYear()}`,
           },
         ].map((card) => {
           const Icon = card.icon;

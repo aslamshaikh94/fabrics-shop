@@ -154,11 +154,21 @@ export default function Customers() {
     setShowForm(true);
   }
 
-  const filteredCustomers = customers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.phone.includes(searchTerm),
-  );
+  // Only search in phone if searchTerm looks like a phone number (digits/min length)
+  const isPhoneSearch = /^[\d\s\-+]{2,}$/.test(searchTerm.trim());
+  const filteredCustomers = customers.filter((c) => {
+    const nameMatch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
+    if (isPhoneSearch) {
+      // For phone search, match digits only and require at least 3 consecutive matching digits
+      const searchDigits = searchTerm.replace(/\D/g, "");
+      const phoneDigits = (c.phone || "").replace(/\D/g, "");
+      return (
+        nameMatch ||
+        (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
+      );
+    }
+    return nameMatch;
+  });
 
   const totalPages = Math.ceil(filteredCustomers.length / PAGE_SIZE);
   const paginated = filteredCustomers.slice(

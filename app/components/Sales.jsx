@@ -44,6 +44,7 @@ export default function Sales() {
   const [customers, setCustomers] = useState([]);
   const [fabrics, setFabrics] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
@@ -296,7 +297,7 @@ export default function Sales() {
       return;
     }
     setFormErrors({});
-    setLoading(true); // Assuming a saving state is needed
+    setSaving(true);
     try {
       const totalAmount = parseFloat(calculateTotal());
       const initialPayment = parseFloat(formData.initial_payment) || 0;
@@ -452,6 +453,7 @@ export default function Sales() {
         }
       }
 
+      setSaving(false);
       setShowForm(false);
       setEditingId(null);
       setFormData(makeEmptyForm());
@@ -460,6 +462,7 @@ export default function Sales() {
         editingId ? "Sale updated successfully" : "Sale recorded successfully",
       );
     } catch (error) {
+      setSaving(false);
       console.error("Error saving sale:", error);
       console.error("Error details:", error?.message || JSON.stringify(error));
       toast(
@@ -1349,8 +1352,16 @@ export default function Sales() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update Sale" : "Record Sale"}
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="btn btn-primary flex-1"
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingId
+                      ? "Update Sale"
+                      : "Record Sale"}
                 </button>
               </div>
             </form>
