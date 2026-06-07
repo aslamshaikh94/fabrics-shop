@@ -1,5 +1,3 @@
-'use client';
-
 import Shell from './components/Shell';
 import AuthGuard from './components/AuthGuard';
 
