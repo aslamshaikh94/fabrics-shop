@@ -1145,11 +1145,13 @@ export default function Sales() {
 
       {selectedGroupForDetails && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">Sale Items</h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Sale Items
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   {selectedGroupForDetails.customer?.name || "Walk-in"} •{" "}
                   {new Date(
                     selectedGroupForDetails.sale_date,
@@ -1174,31 +1176,31 @@ export default function Sales() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div className="bg-gradient-to-r from-primary-50 to-blue-50 rounded-lg p-4 border border-primary-100">
-                <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+              <div className="bg-gradient-to-r from-primary-50 to-blue-50 dark:from-primary-900/20 dark:to-blue-900/20 rounded-lg p-4 border border-primary-100 dark:border-primary-800">
+                <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                   Customer
                 </p>
-                <p className="font-semibold text-gray-900">
+                <p className="font-semibold text-gray-900 dark:text-white">
                   {selectedGroupForDetails.customer?.name || "Walk-in Customer"}
                 </p>
                 {selectedGroupForDetails.customer?.phone && (
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                     {selectedGroupForDetails.customer.phone}
                   </p>
                 )}
               </div>
 
-              <div className="bg-gradient-to-r from-accent-50 to-green-50 rounded-lg p-4 border border-accent-100">
-                <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+              <div className="bg-gradient-to-r from-accent-50 to-green-50 dark:from-accent-900/20 dark:to-green-900/20 rounded-lg p-4 border border-accent-100 dark:border-accent-800">
+                <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                   Payment
                 </p>
-                <p className="font-semibold text-gray-900 mb-1">
+                <p className="font-semibold text-gray-900 dark:text-white mb-1">
                   {paymentBadge(selectedGroupForDetails.payment_type)}
                 </p>
-                <div className="flex justify-between text-xs text-gray-600">
+                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
                   <span>
                     Total:{" "}
-                    <span className="font-semibold text-gray-900">
+                    <span className="font-semibold text-gray-900 dark:text-white">
                       ₹
                       {selectedGroupForDetails.total_amount.toLocaleString(
                         "en-IN",
@@ -1208,7 +1210,7 @@ export default function Sales() {
                   <span>
                     Remaining:{" "}
                     <span
-                      className={`font-semibold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
+                      className={`font-semibold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600 dark:text-warning-400" : "text-gray-500 dark:text-gray-400"}`}
                     >
                       ₹
                       {selectedGroupForDetails.remaining_amount.toLocaleString(
@@ -1219,12 +1221,12 @@ export default function Sales() {
                 </div>
               </div>
 
-              <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
-                <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+              <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                   Details & Documents
                 </p>
-                <p className="text-sm text-gray-900">
-                  <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5" />
+                <p className="text-sm text-gray-900 dark:text-white">
+                  <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5 text-gray-400 dark:text-gray-500" />
                   {new Date(
                     selectedGroupForDetails.sale_date,
                   ).toLocaleDateString("en-IN", {
@@ -1244,7 +1246,9 @@ export default function Sales() {
                     View Invoice
                   </a>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-1">No invoice</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    No invoice
+                  </p>
                 )}
               </div>
             </div>
@@ -1260,11 +1264,11 @@ export default function Sales() {
               </button>
             </div>
 
-            <div className="border-t border-gray-200 my-4"></div>
+            <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
 
             <div className="mb-6">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold text-gray-900">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Items ({selectedGroupForDetails.items.length})
                 </h3>
                 <button
@@ -1314,7 +1318,7 @@ export default function Sales() {
                         </div>
 
                         <div className="relative edit-item-fabric-dropdown-container">
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                          <label className="block text-xs font-bold text-gray-900 dark:text-gray-300 mb-1">
                             Fabric Name
                           </label>
                           <div className="flex gap-2">
@@ -1341,13 +1345,13 @@ export default function Sales() {
                                   );
                                   setActiveEditFabricDropdown(true);
                                 }}
-                                className="input bg-white pr-10"
+                                className="input bg-white dark:bg-gray-800 pr-10"
                                 placeholder="Search inventory or type name"
                                 required
                               />
                               <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                                 <ChevronDown
-                                  className={`w-4 h-4 text-gray-600 transition-transform ${activeEditFabricDropdown ? "rotate-180" : ""}`}
+                                  className={`w-4 h-4 text-gray-600 dark:text-gray-400 transition-transform ${activeEditFabricDropdown ? "rotate-180" : ""}`}
                                 />
                               </div>
                               {activeEditFabricDropdown && (
@@ -1380,8 +1384,10 @@ export default function Sales() {
                                         className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
                                       >
                                         <div className="flex justify-between items-center">
-                                          <span>{f.name}</span>
-                                          <span className="text-[10px] text-gray-400">
+                                          <span className="dark:text-white">
+                                            {f.name}
+                                          </span>
+                                          <span className="text-[10px] text-gray-400 dark:text-gray-500">
                                             {f.available_meters}m
                                           </span>
                                         </div>
@@ -1396,7 +1402,7 @@ export default function Sales() {
                                 setScanningItemIdx("edit");
                                 setShowScanner(true);
                               }}
-                              className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
+                              className="px-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-400 rounded-lg text-gray-500 dark:text-gray-400 transition-colors"
                             >
                               <ScanLine className="w-4 h-4" />
                             </button>
@@ -1405,7 +1411,7 @@ export default function Sales() {
 
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                            <label className="block text-xs font-bold text-gray-900 dark:text-gray-300 mb-1">
                               Meters *
                             </label>
                             <input
@@ -1419,13 +1425,13 @@ export default function Sales() {
                                   meters: e.target.value,
                                 })
                               }
-                              className="input bg-white"
+                              className="input bg-white dark:bg-gray-800"
                               required
                               onWheel={(e) => e.target.blur()}
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                            <label className="block text-xs font-bold text-gray-900 dark:text-gray-300 mb-1">
                               Price ₹/m *
                             </label>
                             <input
@@ -1438,13 +1444,13 @@ export default function Sales() {
                                   price_per_meter: e.target.value,
                                 })
                               }
-                              className="input bg-white"
+                              className="input bg-white dark:bg-gray-800"
                               required
                               onWheel={(e) => e.target.blur()}
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                            <label className="block text-xs font-bold text-gray-900 dark:text-gray-300 mb-1">
                               Cost ₹/m
                             </label>
                             <input
@@ -1457,7 +1463,7 @@ export default function Sales() {
                                   cost_price_per_meter: e.target.value,
                                 })
                               }
-                              className="input bg-white"
+                              className="input bg-white dark:bg-gray-800"
                               onWheel={(e) => e.target.blur()}
                             />
                           </div>
@@ -1467,10 +1473,10 @@ export default function Sales() {
                       <>
                         <div className="flex justify-between items-start mb-3">
                           <div className="flex-1">
-                            <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase font-bold mb-0.5">
                               Item {idx + 1}
                             </p>
-                            <p className="font-semibold text-gray-900">
+                            <p className="font-semibold text-gray-900 dark:text-white">
                               {item.notes
                                 ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
                                 ?.trim() || "N/A"}
@@ -1503,27 +1509,33 @@ export default function Sales() {
 
                         <div className="grid grid-cols-4 gap-3 text-sm">
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">Meters</p>
-                            <p className="font-semibold text-gray-900">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                              Meters
+                            </p>
+                            <p className="font-semibold text-gray-900 dark:text-white">
                               {item.meters}m
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                               Price/M
                             </p>
-                            <p className="font-semibold text-gray-900">
+                            <p className="font-semibold text-gray-900 dark:text-white">
                               ₹{item.price_per_meter.toLocaleString("en-IN")}
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">Total</p>
-                            <p className="font-semibold text-gray-900">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                              Total
+                            </p>
+                            <p className="font-semibold text-gray-900 dark:text-white">
                               ₹{item.total_amount.toLocaleString("en-IN")}
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">Margin</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                              Margin
+                            </p>
                             <p className="font-semibold text-accent-600">
                               ₹{item.margin.toLocaleString("en-IN")}
                             </p>
@@ -1536,13 +1548,13 @@ export default function Sales() {
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-6">
+            <div className="bg-gray-50 dark:bg-gray-900/60 rounded-lg p-4 border border-gray-200 dark:border-gray-700 mb-6">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                     Total Meters
                   </p>
-                  <p className="text-xl font-bold text-gray-900">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
                     {selectedGroupForDetails.items
                       .reduce(
                         (sum, item) => sum + (parseFloat(item.meters) || 0),
@@ -1553,10 +1565,10 @@ export default function Sales() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                     Total Amount
                   </p>
-                  <p className="text-xl font-bold text-gray-900">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
                     ₹
                     {selectedGroupForDetails.total_amount.toLocaleString(
                       "en-IN",
@@ -1564,7 +1576,7 @@ export default function Sales() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                     Total Margin
                   </p>
                   <p className="text-xl font-bold text-accent-600">
@@ -1572,11 +1584,11 @@ export default function Sales() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
                     Remaining
                   </p>
                   <p
-                    className={`text-xl font-bold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
+                    className={`text-xl font-bold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600 dark:text-warning-400" : "text-gray-500 dark:text-gray-400"}`}
                   >
                     ₹
                     {selectedGroupForDetails.remaining_amount.toLocaleString(
@@ -1613,19 +1625,21 @@ export default function Sales() {
 
       {showEditSaleInfo && selectedGroupForDetails && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Edit Sale Info</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Edit Sale Info
+              </h2>
               <button
                 onClick={() => setShowEditSaleInfo(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-4">
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   Customer
                 </span>
                 <div className="grid grid-cols-2 gap-2">
@@ -1643,7 +1657,7 @@ export default function Sales() {
                     className={`py-2 rounded-xl text-sm font-medium border transition-all ${
                       customerTab === "existing"
                         ? "bg-primary-600 text-white border-primary-600"
-                        : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                        : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400"
                     }`}
                   >
                     <Users className="w-4 h-4 inline mr-1.5 mb-0.5" />
@@ -1663,7 +1677,7 @@ export default function Sales() {
                     className={`py-2 rounded-xl text-sm font-medium border transition-all ${
                       customerTab === "walkin"
                         ? "bg-primary-600 text-white border-primary-600"
-                        : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                        : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400"
                     }`}
                   >
                     <UserPlus className="w-4 h-4 inline mr-1.5 mb-0.5" />
@@ -1672,7 +1686,7 @@ export default function Sales() {
                 </div>
                 {customerTab === "existing" ? (
                   <div className="relative">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                       Search Customer
                     </label>
                     <div className="relative">
@@ -1698,12 +1712,12 @@ export default function Sales() {
                           );
                           setShowCustomerDropdown(true);
                         }}
-                        className="input bg-white pr-10"
+                        className="input bg-white dark:bg-gray-800 pr-10"
                         placeholder="Type to search customer..."
                       />
                       <div className="absolute right-3 top-1/2 -translate-y-1/2">
                         <ChevronDown
-                          className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
+                          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
                         />
                       </div>
                     </div>
@@ -1728,7 +1742,7 @@ export default function Sales() {
                                 setCustomerSearch(c.name);
                                 setShowCustomerDropdown(false);
                               }}
-                              className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                              className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
                             >
                               {c.name}
                             </button>
@@ -1738,7 +1752,7 @@ export default function Sales() {
                   </div>
                 ) : (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                       Enter Walk-in Name
                     </label>
                     <input
@@ -1789,7 +1803,7 @@ export default function Sales() {
                         className={`py-2 rounded-xl text-sm font-medium border transition-all ${
                           editGroupFields.payment_type === v
                             ? "bg-primary-600 text-white border-primary-600"
-                            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400"
                         }`}
                       >
                         {l}
@@ -1799,12 +1813,12 @@ export default function Sales() {
                 </div>
               </div>
 
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   Details & Documents
                 </span>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                     Sale Date
                   </label>
                   <input
@@ -1816,7 +1830,7 @@ export default function Sales() {
                         sale_date: e.target.value,
                       })
                     }
-                    className="input bg-white"
+                    className="input bg-white dark:bg-gray-800"
                   />
                 </div>
                 <FileUpload
@@ -1858,23 +1872,25 @@ export default function Sales() {
 
       {showAddItemForm && selectedGroupForDetails && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Add Item to Sale</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Add Item to Sale
+              </h2>
               <button
                 onClick={() => {
                   setShowAddItemForm(false);
                   setActiveNewItemFabricDropdown(false);
                   setNewItemFabricSearch("");
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
-              <p className="text-sm text-blue-900">
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40 rounded-lg p-3 mb-4">
+              <p className="text-sm text-blue-900 dark:text-blue-100">
                 Adding item for{" "}
                 <span className="font-semibold">
                   {selectedGroupForDetails.customer?.name || "Walk-in"}
@@ -1894,7 +1910,7 @@ export default function Sales() {
 
             <form onSubmit={handleAddItemToSale} className="space-y-4">
               <div className="relative new-item-fabric-dropdown-container">
-                <label className="block text-xs font-medium text-gray-600 mb-1">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                   Fabric Name *
                 </label>
                 <div className="flex gap-2">
@@ -1919,18 +1935,18 @@ export default function Sales() {
                         setNewItemFabricSearch(newItemForm.fabric_name || "");
                         setActiveNewItemFabricDropdown(true);
                       }}
-                      className="input bg-white flex-1 pr-10"
+                      className="input bg-white dark:bg-gray-800 flex-1 pr-10"
                       placeholder="Search inventory or type name"
                       required
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <ChevronDown
-                        className={`w-4 h-4 text-gray-400 transition-transform ${activeNewItemFabricDropdown ? "rotate-180" : ""}`}
+                        className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${activeNewItemFabricDropdown ? "rotate-180" : ""}`}
                       />
                     </div>
 
                     {activeNewItemFabricDropdown && (
-                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                      <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
                         {fabrics
                           .filter((f) =>
                             f.name
@@ -1954,11 +1970,13 @@ export default function Sales() {
                                 });
                                 setActiveNewItemFabricDropdown(false);
                               }}
-                              className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                              className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
                             >
                               <div className="flex justify-between items-center">
-                                <span>{f.name}</span>
-                                <span className="text-[10px] text-gray-400">
+                                <span className="dark:text-white">
+                                  {f.name}
+                                </span>
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500">
                                   {f.available_meters}m
                                 </span>
                               </div>
