@@ -11,7 +11,11 @@ import {
   Users,
   UserPlus,
 } from "lucide-react";
-import { validateSale, hasErrors } from "../utils/validators";
+import {
+  validateSale,
+  hasErrors,
+  validateCurrentItem,
+} from "../utils/validators";
 import BarcodeScanner from "./BarcodeScanner";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
@@ -72,13 +76,24 @@ export default function SaleForm({
   useEffect(() => {
     setEditingId(initialEditingId);
     if (open) {
+      setFormData(makeEmptyForm());
       if (initialEditingId) {
-        // Load existing sale data for editing would come from parent
-      } else {
-        setFormData(makeEmptyForm());
+        fetchSaleForEditing(initialEditingId);
       }
     }
   }, [open, initialEditingId]);
+
+  async function fetchSaleForEditing(id) {
+    const { data, error } = await supabase
+      .from("sales")
+      .select("*, customer:customers(*)")
+      .eq("id", id)
+      .single();
+
+    if (data) {
+      loadSaleForEdit(data);
+    }
+  }
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -103,26 +118,6 @@ export default function SaleForm({
         i === idx ? { ...item, ...fields } : item,
       ),
     }));
-  }
-
-  function validateCurrentItem(item) {
-    const itemErrors = {};
-    if (!item.fabric_name || item.fabric_name.trim() === "") {
-      itemErrors.fabric_name = "Fabric name is required";
-    }
-    if (!item.meters || parseFloat(item.meters) <= 0) {
-      itemErrors.meters = "Meters must be greater than 0";
-    }
-    if (!item.price_per_meter || parseFloat(item.price_per_meter) < 0) {
-      itemErrors.price_per_meter = "Price must be 0 or greater";
-    }
-    if (
-      item.cost_price_per_meter &&
-      parseFloat(item.cost_price_per_meter) < 0
-    ) {
-      itemErrors.cost_price_per_meter = "Cost price must be 0 or greater";
-    }
-    return itemErrors;
   }
 
   function addItem() {

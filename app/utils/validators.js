@@ -1,5 +1,19 @@
 // Form validation schemas using basic validation (zod can be added later if needed)
 
+export const validateCurrentItem = (item) => {
+  const itemErrors = {};
+  if (!item.fabric_name || item.fabric_name.trim() === "") {
+    itemErrors.fabric_name = "Fabric name is required";
+  }
+  if (!item.meters || parseFloat(item.meters) <= 0) {
+    itemErrors.meters = "Meters must be greater than 0";
+  }
+  if (!item.price_per_meter || parseFloat(item.price_per_meter) < 0) {
+    itemErrors.price_per_meter = "Price must be 0 or greater";
+  }
+  return itemErrors;
+};
+
 export const validateSale = (formData) => {
   const errors = {};
   if (!formData.customer_id && !formData.customer_name)
