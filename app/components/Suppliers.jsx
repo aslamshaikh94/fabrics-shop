@@ -12,6 +12,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  DollarSign,
 } from "lucide-react";
 import { validateSupplier, hasErrors } from "../utils/validators";
 import SupplierLedger from "./SupplierLedger";
@@ -372,7 +373,9 @@ export default function Suppliers() {
               : "No suppliers added yet"}
           </p>
           <p className="text-gray-300 text-sm mt-1">
-            {searchTerm ? "Try a different search term" : "Click Add Supplier to get started"}
+            {searchTerm
+              ? "Try a different search term"
+              : "Click Add Supplier to get started"}
           </p>
         </div>
       )}

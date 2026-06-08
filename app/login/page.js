@@ -1,20 +1,23 @@
-'use client';
-import { useState } from 'react';
-import { getSupabase } from '../lib/supabase';
-import { Eye, EyeOff, Loader as Loader2 } from 'lucide-react';
+"use client";
+import { useState } from "react";
+import { getSupabase } from "../lib/supabase";
+import { Eye, EyeOff, Loader as Loader2 } from "lucide-react";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   async function handleLogin(e) {
     e.preventDefault();
     setLoading(true);
-    setError('');
-    const { error } = await getSupabase().auth.signInWithPassword({ email, password });
+    setError("");
+    const { error } = await getSupabase().auth.signInWithPassword({
+      email,
+      password,
+    });
     if (error) {
       setError(error.message);
       setLoading(false);
@@ -26,9 +29,13 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 bg-primary-600 rounded-2xl mb-4 shadow-lg shadow-primary-600/20">
-            <span className="text-white text-xl font-black tracking-tight">C</span>
+            <span className="text-white text-xl font-black tracking-tight">
+              C
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">CRMS</h1>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+            CRMS
+          </h1>
           <p className="text-sm text-gray-500 mt-1">Fabric Shop Manager</p>
         </div>
 
@@ -42,35 +49,43 @@ export default function LoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Email
+              </label>
               <input
                 type="email"
                 required
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
                 className="input"
                 placeholder="you@example.com"
                 autoComplete="email"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Password
+              </label>
               <div className="relative">
                 <input
-                  type={showPassword ? 'text' : 'password'}
+                  type={showPassword ? "text" : "password"}
                   required
                   value={password}
-                  onChange={e => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="input pr-10"
                   placeholder="Enter your password"
                   autoComplete="current-password"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(v => !v)}
+                  onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             </div>
@@ -84,7 +99,9 @@ export default function LoginPage() {
                   <Loader2 className="w-4 h-4 animate-spin" />
                   Signing in...
                 </span>
-              ) : 'Sign In'}
+              ) : (
+                "Sign In"
+              )}
             </button>
           </form>
         </div>

@@ -18,14 +18,26 @@ import {
   Download,
   ChevronDown,
   History,
+  TrendingUp,
+  Users,
+  UserPlus,
+  Save,
+  XCircle,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
-import { validateSale, validatePayment, hasErrors } from "../utils/validators";
+import {
+  validateSale,
+  validatePayment,
+  hasErrors,
+  validateCurrentItem,
+} from "../utils/validators";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import FileUpload from "./FileUpload";
+import DateRangeFilter from "./DateRangeFilter";
 import { formatCurrency, formatDate } from "../utils/formatters";
+import SaleForm from "./SaleForm";
 
 const PAGE_SIZE = 10;
 
@@ -78,10 +90,33 @@ export default function Sales() {
     useState(false);
   const [newItemFabricSearch, setNewItemFabricSearch] = useState("");
   const [itemJustAdded, setItemJustAdded] = useState(false);
+  const [customerTab, setCustomerTab] = useState("existing");
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [editItemForm, setEditItemForm] = useState({
+    fabric_id: "",
+    fabric_name: "",
+    meters: "",
+    price_per_meter: "",
+    cost_price_per_meter: "",
+  });
+  const [editItemFabricSearch, setEditItemFabricSearch] = useState("");
+  const [activeEditFabricDropdown, setActiveEditFabricDropdown] =
+    useState(false);
+  const [savingEditItem, setSavingEditItem] = useState(false);
+  const [editGroupFields, setEditGroupFields] = useState({
+    customer_id: "",
+    customer_name: "",
+    sale_date: "",
+    payment_type: "cash",
+    initial_payment: "",
+    invoice_file: null,
+  });
+  const [savingGroupFields, setSavingGroupFields] = useState(false);
+  const [showEditSaleInfo, setShowEditSaleInfo] = useState(false);
   function makeEmptyForm() {
     return {
-      customer_id: null,
-      customer_name: "Walk-in Customer",
+      customer_id: "",
+      customer_name: "",
       items: [
         {
           fabric_id: "",
@@ -125,6 +160,10 @@ export default function Sales() {
 
       if (!event.target.closest(".new-item-fabric-dropdown-container")) {
         setActiveNewItemFabricDropdown(false);
+      }
+
+      if (!event.target.closest(".edit-item-fabric-dropdown-container")) {
+        setActiveEditFabricDropdown(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -207,6 +246,14 @@ export default function Sales() {
           cost_price_per_meter: data.purchase_price_per_meter.toString(),
           price_per_meter: (data.selling_price_per_meter || "").toString(),
         }));
+      } else if (scanningItemIdx === "edit") {
+        setEditItemForm((prev) => ({
+          ...prev,
+          fabric_id: data.id,
+          fabric_name: data.name,
+          cost_price_per_meter: data.purchase_price_per_meter.toString(),
+          price_per_meter: (data.selling_price_per_meter || "").toString(),
+        }));
       } else {
         updateItem(scanningItemIdx, {
           fabric_id: data.id,
@@ -218,6 +265,12 @@ export default function Sales() {
     } else {
       if (scanningItemIdx === "new") {
         setNewItemForm((prev) => ({
+          ...prev,
+          fabric_name: code,
+          fabric_id: "",
+        }));
+      } else if (scanningItemIdx === "edit") {
+        setEditItemForm((prev) => ({
           ...prev,
           fabric_name: code,
           fabric_id: "",
@@ -236,25 +289,6 @@ export default function Sales() {
         i === idx ? { ...item, ...fields } : item,
       ),
     }));
-  }
-
-  function addItem() {
-    setItemJustAdded(true);
-    setFormData((prev) => ({
-      ...prev,
-      items: [
-        ...prev.items,
-        {
-          fabric_id: "",
-          fabric_name: "",
-          meters: "",
-          price_per_meter: "",
-          cost_price_per_meter: "",
-        },
-      ],
-    }));
-    // Reset the flag after a short delay to allow re-render
-    setTimeout(() => setItemJustAdded(false), 100);
   }
 
   function calculateTotal() {
@@ -288,191 +322,6 @@ export default function Sales() {
     ).toFixed(2);
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    const errors = validateSale(formData);
-    if (hasErrors(errors)) {
-      setFormErrors(errors);
-      toast("Please fix the validation errors", "error");
-      return;
-    }
-    setFormErrors({});
-    setSaving(true);
-    try {
-      const totalAmount = parseFloat(calculateTotal());
-      const initialPayment = parseFloat(formData.initial_payment) || 0;
-
-      let invoice_url = "";
-      if (formData.invoice_file) {
-        const ext = formData.invoice_file.name.split(".").pop();
-        const path = `sales-invoices/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("sales-invoices")
-          .upload(path, formData.invoice_file);
-
-        if (uploadError) throw uploadError;
-
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("sales-invoices").getPublicUrl(path);
-        invoice_url = publicUrl;
-      }
-
-      // Check credit limit for credit/partial sales
-      if (formData.customer_id && formData.payment_type !== "cash") {
-        const customer = customers.find((c) => c.id === formData.customer_id);
-        if (customer?.credit_limit > 0) {
-          const newRemaining = totalAmount - initialPayment;
-          const currentDue = customerDues?.[customer.id] || 0;
-          if (currentDue + newRemaining > customer.credit_limit) {
-            toast(
-              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN")}, current dues: ₹${currentDue.toLocaleString("en-IN")}, new would add: ₹${newRemaining.toLocaleString("en-IN")}`,
-              "error",
-            );
-            return;
-          }
-        }
-      }
-
-      if (editingId) {
-        // Editing only supports single-item (the form shows one item when editing)
-        const item = formData.items[0] || {};
-        const salePayload = {
-          customer_id: formData.customer_id || null,
-          fabric_id: item.fabric_id || null,
-          meters: parseFloat(item.meters) || 0,
-          price_per_meter: parseFloat(item.price_per_meter) || 0,
-          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
-          sale_date: formData.sale_date,
-          payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${
-            !formData.customer_id &&
-            formData.customer_name &&
-            formData.customer_name !== "Walk-in Customer"
-              ? ` (Name: ${formData.customer_name})`
-              : ""
-          }`,
-          invoice_url,
-        };
-        const { error: updateError } = await supabase
-          .from("sales")
-          .update(salePayload)
-          .eq("id", editingId);
-        if (updateError) throw updateError;
-      } else {
-        // Generate a unique group ID for this sale transaction
-        const saleGroupId = generateUUID();
-        const walkInNameInfo =
-          !formData.customer_id &&
-          formData.customer_name &&
-          formData.customer_name !== "Walk-in Customer"
-            ? ` (Name: ${formData.customer_name})`
-            : "";
-        // Insert one sale row per item — each row gets its own meters/price/margin
-        const itemNotes = formData.items.map((it) => it.fabric_name).join(", ");
-        const salePayloads = formData.items.map((item) => ({
-          customer_id: formData.customer_id || null,
-          fabric_id: item.fabric_id || null,
-          meters: parseFloat(item.meters) || 0,
-          price_per_meter: parseFloat(item.price_per_meter) || 0,
-          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
-          sale_date: formData.sale_date,
-          payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
-          sale_group_id: saleGroupId,
-          invoice_url,
-        }));
-
-        let saleRows;
-        let saleError;
-
-        // Try inserting with sale_group_id first
-        const { data: data1, error: error1 } = await supabase
-          .from("sales")
-          .insert(salePayloads)
-          .select();
-
-        // If it fails due to unknown column, retry without sale_group_id
-        if (error1 && error1.message?.includes("column")) {
-          const payloadsWithoutGroup = salePayloads.map(
-            ({ sale_group_id, ...rest }) => rest,
-          );
-          const { data: data2, error: error2 } = await supabase
-            .from("sales")
-            .insert(payloadsWithoutGroup)
-            .select();
-          saleRows = data2;
-          saleError = error2;
-        } else {
-          saleRows = data1;
-          saleError = error1;
-        }
-
-        if (saleError) throw saleError;
-
-        // Record payments based on payment type
-        if (saleRows && saleRows.length > 0) {
-          if (formData.payment_type === "cash") {
-            // Full cash: pay each item in full
-            const paymentInserts = saleRows.map((row) => ({
-              sale_id: row.id,
-              amount: row.meters * row.price_per_meter,
-              payment_date: formData.sale_date,
-              payment_method: "cash",
-            }));
-            const { error: payErr } = await supabase
-              .from("sale_payments")
-              .insert(paymentInserts);
-            if (payErr) throw payErr;
-          } else if (initialPayment > 0) {
-            // Partial / credit with initial payment: distribute across items
-            let remaining = initialPayment;
-            const paymentInserts = [];
-            for (const row of saleRows) {
-              const itemTotal = row.meters * row.price_per_meter;
-              const pay = Math.min(remaining, itemTotal);
-              if (pay > 0) {
-                paymentInserts.push({
-                  sale_id: row.id,
-                  amount: pay,
-                  payment_date: formData.sale_date,
-                  payment_method: "cash",
-                });
-                remaining -= pay;
-              }
-              if (remaining <= 0) break;
-            }
-            if (paymentInserts.length > 0) {
-              const { error: payErr } = await supabase
-                .from("sale_payments")
-                .insert(paymentInserts);
-              if (payErr) throw payErr;
-            }
-          }
-          // Full credit with no initial payment: no payments to insert
-        }
-      }
-
-      setSaving(false);
-      setShowForm(false);
-      setEditingId(null);
-      setFormData(makeEmptyForm());
-      fetchSales();
-      toast(
-        editingId ? "Sale updated successfully" : "Sale recorded successfully",
-      );
-    } catch (error) {
-      setSaving(false);
-      console.error("Error saving sale:", error);
-      console.error("Error details:", error?.message || JSON.stringify(error));
-      toast(
-        error?.message ||
-          "Failed to save sale. Please check the form and try again.",
-        "error",
-      );
-    }
-  }
-
   async function handlePaymentSubmit(e) {
     e.preventDefault();
     if (!selectedSale) return;
@@ -485,7 +334,6 @@ export default function Sales() {
     setPaymentErrors({});
 
     try {
-      // Distribute payment across items in the group
       let remainingToPay = parseFloat(paymentData.amount);
       const paymentInserts = [];
 
@@ -527,56 +375,121 @@ export default function Sales() {
     }
   }
 
-  async function fetchPayments(saleIds) {
+  async function handleEditItemSave(itemId) {
+    if (
+      !editItemForm.meters ||
+      !editItemForm.price_per_meter ||
+      !editItemForm.fabric_name
+    ) {
+      toast("Please fill in all required fields", "error");
+      return;
+    }
+    setSavingEditItem(true);
     try {
-      const { data } = await supabase
-        .from("sale_payments")
-        .select("*")
-        .in("sale_id", Array.isArray(saleIds) ? saleIds : [saleIds])
-        .order("payment_date", { ascending: false });
-      setPayments(data || []);
+      const salePayload = {
+        fabric_id: editItemForm.fabric_id || null,
+        meters: parseFloat(editItemForm.meters) || 0,
+        price_per_meter: parseFloat(editItemForm.price_per_meter) || 0,
+        cost_price_per_meter:
+          parseFloat(editItemForm.cost_price_per_meter) || 0,
+        notes: `Fabric: ${editItemForm.fabric_name}`,
+      };
+
+      const { error } = await supabase
+        .from("sales")
+        .update(salePayload)
+        .eq("id", itemId);
+      if (error) throw error;
+
+      setEditingItemId(null);
+      setActiveEditFabricDropdown(false);
+      setEditItemFabricSearch("");
+      fetchSales();
+      toast("Item updated successfully");
     } catch (error) {
-      console.error("Error fetching payments:", error);
+      console.error("Error updating item:", error);
+      toast("Failed to update item", "error");
+    } finally {
+      setSavingEditItem(false);
     }
   }
 
-  function handleEdit(sale) {
-    const notes = sale.notes || "";
-    const fabricMatch = notes.match(/Fabric:\s*([^(|\n]+)/);
-    setFormData({
-      customer_id: sale.customer_id || "",
-      customer_name: sale.customer?.name || "",
-      items: [
-        {
-          fabric_id: sale.fabric_id || "",
-          fabric_name: fabricMatch ? fabricMatch[1].trim() : "",
-          meters: sale.meters.toString(),
-          price_per_meter: sale.price_per_meter.toString(),
-          cost_price_per_meter: sale.cost_price_per_meter.toString(),
-        },
-      ],
-      sale_date: sale.sale_date,
-      payment_type: sale.payment_type,
-      initial_payment: "",
-      invoice_file: null,
-    });
-    setEditingId(sale.id);
-    setShowForm(true);
-  }
+  async function handleEditGroupFieldsSave() {
+    if (!selectedGroupForDetails) return;
+    setSavingGroupFields(true);
+    try {
+      const saleIds = selectedGroupForDetails.items.map((i) => i.id);
+      const customerId = editGroupFields.customer_id || null;
 
-  function handleViewPayments(group) {
-    setSelectedSale(group);
-    fetchPayments(group.items.map((i) => i.id));
-  }
-  function handleAddPayment(group) {
-    setSelectedSale(group);
-    setShowPaymentForm(true);
+      let invoice_url = selectedGroupForDetails.items[0]?.invoice_url || "";
+      if (editGroupFields.invoice_file) {
+        const ext = editGroupFields.invoice_file.name.split(".").pop();
+        const path = `sales-invoices/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("sales-invoices")
+          .upload(path, editGroupFields.invoice_file);
+        if (uploadError) throw uploadError;
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("sales-invoices").getPublicUrl(path);
+        invoice_url = publicUrl;
+      }
+
+      for (const saleId of saleIds) {
+        const { error } = await supabase
+          .from("sales")
+          .update({
+            customer_id: customerId,
+            sale_date: editGroupFields.sale_date,
+            payment_type: editGroupFields.payment_type,
+            invoice_url,
+          })
+          .eq("id", saleId);
+        if (error) throw error;
+      }
+
+      if (
+        editGroupFields.payment_type !== selectedGroupForDetails.payment_type
+      ) {
+        if (editGroupFields.payment_type === "cash") {
+          for (const item of selectedGroupForDetails.items) {
+            await supabase
+              .from("sale_payments")
+              .delete()
+              .eq("sale_id", item.id);
+            const totalAmount = item.meters * item.price_per_meter;
+            await supabase.from("sale_payments").insert([
+              {
+                sale_id: item.id,
+                amount: totalAmount,
+                payment_date: editGroupFields.sale_date,
+                payment_method: "cash",
+              },
+            ]);
+          }
+        } else if (editGroupFields.payment_type === "credit") {
+          for (const item of selectedGroupForDetails.items) {
+            await supabase
+              .from("sale_payments")
+              .delete()
+              .eq("sale_id", item.id);
+          }
+        }
+      }
+
+      fetchSales();
+      toast("Sale info updated successfully");
+    } catch (error) {
+      console.error("Error updating sale info:", error);
+      toast("Failed to update sale info", "error");
+    } finally {
+      setSavingGroupFields(false);
+    }
   }
 
   async function handleDelete(deleteInfo) {
     try {
       if (deleteInfo.isGroup) {
-        // Delete all sales in the group
         const { error: deletePaymentsError } = await supabase
           .from("sale_payments")
           .delete()
@@ -590,7 +503,6 @@ export default function Sales() {
         if (error) throw error;
         toast("Sales group deleted");
       } else {
-        // Single sale deletion
         const { error } = await supabase
           .from("sales")
           .delete()
@@ -628,6 +540,7 @@ export default function Sales() {
         cost_price_per_meter: parseFloat(newItemForm.cost_price_per_meter) || 0,
         sale_date: selectedGroupForDetails.sale_date,
         payment_type: selectedGroupForDetails.payment_type,
+        sale_group_id: selectedGroupForDetails.id,
         notes: `Fabric: ${newItemForm.fabric_name}`,
       };
 
@@ -652,6 +565,33 @@ export default function Sales() {
     }
   }
 
+  async function fetchPayments(saleIds) {
+    try {
+      const { data } = await supabase
+        .from("sale_payments")
+        .select("*")
+        .in("sale_id", Array.isArray(saleIds) ? saleIds : [saleIds])
+        .order("payment_date", { ascending: false });
+      setPayments(data || []);
+    } catch (error) {
+      console.error("Error fetching payments:", error);
+    }
+  }
+
+  function handleEdit(sale) {
+    setEditingId(sale.firstSaleId || sale.id);
+    setShowForm(true);
+  }
+
+  function handleViewPayments(group) {
+    setSelectedSale(group);
+    fetchPayments(group.items.map((i) => i.id));
+  }
+  function handleAddPayment(group) {
+    setSelectedSale(group);
+    setShowPaymentForm(true);
+  }
+
   const filteredSales = sales.filter((s) => {
     const customer = s.customer?.name?.toLowerCase() || "";
     const notes = s.notes?.toLowerCase() || "";
@@ -664,9 +604,7 @@ export default function Sales() {
     return matchesSearch && matchesType && matchesFrom && matchesTo;
   });
 
-  // Group sales by sale_group_id (each separate "New Sale" gets its own group)
   const groupedSales = filteredSales.reduce((acc, sale) => {
-    // Use sale_group_id if available, otherwise use individual id (for legacy data without sale_group_id)
     const key = sale.sale_group_id || sale.id;
     if (!acc[key]) {
       acc[key] = {
@@ -785,589 +723,28 @@ export default function Sales() {
           <option value="credit">Credit</option>
           <option value="partial">Partial</option>
         </select>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          className="input w-full sm:w-36"
-          placeholder="From"
-        />
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          className="input w-full sm:w-36"
-          placeholder="To"
+        <DateRangeFilter
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          setDateFrom={setDateFrom}
+          setDateTo={setDateTo}
+          label="Date"
+          resetPage={() => setPage(1)}
         />
       </div>
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Sale" : "New Sale"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  setEditingId(null);
-                }}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Customer Section */}
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Customer
-                  </span>
-                </div>
-                <div className="relative" ref={customerDropdownRef}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Search or Select Customer
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={
-                        showCustomerDropdown
-                          ? customerSearch
-                          : formData.customer_name || ""
-                      }
-                      onChange={(e) => {
-                        setCustomerSearch(e.target.value);
-                        setFormData({
-                          ...formData,
-                          customer_id: "",
-                          customer_name: e.target.value,
-                        });
-                        setShowCustomerDropdown(true);
-                      }}
-                      onFocus={() => {
-                        setCustomerSearch(formData.customer_name || "");
-                        setShowCustomerDropdown(true);
-                      }}
-                      className="input bg-white pr-10"
-                      placeholder="Type to search or select 'Walk-in Customer'"
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      {formData.customer_id && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormData({
-                              ...formData,
-                              customer_id: "",
-                              customer_name: "",
-                            });
-                            setCustomerSearch("");
-                          }}
-                          className="text-gray-400 hover:text-gray-600 p-0.5"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                      <ChevronDown
-                        className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
-                      />
-                    </div>
-                  </div>
-
-                  {showCustomerDropdown && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({
-                            ...formData,
-                            customer_id: null,
-                            customer_name: "Walk-in Customer",
-                          });
-                          setCustomerSearch("Walk-in Customer");
-                          setShowCustomerDropdown(false);
-                        }}
-                        className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${!formData.customer_id && formData.customer_name === "Walk-in Customer" ? "bg-primary-50 text-primary-700 font-medium" : ""}`}
-                      >
-                        Walk-in Customer
-                      </button>
-                      {customers
-                        .filter((c) =>
-                          c.name
-                            .toLowerCase()
-                            .includes(customerSearch.toLowerCase()),
-                        )
-                        .map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => {
-                              setFormData({
-                                ...formData,
-                                customer_id: c.id,
-                                customer_name: c.name,
-                              });
-                              setCustomerSearch(c.name);
-                              setShowCustomerDropdown(false);
-                            }}
-                            className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${formData.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""}`}
-                          >
-                            {c.name}
-                          </button>
-                        ))}
-                      {customers.filter((c) =>
-                        c.name
-                          .toLowerCase()
-                          .includes(customerSearch.toLowerCase()),
-                      ).length === 0 && (
-                        <div className="px-3 py-2.5 text-sm text-gray-400 italic">
-                          {customerSearch
-                            ? `Add "${customerSearch}" as new customer`
-                            : "No customers found"}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {!formData.customer_id && (
-                  <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Walk-in Customer Name
-                    </label>
-                    <input
-                      type="text"
-                      value={
-                        formData.customer_name === "Walk-in Customer"
-                          ? ""
-                          : formData.customer_name
-                      }
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setFormData({
-                          ...formData,
-                          customer_name: val || "Walk-in Customer",
-                        });
-                        setCustomerSearch(val);
-                      }}
-                      className="input bg-white"
-                      placeholder="Type specific name (e.g. John Doe)"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Fabric Details Section */}
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wide">
-                    Fabric Items
-                  </label>
-                  {formData.items.length > 1 && !editingId && (
-                    <span className="text-xs font-medium text-white bg-accent-500 px-2.5 py-1.5 rounded-full">
-                      {formData.items.length - 1} added
-                    </span>
-                  )}
-                </div>
-
-                {/* Display Added Items List (all except the last one) */}
-                {formData.items.length > 1 && !editingId && (
-                  <div className="space-y-2 mb-3 pb-3 border-b border-gray-200">
-                    {formData.items.slice(0, -1).map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-center justify-between"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-2 h-2 rounded-full bg-green-600" />
-                            <p className="font-semibold text-gray-900">
-                              {item.fabric_name || `Item ${idx + 1}`}
-                            </p>
-                            <span className="text-xs text-gray-700 font-medium">
-                              {item.meters}m @ ₹{item.price_per_meter}/m
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-700 font-medium">
-                            Total: ₹
-                            {(
-                              parseFloat(item.meters) *
-                              parseFloat(item.price_per_meter)
-                            ).toLocaleString("en-IN", {
-                              maximumFractionDigits: 2,
-                            })}
-                            {item.fabric_id && " • Inventory linked"}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              items: prev.items.filter((_, i) => i !== idx),
-                            }))
-                          }
-                          className="ml-2 p-2 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
-                          title="Remove item"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Current Item Being Edited Form */}
-                {(() => {
-                  const currentIdx = formData.items.length - 1;
-                  const item = formData.items[currentIdx];
-                  return (
-                    <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-white fabric-dropdown-container">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-gray-900 uppercase bg-gray-100 px-2 py-1 rounded">
-                          {editingId
-                            ? `Edit Sale`
-                            : `New Item ${formData.items.length}`}
-                        </span>
-                      </div>
-                      <div className="relative">
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Search or Select Fabric *
-                        </label>
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <input
-                              type="text"
-                              value={
-                                activeFabricDropdown === currentIdx
-                                  ? fabricSearch
-                                  : item.fabric_name || ""
-                              }
-                              onChange={(e) => {
-                                setFabricSearch(e.target.value);
-                                updateItem(currentIdx, {
-                                  fabric_id: "",
-                                  fabric_name: e.target.value,
-                                });
-                                setActiveFabricDropdown(currentIdx);
-                              }}
-                              onFocus={() => {
-                                // Only open dropdown on actual user focus, not on auto-focus from re-render
-                                if (!itemJustAdded) {
-                                  setFabricSearch(item.fabric_name || "");
-                                  setActiveFabricDropdown(currentIdx);
-                                }
-                              }}
-                              className="input bg-white pr-10"
-                              placeholder="Search inventory or type name"
-                              required
-                            />
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                              {item.fabric_id && (
-                                <div
-                                  className="w-2 h-2 rounded-full bg-accent-500"
-                                  title="Linked to inventory"
-                                />
-                              )}
-                              <ChevronDown
-                                className={`w-4 h-4 text-gray-600 transition-transform ${activeFabricDropdown === currentIdx ? "rotate-180" : ""}`}
-                              />
-                            </div>
-
-                            {activeFabricDropdown === currentIdx && (
-                              <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-                                {fabrics
-                                  .filter((f) =>
-                                    f.name
-                                      .toLowerCase()
-                                      .includes(fabricSearch.toLowerCase()),
-                                  )
-                                  .map((f) => (
-                                    <button
-                                      key={f.id}
-                                      type="button"
-                                      onClick={() => {
-                                        updateItem(currentIdx, {
-                                          fabric_id: f.id,
-                                          fabric_name: f.name,
-                                          cost_price_per_meter:
-                                            f.purchase_price_per_meter.toString(),
-                                          price_per_meter: (
-                                            f.selling_price_per_meter || ""
-                                          ).toString(),
-                                        });
-                                        setActiveFabricDropdown(null);
-                                      }}
-                                      className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
-                                    >
-                                      <div className="flex justify-between items-center">
-                                        <span>{f.name}</span>
-                                        <span className="text-[10px] text-gray-400">
-                                          {f.available_meters}m
-                                        </span>
-                                      </div>
-                                    </button>
-                                  ))}
-                                {fabrics.filter((f) =>
-                                  f.name
-                                    .toLowerCase()
-                                    .includes(fabricSearch.toLowerCase()),
-                                ).length === 0 && (
-                                  <div className="px-3 py-2.5 text-xs text-gray-400 italic">
-                                    No matching fabrics found
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setScanningItemIdx(currentIdx);
-                              setShowScanner(true);
-                            }}
-                            className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
-                          >
-                            <ScanLine className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {item.fabric_id && (
-                        <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-accent-500" />
-                            <div>
-                              <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                                Linked Inventory
-                              </p>
-                              <p className="text-sm font-semibold text-primary-900">
-                                {item.fabric_name}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                              Cost
-                            </p>
-                            <p className="text-sm font-semibold text-primary-900">
-                              ₹{item.cost_price_per_meter}/m
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                      <div
-                        className={`grid ${item.fabric_id ? "grid-cols-2" : "grid-cols-3"} gap-2`}
-                      >
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Meters *
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            required
-                            min="0.01"
-                            value={item.meters}
-                            onChange={(e) =>
-                              updateItem(currentIdx, { meters: e.target.value })
-                            }
-                            className="input bg-white"
-                            onWheel={(e) => e.target.blur()}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Price ₹/m *
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            required
-                            value={item.price_per_meter}
-                            onChange={(e) =>
-                              updateItem(currentIdx, {
-                                price_per_meter: e.target.value,
-                              })
-                            }
-                            className="input bg-white"
-                            onWheel={(e) => e.target.blur()}
-                          />
-                        </div>
-                        {!item.fabric_id && (
-                          <div>
-                            <label className="block text-xs font-bold text-gray-900 mb-1">
-                              Cost ₹/m
-                            </label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={item.cost_price_per_meter}
-                              onChange={(e) =>
-                                updateItem(currentIdx, {
-                                  cost_price_per_meter: e.target.value,
-                                })
-                              }
-                              className="input bg-white"
-                              onWheel={(e) => e.target.blur()}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {!editingId && (
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    className="w-full btn btn-primary flex items-center justify-center gap-2 text-sm"
-                  >
-                    <Plus className="w-4 h-4" /> Add Item
-                  </button>
-                )}
-              </div>
-
-              {/* Payment Section */}
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Payment
-                  </span>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Payment Type *
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      ["cash", "Full Cash"],
-                      ["partial", "Partial"],
-                      ["credit", "Full Credit"],
-                    ].map(([v, l]) => (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() =>
-                          setFormData({
-                            ...formData,
-                            payment_type: v,
-                            initial_payment:
-                              v === "partial" ? formData.initial_payment : "",
-                          })
-                        }
-                        className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                          formData.payment_type === v
-                            ? "bg-primary-600 text-white border-primary-600"
-                            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
-                        }`}
-                      >
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {formData.payment_type === "partial" && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Initial Payment
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.initial_payment}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          initial_payment: e.target.value,
-                        })
-                      }
-                      className="input bg-white"
-                      placeholder="Amount received now"
-                      onWheel={(e) => e.target.blur()}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Date & Notes Section */}
-              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    Details & Documents
-                  </span>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                    Sale Date
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.sale_date}
-                    onChange={(e) =>
-                      setFormData({ ...formData, sale_date: e.target.value })
-                    }
-                    className="input bg-white dark:bg-gray-800 dark:text-white dark:border-gray-600"
-                  />
-                </div>
-                <div>
-                  <FileUpload
-                    label="Bill/Invoice"
-                    file={formData.invoice_file}
-                    onFileChange={(f) =>
-                      setFormData({ ...formData, invoice_file: f })
-                    }
-                  />
-                </div>
-              </div>
-
-              {/* Totals Summary */}
-              {parseFloat(calculateTotal()) > 0 && (
-                <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Total Amount:</span>
-                    <span className="font-semibold">
-                      {formatCurrency(calculateTotal())}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Total Margin:</span>
-                    <span className="font-semibold text-accent-600">
-                      {formatCurrency(calculateMargin())}
-                    </span>
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setEditingId(null);
-                  }}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="btn btn-primary flex-1"
-                >
-                  {saving
-                    ? "Saving..."
-                    : editingId
-                      ? "Update Sale"
-                      : "Record Sale"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <SaleForm
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          setEditingId(null);
+        }}
+        editingId={editingId}
+        onSaved={() => fetchSales()}
+        fabrics={fabrics}
+        customers={customers}
+        customerDues={customerDues}
+      />
 
       {showScanner && (
         <BarcodeScanner
@@ -1685,7 +1062,20 @@ export default function Sales() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button
-                        onClick={() => setSelectedGroupForDetails(group)}
+                        onClick={() => {
+                          const g = group;
+                          setEditGroupFields({
+                            customer_id: g.customer_id || "",
+                            customer_name:
+                              g.customer?.name ||
+                              (g.customer_id ? "" : "Walk-in Customer"),
+                            sale_date: g.sale_date,
+                            payment_type: g.payment_type,
+                            initial_payment: "",
+                            invoice_file: null,
+                          });
+                          setSelectedGroupForDetails(g);
+                        }}
                         className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
                         title="View details"
                       >
@@ -1756,7 +1146,6 @@ export default function Sales() {
       {selectedGroupForDetails && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8">
-            {/* Header */}
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">Sale Items</h2>
@@ -1772,57 +1161,107 @@ export default function Sales() {
                 </p>
               </div>
               <button
-                onClick={() => setSelectedGroupForDetails(null)}
+                onClick={() => {
+                  setSelectedGroupForDetails(null);
+                  setEditingItemId(null);
+                  setActiveEditFabricDropdown(false);
+                  setEditItemFabricSearch("");
+                }}
                 className="p-2 hover:bg-gray-100 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Customer Info Card */}
-            <div className="bg-gradient-to-r from-primary-50 to-blue-50 rounded-lg p-4 mb-6 border border-primary-100">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
-                    Customer
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div className="bg-gradient-to-r from-primary-50 to-blue-50 rounded-lg p-4 border border-primary-100">
+                <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  Customer
+                </p>
+                <p className="font-semibold text-gray-900">
+                  {selectedGroupForDetails.customer?.name || "Walk-in Customer"}
+                </p>
+                {selectedGroupForDetails.customer?.phone && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {selectedGroupForDetails.customer.phone}
                   </p>
-                  <p className="font-semibold text-gray-900">
-                    {selectedGroupForDetails.customer?.name || "Walk-in"}
-                  </p>
+                )}
+              </div>
+
+              <div className="bg-gradient-to-r from-accent-50 to-green-50 rounded-lg p-4 border border-accent-100">
+                <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  Payment
+                </p>
+                <p className="font-semibold text-gray-900 mb-1">
+                  {paymentBadge(selectedGroupForDetails.payment_type)}
+                </p>
+                <div className="flex justify-between text-xs text-gray-600">
+                  <span>
+                    Total:{" "}
+                    <span className="font-semibold text-gray-900">
+                      ₹
+                      {selectedGroupForDetails.total_amount.toLocaleString(
+                        "en-IN",
+                      )}
+                    </span>
+                  </span>
+                  <span>
+                    Remaining:{" "}
+                    <span
+                      className={`font-semibold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
+                    >
+                      ₹
+                      {selectedGroupForDetails.remaining_amount.toLocaleString(
+                        "en-IN",
+                      )}
+                    </span>
+                  </span>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
-                    Date
-                  </p>
-                  <p className="font-semibold text-gray-900">
-                    {new Date(
-                      selectedGroupForDetails.sale_date,
-                    ).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
-                    Items
-                  </p>
-                  <p className="font-semibold text-primary-600">
-                    {selectedGroupForDetails.items.length}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
-                    Type
-                  </p>
-                  <p className="font-semibold">
-                    {paymentBadge(selectedGroupForDetails.payment_type)}
-                  </p>
-                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
+                <p className="text-xs text-gray-600 uppercase font-semibold mb-1">
+                  Details & Documents
+                </p>
+                <p className="text-sm text-gray-900">
+                  <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5" />
+                  {new Date(
+                    selectedGroupForDetails.sale_date,
+                  ).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </p>
+                {selectedGroupForDetails.items[0]?.invoice_url ? (
+                  <a
+                    href={selectedGroupForDetails.items[0].invoice_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-primary-600 hover:underline mt-1 inline-flex items-center gap-1"
+                  >
+                    <Paperclip className="w-3 h-3" />
+                    View Invoice
+                  </a>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-1">No invoice</p>
+                )}
               </div>
             </div>
 
-            {/* Items Section */}
+            <div className="flex justify-end mb-2">
+              <button
+                type="button"
+                onClick={() => setShowEditSaleInfo(true)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit Sale Info
+              </button>
+            </div>
+
+            <div className="border-t border-gray-200 my-4"></div>
+
             <div className="mb-6">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-semibold text-gray-900">
@@ -1843,61 +1282,260 @@ export default function Sales() {
                     key={item.id}
                     className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white"
                   >
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex-1">
-                        <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
-                          Item {idx + 1}
-                        </p>
-                        <p className="font-semibold text-gray-900">
-                          {item.notes
-                            ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
-                            ?.trim() || "N/A"}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          handleEdit(item);
-                          setSelectedGroupForDetails(null);
-                        }}
-                        className="ml-2 p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600 transition-colors"
-                        title="Edit item"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {editingItemId === item.id ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs text-gray-500 uppercase font-bold">
+                            Editing Item {idx + 1}
+                          </p>
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingItemId(null);
+                                setActiveEditFabricDropdown(false);
+                                setEditItemFabricSearch("");
+                              }}
+                              className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
+                              title="Cancel"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEditItemSave(item.id)}
+                              disabled={savingEditItem}
+                              className="p-1.5 hover:bg-green-50 rounded-lg text-gray-400 hover:text-green-600 transition-colors"
+                              title="Save"
+                            >
+                              <Save className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
 
-                    <div className="grid grid-cols-4 gap-3 text-sm">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Meters</p>
-                        <p className="font-semibold text-gray-900">
-                          {item.meters}m
-                        </p>
+                        <div className="relative edit-item-fabric-dropdown-container">
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Fabric Name
+                          </label>
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <input
+                                type="text"
+                                value={
+                                  activeEditFabricDropdown
+                                    ? editItemFabricSearch
+                                    : editItemForm.fabric_name || ""
+                                }
+                                onChange={(e) => {
+                                  setEditItemFabricSearch(e.target.value);
+                                  setEditItemForm({
+                                    ...editItemForm,
+                                    fabric_id: "",
+                                    fabric_name: e.target.value,
+                                  });
+                                  setActiveEditFabricDropdown(true);
+                                }}
+                                onFocus={() => {
+                                  setEditItemFabricSearch(
+                                    editItemForm.fabric_name || "",
+                                  );
+                                  setActiveEditFabricDropdown(true);
+                                }}
+                                className="input bg-white pr-10"
+                                placeholder="Search inventory or type name"
+                                required
+                              />
+                              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                <ChevronDown
+                                  className={`w-4 h-4 text-gray-600 transition-transform ${activeEditFabricDropdown ? "rotate-180" : ""}`}
+                                />
+                              </div>
+                              {activeEditFabricDropdown && (
+                                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                                  {fabrics
+                                    .filter((f) =>
+                                      f.name
+                                        .toLowerCase()
+                                        .includes(
+                                          editItemFabricSearch.toLowerCase(),
+                                        ),
+                                    )
+                                    .map((f) => (
+                                      <button
+                                        key={f.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setEditItemForm({
+                                            ...editItemForm,
+                                            fabric_id: f.id,
+                                            fabric_name: f.name,
+                                            cost_price_per_meter:
+                                              f.purchase_price_per_meter.toString(),
+                                            price_per_meter: (
+                                              f.selling_price_per_meter || ""
+                                            ).toString(),
+                                          });
+                                          setActiveEditFabricDropdown(false);
+                                        }}
+                                        className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                                      >
+                                        <div className="flex justify-between items-center">
+                                          <span>{f.name}</span>
+                                          <span className="text-[10px] text-gray-400">
+                                            {f.available_meters}m
+                                          </span>
+                                        </div>
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setScanningItemIdx("edit");
+                                setShowScanner(true);
+                              }}
+                              className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
+                            >
+                              <ScanLine className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                              Meters *
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={editItemForm.meters}
+                              onChange={(e) =>
+                                setEditItemForm({
+                                  ...editItemForm,
+                                  meters: e.target.value,
+                                })
+                              }
+                              className="input bg-white"
+                              required
+                              onWheel={(e) => e.target.blur()}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                              Price ₹/m *
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editItemForm.price_per_meter}
+                              onChange={(e) =>
+                                setEditItemForm({
+                                  ...editItemForm,
+                                  price_per_meter: e.target.value,
+                                })
+                              }
+                              className="input bg-white"
+                              required
+                              onWheel={(e) => e.target.blur()}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-gray-900 mb-1">
+                              Cost ₹/m
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editItemForm.cost_price_per_meter}
+                              onChange={(e) =>
+                                setEditItemForm({
+                                  ...editItemForm,
+                                  cost_price_per_meter: e.target.value,
+                                })
+                              }
+                              className="input bg-white"
+                              onWheel={(e) => e.target.blur()}
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Price/M</p>
-                        <p className="font-semibold text-gray-900">
-                          ₹{item.price_per_meter.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Total</p>
-                        <p className="font-semibold text-gray-900">
-                          ₹{item.total_amount.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Margin</p>
-                        <p className="font-semibold text-accent-600">
-                          ₹{item.margin.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex-1">
+                            <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
+                              Item {idx + 1}
+                            </p>
+                            <p className="font-semibold text-gray-900">
+                              {item.notes
+                                ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
+                                ?.trim() || "N/A"}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const fabricName =
+                                item.notes
+                                  ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
+                                  ?.trim() || "";
+                              setEditItemForm({
+                                fabric_id: item.fabric_id || "",
+                                fabric_name: fabricName,
+                                meters: item.meters.toString(),
+                                price_per_meter:
+                                  item.price_per_meter.toString(),
+                                cost_price_per_meter:
+                                  item.cost_price_per_meter.toString(),
+                              });
+                              setEditItemFabricSearch(fabricName);
+                              setEditingItemId(item.id);
+                            }}
+                            className="ml-2 p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600 transition-colors"
+                            title="Edit item"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-3 text-sm">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Meters</p>
+                            <p className="font-semibold text-gray-900">
+                              {item.meters}m
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">
+                              Price/M
+                            </p>
+                            <p className="font-semibold text-gray-900">
+                              ₹{item.price_per_meter.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Total</p>
+                            <p className="font-semibold text-gray-900">
+                              ₹{item.total_amount.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Margin</p>
+                            <p className="font-semibold text-accent-600">
+                              ₹{item.margin.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Summary Section */}
             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-6">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
@@ -1949,7 +1587,6 @@ export default function Sales() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex gap-3">
               <button
                 onClick={() => handleViewPayments(selectedGroupForDetails)}
@@ -1959,11 +1596,261 @@ export default function Sales() {
                 View Payments
               </button>
               <button
-                onClick={() => setSelectedGroupForDetails(null)}
+                onClick={() => {
+                  setSelectedGroupForDetails(null);
+                  setEditingItemId(null);
+                  setActiveEditFabricDropdown(false);
+                  setEditItemFabricSearch("");
+                }}
                 className="flex-1 btn btn-primary"
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditSaleInfo && selectedGroupForDetails && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Edit Sale Info</h2>
+              <button
+                onClick={() => setShowEditSaleInfo(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Customer
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerTab("existing");
+                      setCustomerSearch("");
+                      setEditGroupFields({
+                        ...editGroupFields,
+                        customer_id: "",
+                        customer_name: "",
+                      });
+                    }}
+                    className={`py-2 rounded-xl text-sm font-medium border transition-all ${
+                      customerTab === "existing"
+                        ? "bg-primary-600 text-white border-primary-600"
+                        : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                    }`}
+                  >
+                    <Users className="w-4 h-4 inline mr-1.5 mb-0.5" />
+                    Existing Customer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerTab("walkin");
+                      setEditGroupFields({
+                        ...editGroupFields,
+                        customer_id: "",
+                        customer_name: "Walk-in Customer",
+                      });
+                      setCustomerSearch("");
+                    }}
+                    className={`py-2 rounded-xl text-sm font-medium border transition-all ${
+                      customerTab === "walkin"
+                        ? "bg-primary-600 text-white border-primary-600"
+                        : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                    }`}
+                  >
+                    <UserPlus className="w-4 h-4 inline mr-1.5 mb-0.5" />
+                    Walk-in
+                  </button>
+                </div>
+                {customerTab === "existing" ? (
+                  <div className="relative">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Search Customer
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={
+                          showCustomerDropdown
+                            ? customerSearch
+                            : editGroupFields.customer_name || ""
+                        }
+                        onChange={(e) => {
+                          setCustomerSearch(e.target.value);
+                          setEditGroupFields({
+                            ...editGroupFields,
+                            customer_id: "",
+                            customer_name: e.target.value,
+                          });
+                          setShowCustomerDropdown(true);
+                        }}
+                        onFocus={() => {
+                          setCustomerSearch(
+                            editGroupFields.customer_name || "",
+                          );
+                          setShowCustomerDropdown(true);
+                        }}
+                        className="input bg-white pr-10"
+                        placeholder="Type to search customer..."
+                      />
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <ChevronDown
+                          className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
+                        />
+                      </div>
+                    </div>
+                    {showCustomerDropdown && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                        {customers
+                          .filter((c) =>
+                            c.name
+                              .toLowerCase()
+                              .includes(customerSearch.toLowerCase()),
+                          )
+                          .map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setEditGroupFields({
+                                  ...editGroupFields,
+                                  customer_id: c.id,
+                                  customer_name: c.name,
+                                });
+                                setCustomerSearch(c.name);
+                                setShowCustomerDropdown(false);
+                              }}
+                              className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
+                            >
+                              {c.name}
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Enter Walk-in Name
+                    </label>
+                    <input
+                      type="text"
+                      value={
+                        editGroupFields.customer_name === "Walk-in Customer"
+                          ? ""
+                          : editGroupFields.customer_name
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditGroupFields({
+                          ...editGroupFields,
+                          customer_id: "",
+                          customer_name: val || "Walk-in Customer",
+                        });
+                      }}
+                      className="input bg-white"
+                      placeholder="e.g. John Doe"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Payment
+                </span>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Payment Type
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ["cash", "Full Cash"],
+                      ["partial", "Partial"],
+                      ["credit", "Full Credit"],
+                    ].map(([v, l]) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() =>
+                          setEditGroupFields({
+                            ...editGroupFields,
+                            payment_type: v,
+                          })
+                        }
+                        className={`py-2 rounded-xl text-sm font-medium border transition-all ${
+                          editGroupFields.payment_type === v
+                            ? "bg-primary-600 text-white border-primary-600"
+                            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Details & Documents
+                </span>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Sale Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editGroupFields.sale_date}
+                    onChange={(e) =>
+                      setEditGroupFields({
+                        ...editGroupFields,
+                        sale_date: e.target.value,
+                      })
+                    }
+                    className="input bg-white"
+                  />
+                </div>
+                <FileUpload
+                  label="Bill/Invoice"
+                  file={editGroupFields.invoice_file}
+                  onFileChange={(f) =>
+                    setEditGroupFields({
+                      ...editGroupFields,
+                      invoice_file: f,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditSaleInfo(false)}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleEditGroupFieldsSave();
+                    setShowEditSaleInfo(false);
+                  }}
+                  disabled={savingGroupFields}
+                  className="btn btn-primary flex-1"
+                >
+                  {savingGroupFields ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2163,34 +2050,6 @@ export default function Sales() {
                 />
               </div>
 
-              {newItemForm.meters && newItemForm.price_per_meter && (
-                <div className="bg-gray-50 rounded-lg p-3 space-y-1">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Item Total:</span>
-                    <span className="font-semibold">
-                      ₹
-                      {(
-                        parseFloat(newItemForm.meters) *
-                        parseFloat(newItemForm.price_per_meter)
-                      ).toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  {newItemForm.cost_price_per_meter && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Margin:</span>
-                      <span className="font-semibold text-accent-600">
-                        ₹
-                        {(
-                          parseFloat(newItemForm.meters) *
-                          (parseFloat(newItemForm.price_per_meter) -
-                            parseFloat(newItemForm.cost_price_per_meter))
-                        ).toLocaleString("en-IN")}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -2228,7 +2087,9 @@ export default function Sales() {
         <div className="text-center py-16">
           <TrendingUp className="w-10 h-10 text-gray-200 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No sales found</p>
-          <p className="text-gray-300 text-sm mt-1">Try adjusting your filters</p>
+          <p className="text-gray-300 text-sm mt-1">
+            Try adjusting your filters
+          </p>
         </div>
       )}
     </div>

@@ -15,7 +15,9 @@ import {
   Paperclip,
   FileText,
   Download,
+  ShoppingBag,
 } from "lucide-react";
+import DateRangeFilter from "./DateRangeFilter";
 import { exportCSV } from "../utils/export";
 import {
   validatePurchase,
@@ -372,17 +374,13 @@ export default function Purchases() {
           <option value="partial">Partial</option>
           <option value="paid">Paid</option>
         </select>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          className="input w-full sm:w-36"
-        />
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          className="input w-full sm:w-36"
+        <DateRangeFilter
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          setDateFrom={setDateFrom}
+          setDateTo={setDateTo}
+          label="Date"
+          resetPage={() => setPage(1)}
         />
       </div>
 
@@ -960,7 +958,9 @@ export default function Purchases() {
         <div className="text-center py-16">
           <ShoppingBag className="w-10 h-10 text-gray-200 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No purchases found</p>
-          <p className="text-gray-300 text-sm mt-1">Try adjusting your filters</p>
+          <p className="text-gray-300 text-sm mt-1">
+            Try adjusting your filters
+          </p>
         </div>
       )}
 

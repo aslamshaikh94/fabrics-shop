@@ -13,6 +13,7 @@ import {
   MessageCircle,
   ChevronLeft,
   ChevronRight,
+  Users,
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
@@ -33,7 +34,6 @@ export default function Customers() {
     name: "",
     phone: "",
     address: "",
-    credit_limit: "",
     notes: "",
   });
   const [ledgerCustomer, setLedgerCustomer] = useState(null);
@@ -87,7 +87,6 @@ export default function Customers() {
         name: formData.name,
         phone: formData.phone,
         address: formData.address,
-        credit_limit: parseFloat(formData.credit_limit) || 0,
         notes: formData.notes,
       };
       if (editingId) {
@@ -108,7 +107,6 @@ export default function Customers() {
         name: "",
         phone: "",
         address: "",
-        credit_limit: "",
         notes: "",
       });
       fetchCustomers();
@@ -147,7 +145,6 @@ export default function Customers() {
       name: customer.name,
       phone: customer.phone,
       address: customer.address,
-      credit_limit: customer.credit_limit.toString(),
       notes: customer.notes,
     });
     setEditingId(customer.id);
@@ -198,7 +195,6 @@ export default function Customers() {
               name: "",
               phone: "",
               address: "",
-              credit_limit: "",
               notes: "",
             });
           }}
@@ -276,21 +272,6 @@ export default function Customers() {
                   }
                   className="input"
                   placeholder="Address"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Credit Limit
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.credit_limit}
-                  onChange={(e) =>
-                    setFormData({ ...formData, credit_limit: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Maximum credit allowed"
                 />
               </div>
               <div>
@@ -438,7 +419,9 @@ export default function Customers() {
               : "No customers added yet"}
           </p>
           <p className="text-gray-300 text-sm mt-1">
-            {searchTerm ? "Try a different search term" : "Click Add Customer to get started"}
+            {searchTerm
+              ? "Try a different search term"
+              : "Click Add Customer to get started"}
           </p>
         </div>
       )}
