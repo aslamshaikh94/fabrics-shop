@@ -16,6 +16,8 @@ import {
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import DateRangeFilter from "./DateRangeFilter";
+import { formatDate } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -36,6 +38,8 @@ export default function Fabrics() {
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterSupplier, setFilterSupplier] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const toast = useToast();
@@ -50,7 +54,7 @@ export default function Fabrics() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterSupplier]);
+  }, [searchTerm, filterSupplier, dateFrom, dateTo]);
 
   async function fetchFabrics() {
     try {
@@ -176,7 +180,10 @@ export default function Fabrics() {
       .includes(searchTerm.toLowerCase());
     const matchesSupplier =
       filterSupplier === "all" || f.supplier_id === filterSupplier;
-    return matchesSearch && matchesSupplier;
+    const matchesFrom = !dateFrom || (f.created_at && f.created_at >= dateFrom);
+    const matchesTo =
+      !dateTo || (f.created_at && f.created_at <= dateTo + "T23:59:59");
+    return matchesSearch && matchesSupplier && matchesFrom && matchesTo;
   });
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -252,6 +259,14 @@ export default function Fabrics() {
             </option>
           ))}
         </select>
+        <DateRangeFilter
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          setDateFrom={setDateFrom}
+          setDateTo={setDateTo}
+          label="Added"
+          resetPage={() => setPage(1)}
+        />
       </div>
 
       {showForm && (
@@ -500,6 +515,9 @@ export default function Fabrics() {
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Supplier
               </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                Date Added
+              </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 Available
               </th>
@@ -539,6 +557,11 @@ export default function Fabrics() {
                 <td className="px-4 py-3">
                   <p className="text-sm text-gray-600">
                     {fabric.supplier?.name || "—"}
+                  </p>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <p className="text-sm text-gray-600">
+                    {fabric.created_at ? formatDate(fabric.created_at) : "—"}
                   </p>
                 </td>
                 <td className="px-4 py-3 text-center">

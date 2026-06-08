@@ -17,6 +17,7 @@ import {
 import { validateExpense, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import DateRangeFilter from "./DateRangeFilter";
 
 const PAGE_SIZE = 10;
 
@@ -50,6 +51,8 @@ export default function Expenses() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterMonth, setFilterMonth] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [formData, setFormData] = useState(emptyForm);
   const [formErrors, setFormErrors] = useState({});
@@ -64,7 +67,7 @@ export default function Expenses() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterCategory, filterMonth]);
+  }, [searchTerm, filterCategory, filterMonth, dateFrom, dateTo]);
 
   async function fetchExpenses() {
     try {
@@ -195,7 +198,9 @@ export default function Expenses() {
       e.notes?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchCat = filterCategory === "all" || e.category === filterCategory;
     const matchMonth = !filterMonth || e.expense_date.startsWith(filterMonth);
-    return matchSearch && matchCat && matchMonth;
+    const matchesFrom = !dateFrom || e.expense_date >= dateFrom;
+    const matchesTo = !dateTo || e.expense_date <= dateTo;
+    return matchSearch && matchCat && matchMonth && matchesFrom && matchesTo;
   });
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -261,8 +266,8 @@ export default function Expenses() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
@@ -289,6 +294,14 @@ export default function Expenses() {
           value={filterMonth}
           onChange={(e) => setFilterMonth(e.target.value)}
           className="input w-full sm:w-40"
+        />
+        <DateRangeFilter
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          setDateFrom={setDateFrom}
+          setDateTo={setDateTo}
+          label=""
+          resetPage={() => setPage(1)}
         />
       </div>
 

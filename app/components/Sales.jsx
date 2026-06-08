@@ -25,6 +25,7 @@ import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import FileUpload from "./FileUpload";
+import DateRangeFilter from "./DateRangeFilter";
 import { formatCurrency, formatDate } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
@@ -785,19 +786,13 @@ export default function Sales() {
           <option value="credit">Credit</option>
           <option value="partial">Partial</option>
         </select>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          className="input w-full sm:w-36"
-          placeholder="From"
-        />
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          className="input w-full sm:w-36"
-          placeholder="To"
+        <DateRangeFilter
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          setDateFrom={setDateFrom}
+          setDateTo={setDateTo}
+          label="Date"
+          resetPage={() => setPage(1)}
         />
       </div>
 
