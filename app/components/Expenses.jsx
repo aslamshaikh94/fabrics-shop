@@ -218,7 +218,7 @@ export default function Expenses() {
   if (loading)
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
       </div>
     );
 
@@ -294,8 +294,8 @@ export default function Expenses() {
 
       {/* Add Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">
                 {editingId ? "Edit Expense" : "Add Expense"}
@@ -640,21 +640,27 @@ export default function Expenses() {
       )}
 
       {filtered.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
-          {searchTerm || filterCategory !== "all" || filterMonth
-            ? "No expenses match your filters"
-            : "No expenses recorded yet"}
+        <div className="text-center py-16">
+          <Receipt className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+          <p className="text-gray-400 font-medium">
+            {searchTerm || filterCategory !== "all" || filterMonth
+              ? "No expenses match your filters"
+              : "No expenses recorded yet"}
+          </p>
+          <p className="text-gray-300 text-sm mt-1">
+            {searchTerm || filterCategory !== "all" || filterMonth ? "Try adjusting your filters" : "Click Add Expense to get started"}
+          </p>
         </div>
       )}
 
       {/* Payment Proof Popup */}
       {viewProofUrl && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] p-4"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
           onClick={() => setViewProofUrl(null)}
         >
           <div
-            className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
+            className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">

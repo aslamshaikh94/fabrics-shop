@@ -230,7 +230,7 @@ export default function Payments() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
       </div>
     );
   }
@@ -708,16 +708,18 @@ export default function Payments() {
           )}
 
           {allPayments.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
-              No payments found matching your filters
+            <div className="text-center py-16">
+              <CreditCard className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+              <p className="text-gray-400 font-medium">No payments found matching your filters</p>
+              <p className="text-gray-300 text-sm mt-1">Try adjusting your search or filters</p>
             </div>
           )}
         </>
       )}
 
       {editingPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Edit Payment</h2>
               <button

@@ -5,10 +5,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-import {
-  TrendingUp, TrendingDown, DollarSign, ShoppingBag, Receipt,
-  Users, AlertCircle, Package, MessageCircle,
-} from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, ShoppingBag, Receipt, Users, CircleAlert as AlertCircle, Package, MessageCircle } from 'lucide-react';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}`; }
@@ -178,7 +175,7 @@ export default function Reports() {
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
     </div>
   );
 

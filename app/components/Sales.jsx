@@ -714,7 +714,7 @@ export default function Sales() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
       </div>
     );
   }
@@ -802,8 +802,8 @@ export default function Sales() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">
                 {editingId ? "Edit Sale" : "New Sale"}
@@ -1377,8 +1377,8 @@ export default function Sales() {
       )}
 
       {showPaymentForm && selectedSale && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Receive Payment</h2>
               <button
@@ -1502,8 +1502,8 @@ export default function Sales() {
       )}
 
       {selectedSale && !showPaymentForm && payments.length > 0 && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Payment History</h2>
               <button
@@ -1754,8 +1754,8 @@ export default function Sales() {
       )}
 
       {selectedGroupForDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8">
             {/* Header */}
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
               <div>
@@ -1970,8 +1970,8 @@ export default function Sales() {
       )}
 
       {showAddItemForm && selectedGroupForDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Add Item to Sale</h2>
               <button
@@ -2225,7 +2225,11 @@ export default function Sales() {
       )}
 
       {groupedArray.length === 0 && (
-        <div className="text-center py-12 text-gray-500">No sales found</div>
+        <div className="text-center py-16">
+          <TrendingUp className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+          <p className="text-gray-400 font-medium">No sales found</p>
+          <p className="text-gray-300 text-sm mt-1">Try adjusting your filters</p>
+        </div>
       )}
     </div>
   );
