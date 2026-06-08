@@ -1,11 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-  LayoutDashboard, ShoppingBag, Users, DollarSign, CreditCard,
-  Menu, X, TrendingUp, BarChart2, Package, Receipt, Sun, Moon, LogOut, Zap,
-  ChevronRight,
-} from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Users, DollarSign, CreditCard, Menu, X, TrendingUp, ChartBar as BarChart2, Package, Receipt, Sun, Moon, LogOut, Zap, ChevronRight } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 import { useAuth } from './AuthGuard';
 import Dashboard from './Dashboard';
@@ -44,12 +40,14 @@ export default function Shell() {
   const { isAdmin, user } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dark, setDark] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('theme') === 'dark';
-    }
-    return false;
-  });
+  const [dark, setDark] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = saved ? saved === 'dark' : prefersDark;
+    setDark(isDark);
+  }, []);
 
   const navItems = ALL_NAV.filter(item => !item.adminOnly || isAdmin);
   const bottomNavItems = BOTTOM_NAV.filter(item => !item.adminOnly || isAdmin);
