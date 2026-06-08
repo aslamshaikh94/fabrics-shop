@@ -1,14 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  X,
-  ScanLine,
-  Search,
-  ChevronDown,
-  CheckCircle,
-  Plus,
-} from "lucide-react";
+import { X, ScanLine, Search, ChevronDown, CircleCheck as CheckCircle, Plus } from "lucide-react";
 import { validateSale, hasErrors } from "../utils/validators";
 import BarcodeScanner from "./BarcodeScanner";
 import FileUpload from "./FileUpload";
@@ -391,8 +384,8 @@ export default function SaleForm({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-      <div className="bg-white rounded-xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">
             {editingId ? "Edit Sale" : "New Sale"}

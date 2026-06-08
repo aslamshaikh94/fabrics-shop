@@ -19,7 +19,7 @@ export default function AuthGuard({ children }) {
   if (session === undefined) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600" />
       </div>
     );
   }

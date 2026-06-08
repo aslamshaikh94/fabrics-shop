@@ -52,8 +52,8 @@ export default function SupplierLedger({ supplier, onClose }) {
   }).reverse(); // Show latest first
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-      <div className="bg-white rounded-xl w-full max-w-2xl m-4 my-8 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl m-4 my-8 flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-100 shrink-0">
           <div>

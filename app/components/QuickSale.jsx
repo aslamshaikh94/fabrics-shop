@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { ScanLine, Search, X, CheckCircle, Zap } from "lucide-react";
+import { ScanLine, Search, X, CircleCheck as CheckCircle, Zap } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
 
@@ -116,7 +116,7 @@ export default function QuickSale() {
   if (loading)
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
       </div>
     );
 

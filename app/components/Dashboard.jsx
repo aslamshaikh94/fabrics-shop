@@ -1,18 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  TrendingUp,
-  TrendingDown,
-  Package,
-  DollarSign,
-  Users,
-  AlertTriangle,
-  AlertCircle,
-  ShoppingBag,
-  CreditCard,
-  Receipt,
-} from "lucide-react";
+import { TrendingUp, TrendingDown, Package, DollarSign, Users, TriangleAlert as AlertTriangle, CircleAlert as AlertCircle, ShoppingBag, CreditCard, Receipt } from "lucide-react";
 
 function pctChange(curr, prev) {
   if (!prev) return null;
@@ -143,7 +132,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
       </div>
     );
   }
@@ -198,7 +187,7 @@ export default function Dashboard() {
         ].map((card) => {
           const Icon = card.icon;
           return (
-            <div key={card.title} className="card p-4">
+            <div key={card.title} className="card-hover p-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs font-medium text-gray-500 leading-tight">
                   {card.title}
@@ -231,7 +220,7 @@ export default function Dashboard() {
       </div>
 
       {/* Inventory Value breakdown */}
-      <div className="card p-4">
+      <div className="card-hover p-4">
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             Current Stock Value (at Cost)
@@ -265,7 +254,7 @@ export default function Dashboard() {
       </div>
 
       {/* Supplier payment breakdown */}
-      <div className="card p-4">
+      <div className="card-hover p-4">
         <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
           Supplier Payments
         </p>

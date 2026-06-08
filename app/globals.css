@@ -12,8 +12,54 @@
     transform: translateX(0);
   }
 }
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
 .animate-slide-in {
   animation: slide-in 0.25s ease-out;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-modal-in {
+  animation: modal-in 0.2s ease-out;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
 }
 
 body {
@@ -58,11 +104,11 @@ input[type="date"] {
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98];
   }
 
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800 shadow-sm;
+    @apply bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800 shadow-sm hover:shadow;
   }
 
   .btn-secondary {
@@ -78,11 +124,15 @@ input[type="date"] {
   }
 
   .input {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400;
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500 transition-all duration-150 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 dark:focus:ring-primary-400/40 dark:focus:border-primary-400;
   }
 
   .card {
     @apply bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden dark:bg-gray-800 dark:border-gray-700;
+  }
+
+  .card-hover {
+    @apply card hover:shadow-md hover:border-gray-200 dark:hover:border-gray-600 transition-all duration-200;
   }
 
   .badge {
@@ -109,6 +159,42 @@ input[type="date"] {
   .badge-gray {
     @apply bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200;
   }
+}
+
+/* Table styling */
+.data-table {
+  width: 100%;
+}
+.data-table thead {
+  background-color: rgb(249 250 251);
+  border-bottom: 1px solid rgb(229 231 235);
+}
+.dark .data-table thead {
+  background-color: rgb(55 65 81 / 0.5);
+  border-bottom-color: rgb(75 85 99);
+}
+.data-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgb(107 114 128);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.dark .data-table th {
+  color: rgb(156 163 175);
+}
+.data-table th.text-right { text-align: right; }
+.data-table th.text-center { text-align: center; }
+.data-table tbody tr {
+  transition: background-color 0.15s;
+}
+.data-table tbody tr:hover {
+  background-color: rgb(249 250 251 / 0.8);
+}
+.dark .data-table tbody tr:hover {
+  background-color: rgb(55 65 81 / 0.3);
 }
 
 /* Dark mode overrides for common hardcoded Tailwind classes */
@@ -181,4 +267,38 @@ input[type="date"] {
   background-color: rgb(31 41 55);
   color: rgb(229 231 235);
   border-color: rgb(75 85 99);
+}
+
+/* Scrollbar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgb(200 200 200);
+  border-radius: 4px;
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgb(100 100 100);
+}
+
+/* Safe area for mobile bottom nav */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Modal styling */
+.modal-container {
+  background-color: white;
+  border-radius: 1rem;
+  width: 100%;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  border: 1px solid rgb(243 244 246);
+  animation: modal-in 0.2s ease-out;
+}
+.dark .modal-container {
+  background-color: rgb(31 41 55);
+  border-color: rgb(55 65 81);
 }
