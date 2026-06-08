@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext, useState, useEffect } from 'react';
 import { getSupabase } from '../lib/supabase';
-import LoginPage from '../login/page';
+import LoginForm from './LoginForm';
 
 const AuthContext = createContext({ isAdmin: false, user: null });
 export const useAuth = () => useContext(AuthContext);
@@ -24,7 +24,7 @@ export default function AuthGuard({ children }) {
     );
   }
 
-  if (!session) return <LoginPage />;
+  if (!session) return <LoginForm />;
 
   // app_metadata is set server-side only — cannot be tampered by the user
   const isAdmin = session.user.app_metadata?.role === 'admin';
