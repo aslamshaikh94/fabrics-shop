@@ -13,6 +13,7 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  Receipt,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
@@ -661,7 +662,9 @@ export default function Expenses() {
               : "No expenses recorded yet"}
           </p>
           <p className="text-gray-300 text-sm mt-1">
-            {searchTerm || filterCategory !== "all" || filterMonth ? "Try adjusting your filters" : "Click Add Expense to get started"}
+            {searchTerm || filterCategory !== "all" || filterMonth
+              ? "Try adjusting your filters"
+              : "Click Add Expense to get started"}
           </p>
         </div>
       )}

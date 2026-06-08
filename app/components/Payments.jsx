@@ -14,6 +14,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  CreditCard,
 } from "lucide-react";
 
 import { useToast } from "./Toast";
@@ -710,8 +711,12 @@ export default function Payments() {
           {allPayments.length === 0 && (
             <div className="text-center py-16">
               <CreditCard className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-              <p className="text-gray-400 font-medium">No payments found matching your filters</p>
-              <p className="text-gray-300 text-sm mt-1">Try adjusting your search or filters</p>
+              <p className="text-gray-400 font-medium">
+                No payments found matching your filters
+              </p>
+              <p className="text-gray-300 text-sm mt-1">
+                Try adjusting your search or filters
+              </p>
             </div>
           )}
         </>

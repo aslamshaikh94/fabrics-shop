@@ -9,8 +9,13 @@ export const validateSale = (formData) => {
   if (!formData.items || formData.items.length === 0) {
     errors.items = "At least one item is required";
   } else {
-    // Check each item
-    for (let i = 0; i < formData.items.length; i++) {
+    // Validate all items except the last one, UNLESS it's the only item.
+    // The last item is considered the "new item" row and is validated on "Add Item".
+    const numItemsToValidate =
+      formData.items.length === 1
+        ? 1 // If only one item, validate it (it's the primary item for the sale)
+        : formData.items.length - 1; // Otherwise, validate all but the last (the "new item" row)
+    for (let i = 0; i < numItemsToValidate; i++) {
       const item = formData.items[i];
       if (!item.fabric_name || item.fabric_name.trim() === "") {
         errors[`fabric_name_${i}`] = `Item ${i + 1}: Fabric name is required`;
