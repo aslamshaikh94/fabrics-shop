@@ -90,6 +90,17 @@ export default function Shell() {
     localStorage.setItem("theme", dark ? "dark" : "light");
   }, [dark]);
 
+  // Listen for custom navigate events from child components
+  useEffect(() => {
+    function handleNavigate(e) {
+      if (e.detail?.page && allowedIds.includes(e.detail.page)) {
+        setCurrentPage(e.detail.page);
+      }
+    }
+    window.addEventListener("navigate", handleNavigate);
+    return () => window.removeEventListener("navigate", handleNavigate);
+  }, [allowedIds.join(",")]);
+
   function navigate(id) {
     if (!allowedIds.includes(id)) return;
     setCurrentPage(id);

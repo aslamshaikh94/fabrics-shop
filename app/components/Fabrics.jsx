@@ -1,7 +1,18 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Plus, Pencil, Trash2, X, Search, Package, TriangleAlert as AlertTriangle, ScanLine, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  X,
+  Search,
+  Package,
+  TriangleAlert as AlertTriangle,
+  ScanLine,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
@@ -17,7 +28,7 @@ const emptyRow = {
   quantity: "",
   barcode: "",
 };
-const emptyForm = { supplier_id: "" };
+const emptyForm = { supplier_id: "", purchase_number: "" };
 
 export default function Fabrics() {
   const [fabrics, setFabrics] = useState([]);
@@ -33,6 +44,8 @@ export default function Fabrics() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const toast = useToast();
   const [formData, setFormData] = useState(emptyForm);
+  const [existingPurchaseInfo, setExistingPurchaseInfo] = useState(null);
+  const [linkingPurchase, setLinkingPurchase] = useState(false);
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
 
@@ -52,7 +65,30 @@ export default function Fabrics() {
         .select("*, supplier:suppliers(*)")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      setFabrics(data || []);
+
+      // Fetch purchase numbers for fabrics that have purchase_id
+      const fabricsWithPurchase = (data || []).filter((f) => f.purchase_id);
+      const purchaseIds = fabricsWithPurchase.map((f) => f.purchase_id);
+      let purchaseMap = {};
+      if (purchaseIds.length > 0) {
+        const { data: purchases } = await supabase
+          .from("purchases")
+          .select("id, purchase_number")
+          .in("id", purchaseIds);
+        if (purchases) {
+          purchaseMap = Object.fromEntries(
+            purchases.map((p) => [p.id, p.purchase_number]),
+          );
+        }
+      }
+
+      const enriched = (data || []).map((f) => ({
+        ...f,
+        purchase: f.purchase_id
+          ? { purchase_number: purchaseMap[f.purchase_id] || null }
+          : null,
+      }));
+      setFabrics(enriched);
     } catch (err) {
       console.error("Error fetching fabrics:", err);
     } finally {
@@ -108,6 +144,57 @@ export default function Fabrics() {
         toast("Fabric updated");
       } else {
         const validRows = rows.filter((r) => r.name.trim());
+
+        // Determine purchase_id - link to existing purchase or create new
+        let purchaseId;
+        const newFabricsTotal = validRows.reduce(
+          (sum, r) =>
+            sum +
+            (parseFloat(r.total_meters) || 0) *
+              (parseFloat(r.purchase_price_per_meter) || 0),
+          0,
+        );
+        if (existingPurchaseInfo) {
+          // Link to the existing purchase by its ID
+          // Recalculate total from ALL fabrics linked to this purchase
+          purchaseId = existingPurchaseInfo.id;
+          const { data: linkedFabrics } = await supabase
+            .from("fabrics")
+            .select("total_meters, purchase_price_per_meter")
+            .eq("purchase_id", purchaseId);
+          const existingTotal = (linkedFabrics || []).reduce(
+            (sum, f) =>
+              sum +
+              (parseFloat(f.total_meters) || 0) *
+                (parseFloat(f.purchase_price_per_meter) || 0),
+            0,
+          );
+          const { error: updateError } = await supabase
+            .from("purchases")
+            .update({
+              total_amount: existingTotal + newFabricsTotal,
+            })
+            .eq("id", purchaseId);
+          if (updateError) throw updateError;
+        } else {
+          // Create a new purchase record
+          const { data: purchaseData, error: purchaseError } = await supabase
+            .from("purchases")
+            .insert([
+              {
+                supplier_id: formData.supplier_id || null,
+                total_amount: newFabricsTotal,
+                purchase_date: new Date().toISOString().split("T")[0],
+                notes: `Fabric purchase: ${validRows.map((r) => r.name).join(", ")}`,
+                status: "pending",
+              },
+            ])
+            .select()
+            .single();
+          if (purchaseError) throw purchaseError;
+          purchaseId = purchaseData.id;
+        }
+
         const payloads = validRows.map((r) => ({
           name: r.name,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
@@ -116,17 +203,20 @@ export default function Fabrics() {
           supplier_id: formData.supplier_id || null,
           quantity: r.quantity || "",
           barcode: r.barcode || "",
+          purchase_id: purchaseId,
         }));
         const { error } = await supabase.from("fabrics").insert(payloads);
         if (error) throw error;
         toast(
-          `${payloads.length} fabric${payloads.length > 1 ? "s" : ""} added`,
+          `${payloads.length} fabric${payloads.length > 1 ? "s" : ""} added${existingPurchaseInfo ? " and linked to " + existingPurchaseInfo.purchase_number : " with purchase record"}`,
         );
       }
       setShowForm(false);
       setEditingId(null);
       setFormData(emptyForm);
       setRows([{ ...emptyRow }]);
+      setExistingPurchaseInfo(null);
+      setLinkingPurchase(false);
       fetchFabrics();
     } catch (err) {
       console.error("Error saving fabric:", err);
@@ -292,6 +382,57 @@ export default function Fabrics() {
                   ))}
                 </select>
               </div>
+
+              {/* Link to existing purchase */}
+              {!editingId && (
+                <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Link to Existing Purchase (optional)
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      className="input flex-1"
+                      value={formData.purchase_number}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        setFormData({ ...formData, purchase_number: val });
+                        if (!val.trim()) {
+                          setExistingPurchaseInfo(null);
+                          return;
+                        }
+                        // Look up purchase by number
+                        const { data } = await supabase
+                          .from("purchases")
+                          .select(
+                            "id, purchase_number, total_amount, supplier:suppliers(name)",
+                          )
+                          .eq("purchase_number", val.trim())
+                          .single();
+                        if (data) {
+                          setExistingPurchaseInfo(data);
+                        } else {
+                          setExistingPurchaseInfo(null);
+                        }
+                      }}
+                      placeholder="Enter purchase number (e.g. PUR-00001)"
+                    />
+                  </div>
+                  {existingPurchaseInfo && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <p className="text-sm font-medium text-green-800">
+                        ✓ Linked to {existingPurchaseInfo.purchase_number}
+                      </p>
+                      <p className="text-xs text-green-600 mt-0.5">
+                        Supplier: {existingPurchaseInfo.supplier?.name} — ₹
+                        {existingPurchaseInfo.total_amount.toLocaleString(
+                          "en-IN",
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
                 <div className="flex items-center justify-between">
@@ -505,6 +646,9 @@ export default function Fabrics() {
                 Supplier
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                Purchase #
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Date Added
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
@@ -548,6 +692,11 @@ export default function Fabrics() {
                     {fabric.supplier?.name || "—"}
                   </p>
                 </td>
+                <td className="px-4 py-3">
+                  <p className="text-xs text-gray-600 font-mono">
+                    {fabric.purchase?.purchase_number || "—"}
+                  </p>
+                </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <p className="text-sm text-gray-600">
                     {fabric.created_at ? formatDate(fabric.created_at) : "—"}
@@ -587,6 +736,25 @@ export default function Fabrics() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
+                    {fabric.purchase?.purchase_number && (
+                      <button
+                        onClick={() => {
+                          localStorage.setItem(
+                            "prefill_purchase_number",
+                            fabric.purchase.purchase_number,
+                          );
+                          window.dispatchEvent(
+                            new CustomEvent("navigate", {
+                              detail: { page: "purchases" },
+                            }),
+                          );
+                        }}
+                        className="p-2 hover:bg-blue-100 rounded-lg text-gray-500 hover:text-blue-600"
+                        title={"View " + fabric.purchase.purchase_number}
+                      >
+                        <span className="text-xs font-mono">🛒</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => handleEdit(fabric)}
                       className="p-2 hover:bg-gray-200 rounded-lg text-gray-500 hover:text-gray-700"
@@ -650,7 +818,9 @@ export default function Fabrics() {
               : "No fabrics added yet"}
           </p>
           <p className="text-gray-300 text-sm mt-1">
-            {searchTerm ? "Try a different search term" : "Click Add Fabric to get started"}
+            {searchTerm
+              ? "Try a different search term"
+              : "Click Add Fabric to get started"}
           </p>
         </div>
       )}
