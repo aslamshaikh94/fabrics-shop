@@ -457,20 +457,31 @@ export default function Sales() {
           parseFloat(editGroupFields.initial_payment) > 0)
       ) {
         for (const item of selectedGroupForDetails.items) {
-          await supabase.from("sale_payments").delete().eq("sale_id", item.id);
+          const { error: delError } = await supabase
+            .from("sale_payments")
+            .delete()
+            .eq("sale_id", item.id);
+          if (delError)
+            throw new Error(`Failed to delete payment: ${delError.message}`);
         }
 
         if (editGroupFields.payment_type === "cash") {
           for (const item of selectedGroupForDetails.items) {
             const totalAmount = item.meters * item.price_per_meter;
-            await supabase.from("sale_payments").insert([
-              {
-                sale_id: item.id,
-                amount: totalAmount,
-                payment_date: editGroupFields.sale_date,
-                payment_method: "cash",
-              },
-            ]);
+            const { error: insError } = await supabase
+              .from("sale_payments")
+              .insert([
+                {
+                  sale_id: item.id,
+                  amount: totalAmount,
+                  payment_date: editGroupFields.sale_date,
+                  payment_method: "cash",
+                },
+              ]);
+            if (insError)
+              throw new Error(
+                `Failed to create cash payment: ${insError.message}`,
+              );
           }
         } else if (editGroupFields.payment_type === "partial") {
           let remaining = parseFloat(editGroupFields.initial_payment) || 0;
@@ -479,14 +490,20 @@ export default function Sales() {
             const itemTotal = item.meters * item.price_per_meter;
             const pay = Math.min(remaining, itemTotal);
             if (pay > 0) {
-              await supabase.from("sale_payments").insert([
-                {
-                  sale_id: item.id,
-                  amount: pay,
-                  payment_date: editGroupFields.sale_date,
-                  payment_method: "cash",
-                },
-              ]);
+              const { error: insError } = await supabase
+                .from("sale_payments")
+                .insert([
+                  {
+                    sale_id: item.id,
+                    amount: pay,
+                    payment_date: editGroupFields.sale_date,
+                    payment_method: "cash",
+                  },
+                ]);
+              if (insError)
+                throw new Error(
+                  `Failed to create partial payment: ${insError.message}`,
+                );
               remaining -= pay;
             }
           }
