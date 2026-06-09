@@ -1,7 +1,18 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { TrendingUp, TrendingDown, Package, DollarSign, Users, TriangleAlert as AlertTriangle, CircleAlert as AlertCircle, ShoppingBag, CreditCard, Receipt } from "lucide-react";
+import {
+  TrendingUp,
+  TrendingDown,
+  Package,
+  DollarSign,
+  Users,
+  TriangleAlert as AlertTriangle,
+  CircleAlert as AlertCircle,
+  ShoppingBag,
+  CreditCard,
+  Receipt,
+} from "lucide-react";
 
 function pctChange(curr, prev) {
   if (!prev) return null;
@@ -19,7 +30,7 @@ export default function Dashboard() {
     totalFabrics: 0,
     totalCustomers: 0,
     totalPurchases: 0,
-    totalExpenses: 0,
+    collectedAmount: 0,
     inventoryValue: 0,
   });
   const [changes, setChanges] = useState({});
@@ -45,10 +56,8 @@ export default function Dashboard() {
         thisMoSales,
         prevMoSales,
         recentRes,
-        expensesRes,
-        thisMoExpenses,
       ] = await Promise.all([
-        supabase.from("sales").select("remaining_amount"),
+        supabase.from("sales").select("total_amount, remaining_amount"),
         supabase
           .from("purchases")
           .select("total_amount, paid_amount, remaining_amount"),
@@ -72,11 +81,6 @@ export default function Dashboard() {
           )
           .order("sale_date", { ascending: false })
           .limit(6),
-        supabase.from("expenses").select("amount"),
-        supabase
-          .from("expenses")
-          .select("amount")
-          .gte("expense_date", `${thisMonth}-01`),
       ]);
 
       const invValue =
@@ -93,15 +97,15 @@ export default function Dashboard() {
         thisMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
       const prevProfit =
         prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
-      const currMonthExpenses =
-        thisMoExpenses.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0;
+      const totalSalesAmount =
+        salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
+      const totalRemaining =
+        salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0;
 
       setStats({
         thisMonthSales: currSales,
         thisMonthProfit: currProfit,
-        pendingSalePayments:
-          salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) ||
-          0,
+        pendingSalePayments: totalRemaining,
         pendingPurchasePayments:
           purchasesRes.data?.reduce(
             (s, r) => s + (r.remaining_amount || 0),
@@ -115,7 +119,7 @@ export default function Dashboard() {
         totalPurchases:
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
           0,
-        totalExpenses: currMonthExpenses,
+        collectedAmount: totalSalesAmount - totalRemaining,
       });
       setChanges({
         sales: pctChange(currSales, prevSales),
@@ -177,12 +181,12 @@ export default function Dashboard() {
             subtitle: "From customers",
           },
           {
-            title: "Total Expenses",
-            value: stats.totalExpenses,
+            title: "Collected Amount",
+            value: stats.collectedAmount,
             icon: Receipt,
-            iconBg: "bg-red-500",
-            valueBg: "text-red-600",
-            subtitle: `${monthName} ${now.getFullYear()}`,
+            iconBg: "bg-green-500",
+            valueBg: "text-green-600",
+            subtitle: "Total collected from sales",
           },
         ].map((card) => {
           const Icon = card.icon;
