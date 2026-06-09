@@ -494,10 +494,12 @@ export default function Sales() {
         // credit: no payments created (all deleted above)
       }
 
-      fetchSales();
+      await fetchSales();
+      setShowEditSaleInfo(false);
       toast("Sale info updated successfully");
     } catch (error) {
       console.error("Error updating sale info:", error);
+      setShowEditSaleInfo(false);
       toast("Failed to update sale info", "error");
     } finally {
       setSavingGroupFields(false);
@@ -1911,7 +1913,6 @@ export default function Sales() {
                   type="button"
                   onClick={() => {
                     handleEditGroupFieldsSave();
-                    setShowEditSaleInfo(false);
                   }}
                   disabled={savingGroupFields}
                   className="btn btn-primary flex-1"
