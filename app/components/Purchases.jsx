@@ -38,6 +38,7 @@ export default function Purchases() {
   const [showForm, setShowForm] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
+  const [purchaseFabrics, setPurchaseFabrics] = useState([]);
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -69,6 +70,12 @@ export default function Purchases() {
   useEffect(() => {
     fetchPurchases();
     fetchSuppliers();
+    // Check if we need to prefill search from fabrics page
+    const prefill = localStorage.getItem("prefill_purchase_number");
+    if (prefill) {
+      setSearchTerm(prefill);
+      localStorage.removeItem("prefill_purchase_number");
+    }
   }, []);
 
   async function fetchPurchases() {
@@ -234,6 +241,18 @@ export default function Purchases() {
     }
   }
 
+  async function fetchPurchaseFabrics(purchaseId) {
+    try {
+      const { data } = await supabase
+        .from("fabrics")
+        .select("*")
+        .eq("purchase_id", purchaseId);
+      setPurchaseFabrics(data || []);
+    } catch (error) {
+      console.error("Error fetching purchase fabrics:", error);
+    }
+  }
+
   function handleEdit(purchase) {
     setFormData({
       supplier_id: purchase.supplier_id,
@@ -249,6 +268,7 @@ export default function Purchases() {
   function handleViewPayments(purchase) {
     setSelectedPurchase(purchase);
     fetchPayments(purchase.id);
+    fetchPurchaseFabrics(purchase.id);
   }
 
   function handleAddPayment(purchase) {
@@ -273,7 +293,10 @@ export default function Purchases() {
   const filteredPurchases = purchases.filter((p) => {
     const matchesSearch =
       p.supplier?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.notes?.toLowerCase().includes(searchTerm.toLowerCase());
+      p.notes?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.purchase_number || "")
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase());
     const matchesStatus = filterStatus === "all" || p.status === filterStatus;
     const matchesFrom = !dateFrom || p.purchase_date >= dateFrom;
     const matchesTo = !dateTo || p.purchase_date <= dateTo;
@@ -685,14 +708,15 @@ export default function Purchases() {
         </div>
       )}
 
-      {selectedPurchase && !showPaymentForm && payments.length > 0 && (
+      {selectedPurchase && !showPaymentForm && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Payment History</h2>
+              <h2 className="text-xl font-semibold">Purchase Details</h2>
               <button
                 onClick={() => {
                   setSelectedPurchase(null);
+                  setPurchaseFabrics([]);
                   setPayments([]);
                 }}
                 className="p-2 hover:bg-gray-100 rounded-lg"
@@ -707,9 +731,11 @@ export default function Purchases() {
                   {selectedPurchase.supplier?.name}
                 </span>
               </p>
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedPurchase.notes}
-              </p>
+              {selectedPurchase.notes && (
+                <p className="text-sm text-gray-600 mt-1">
+                  {selectedPurchase.notes}
+                </p>
+              )}
               <div className="flex justify-between mt-2 pt-2 border-t border-gray-200">
                 <span className="text-sm">
                   Total:{" "}
@@ -725,35 +751,87 @@ export default function Purchases() {
                 </span>
               </div>
             </div>
-            <div className="space-y-2 max-h-80 overflow-y-auto">
-              {payments.map((payment) => (
-                <div key={payment.id} className="bg-gray-50 rounded-lg p-3">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        ₹{payment.amount.toLocaleString("en-IN")}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(payment.payment_date).toLocaleDateString(
-                          "en-IN",
-                          { day: "numeric", month: "short", year: "numeric" },
-                        )}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span className="badge bg-gray-200 text-gray-700">
-                        {payment.payment_method.toUpperCase()}
-                      </span>
-                      {payment.reference_number && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {payment.reference_number}
+
+            {purchaseFabrics.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Purchased Fabrics ({purchaseFabrics.length})
+                </h3>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {purchaseFabrics.map((fabric) => (
+                    <div
+                      key={fabric.id}
+                      className="border border-gray-200 rounded-lg p-3 flex items-center justify-between bg-white"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900 text-sm">
+                          {fabric.name}
                         </p>
-                      )}
+                        <p className="text-xs text-gray-500">
+                          {fabric.total_meters}m @ ₹
+                          {fabric.purchase_price_per_meter}/m
+                          {fabric.quantity ? ` • ${fabric.quantity}` : ""}
+                        </p>
+                      </div>
+                      <p className="font-semibold text-gray-900 text-sm">
+                        ₹
+                        {(
+                          fabric.total_meters * fabric.purchase_price_per_meter
+                        ).toLocaleString("en-IN")}
+                      </p>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+
+            {payments.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Payments ({payments.length})
+                </h3>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {payments.map((payment) => (
+                    <div key={payment.id} className="bg-gray-50 rounded-lg p-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-semibold text-gray-900">
+                            ₹{payment.amount.toLocaleString("en-IN")}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {new Date(payment.payment_date).toLocaleDateString(
+                              "en-IN",
+                              {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              },
+                            )}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="badge bg-gray-200 text-gray-700">
+                            {payment.payment_method.toUpperCase()}
+                          </span>
+                          {payment.reference_number && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              {payment.reference_number}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {payments.length === 0 && purchaseFabrics.length === 0 && (
+              <div className="text-center py-8 text-sm text-gray-400">
+                No fabrics or payments recorded for this purchase.
+              </div>
+            )}
+
             {selectedPurchase.remaining_amount > 0 && (
               <button
                 onClick={() => setShowPaymentForm(true)}
@@ -773,7 +851,10 @@ export default function Purchases() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Supplier / Fabric
+                  Purchase #
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Supplier
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Date
@@ -801,6 +882,11 @@ export default function Purchases() {
                   key={purchase.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-gray-900 font-mono text-sm">
+                      {purchase.purchase_number || "—"}
+                    </p>
+                  </td>
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">
                       {purchase.supplier?.name}

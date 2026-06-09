@@ -1010,6 +1010,9 @@ export default function Sales() {
                   Total
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Paid
+                </th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Margin
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1031,7 +1034,11 @@ export default function Sales() {
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">
-                      {group.customer?.name || "Walk-in"}
+                      {group.customer?.name ||
+                        group.items[0]?.notes
+                          ?.match(/Name:\s*([^)]+)/)?.[1]
+                          ?.trim() ||
+                        "Walk-in"}
                     </p>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -1056,6 +1063,11 @@ export default function Sales() {
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
                     ₹{group.total_amount.toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    <span className="font-medium text-gray-900">
+                      ₹{group.paid_amount.toLocaleString("en-IN")}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span className="text-accent-600 font-medium">
