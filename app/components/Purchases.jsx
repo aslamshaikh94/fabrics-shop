@@ -11,20 +11,13 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
-  Pencil,
-  Paperclip,
-  FileText,
   Download,
   ShoppingBag,
+  History,
 } from "lucide-react";
 import DateRangeFilter from "./DateRangeFilter";
+import PurchaseForm from "./PurchaseForm";
 import { exportCSV } from "../utils/export";
-import {
-  validatePurchase,
-  validatePayment,
-  hasErrors,
-} from "../utils/validators";
-import { validateInvoiceFile } from "../utils/upload";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 
@@ -34,10 +27,12 @@ export default function Purchases() {
   const toast = useToast();
   const [purchases, setPurchases] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [fabrics, setFabrics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
+  const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -46,18 +41,6 @@ export default function Purchases() {
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  const [invoiceFile, setInvoiceFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [invoiceError, setInvoiceError] = useState("");
-  const [viewInvoiceUrl, setViewInvoiceUrl] = useState(null);
-  const [formErrors, setFormErrors] = useState({});
-  const [paymentErrors, setPaymentErrors] = useState({});
-  const [formData, setFormData] = useState({
-    supplier_id: "",
-    total_amount: "",
-    purchase_date: new Date().toISOString().split("T")[0],
-    notes: "",
-  });
   const [paymentData, setPaymentData] = useState({
     amount: "",
     payment_date: new Date().toISOString().split("T")[0],
@@ -69,7 +52,12 @@ export default function Purchases() {
   useEffect(() => {
     fetchPurchases();
     fetchSuppliers();
+    fetchFabrics();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterStatus, dateFrom, dateTo]);
 
   async function fetchPurchases() {
     try {
@@ -98,112 +86,43 @@ export default function Purchases() {
     }
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setInvoiceError("");
-    const errors = validatePurchase(formData);
-    if (hasErrors(errors)) {
-      setFormErrors(errors);
-      toast("Please fix the validation errors", "error");
-      return;
-    }
-    if (invoiceFile) {
-      const validation = validateInvoiceFile(invoiceFile);
-      if (!validation.valid) {
-        setInvoiceError(validation.errors[0]);
-        toast(validation.errors[0], "error");
-        return;
-      }
-    }
-    setFormErrors({});
-    setUploading(true);
+  async function fetchFabrics() {
     try {
-      let invoice_url = editingId
-        ? purchases.find((p) => p.id === editingId)?.invoice_url || ""
-        : "";
-
-      if (invoiceFile) {
-        const ext = invoiceFile.name.split(".").pop();
-        const path = `${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("purchase-invoices")
-          .upload(path, invoiceFile, { upsert: true });
-        if (uploadError) throw uploadError;
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("purchase-invoices").getPublicUrl(path);
-        invoice_url = publicUrl;
-      }
-
-      if (editingId) {
-        const { error } = await supabase
-          .from("purchases")
-          .update({
-            supplier_id: formData.supplier_id,
-            total_amount: parseFloat(formData.total_amount),
-            purchase_date: formData.purchase_date,
-            notes: formData.notes,
-            invoice_url,
-          })
-          .eq("id", editingId);
-        if (error) throw error;
-        toast("Purchase updated");
-      } else {
-        const { error } = await supabase.from("purchases").insert([
-          {
-            supplier_id: formData.supplier_id,
-            total_amount: parseFloat(formData.total_amount),
-            purchase_date: formData.purchase_date,
-            notes: formData.notes,
-            status: "pending",
-            invoice_url,
-          },
-        ]);
-        if (error) throw error;
-        toast("Purchase added successfully");
-      }
-      setShowForm(false);
-      setEditingId(null);
-      setInvoiceFile(null);
-      setInvoiceError("");
-      setFormErrors({});
-      setFormData({
-        supplier_id: "",
-        total_amount: "",
-        purchase_date: new Date().toISOString().split("T")[0],
-        notes: "",
-      });
-      fetchPurchases();
+      const { data } = await supabase.from("fabrics").select("*").order("name");
+      setFabrics(data || []);
     } catch (error) {
-      console.error("Error saving purchase:", error);
-      toast("Failed to save purchase", "error");
-    } finally {
-      setUploading(false);
+      console.error("Error fetching fabrics:", error);
     }
   }
 
   async function handlePaymentSubmit(e) {
     e.preventDefault();
     if (!selectedPurchase) return;
-    const errors = validatePayment(paymentData);
-    if (hasErrors(errors)) {
-      setPaymentErrors(errors);
-      toast("Please fix the validation errors", "error");
-      return;
-    }
-    setPaymentErrors({});
     try {
-      const { error } = await supabase.from("purchase_payments").insert([
-        {
-          purchase_id: selectedPurchase.id,
-          amount: parseFloat(paymentData.amount),
+      let remainingToPay = parseFloat(paymentData.amount);
+      const paymentInserts = [];
+
+      for (const item of selectedPurchase.items || []) {
+        if (remainingToPay <= 0) break;
+        if (item.remaining_amount <= 0) continue;
+
+        const pay = Math.min(remainingToPay, item.remaining_amount);
+        paymentInserts.push({
+          purchase_id: item.id,
+          amount: pay,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
           reference_number: paymentData.reference_number,
           notes: paymentData.notes,
-        },
-      ]);
+        });
+        remainingToPay -= pay;
+      }
+
+      const { error } = await supabase
+        .from("purchase_payments")
+        .insert(paymentInserts);
       if (error) throw error;
+
       setShowPaymentForm(false);
       setPaymentData({
         amount: "",
@@ -213,20 +132,22 @@ export default function Purchases() {
         notes: "",
       });
       fetchPurchases();
-      fetchPayments(selectedPurchase.id);
-      toast("Payment added");
+      if (selectedPurchase) {
+        fetchPayments(selectedPurchase.items.map((i) => i.id));
+      }
+      toast("Payment recorded");
     } catch (error) {
       console.error("Error saving payment:", error);
       toast("Failed to save payment", "error");
     }
   }
 
-  async function fetchPayments(purchaseId) {
+  async function fetchPayments(purchaseIds) {
     try {
       const { data } = await supabase
         .from("purchase_payments")
         .select("*")
-        .eq("purchase_id", purchaseId)
+        .in("purchase_id", Array.isArray(purchaseIds) ? purchaseIds : [purchaseIds])
         .order("payment_date", { ascending: false });
       setPayments(data || []);
     } catch (error) {
@@ -234,33 +155,46 @@ export default function Purchases() {
     }
   }
 
-  function handleEdit(purchase) {
-    setFormData({
-      supplier_id: purchase.supplier_id,
-      total_amount: purchase.total_amount.toString(),
-      purchase_date: purchase.purchase_date,
-      notes: purchase.notes,
-    });
-    setInvoiceFile(null);
-    setEditingId(purchase.id);
-    setShowForm(true);
+  function handleViewPayments(group) {
+    setSelectedPurchase(group);
+    fetchPayments(group.items.map((i) => i.id));
   }
 
-  function handleViewPayments(purchase) {
-    setSelectedPurchase(purchase);
-    fetchPayments(purchase.id);
-  }
-
-  function handleAddPayment(purchase) {
-    setSelectedPurchase(purchase);
+  function handleAddPayment(group) {
+    setSelectedPurchase(group);
     setShowPaymentForm(true);
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(deleteInfo) {
     try {
-      const { error } = await supabase.from("purchases").delete().eq("id", id);
-      if (error) throw error;
-      toast("Purchase deleted");
+      if (deleteInfo.isGroup) {
+        const purchaseIds = deleteInfo.purchaseIds;
+        const { error: deletePaymentsError } = await supabase
+          .from("purchase_payments")
+          .delete()
+          .in("purchase_id", purchaseIds);
+        if (deletePaymentsError) throw deletePaymentsError;
+
+        const { error } = await supabase
+          .from("purchases")
+          .delete()
+          .in("id", purchaseIds);
+        if (error) throw error;
+        toast("Purchase group deleted");
+      } else {
+        const { error: deletePaymentsError } = await supabase
+          .from("purchase_payments")
+          .delete()
+          .eq("purchase_id", deleteInfo);
+        if (deletePaymentsError) throw deletePaymentsError;
+
+        const { error } = await supabase
+          .from("purchases")
+          .delete()
+          .eq("id", deleteInfo);
+        if (error) throw error;
+        toast("Purchase deleted");
+      }
       fetchPurchases();
     } catch (err) {
       console.error("Error deleting purchase:", err);
@@ -270,21 +204,54 @@ export default function Purchases() {
     }
   }
 
+  // Filter and group purchases
   const filteredPurchases = purchases.filter((p) => {
+    const supplier = p.supplier?.name?.toLowerCase() || "";
+    const notes = p.notes?.toLowerCase() || "";
+    const fabricName = p.fabric_name?.toLowerCase() || "";
     const matchesSearch =
-      p.supplier?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.notes?.toLowerCase().includes(searchTerm.toLowerCase());
+      supplier.includes(searchTerm.toLowerCase()) ||
+      notes.includes(searchTerm.toLowerCase()) ||
+      fabricName.includes(searchTerm.toLowerCase());
     const matchesStatus = filterStatus === "all" || p.status === filterStatus;
     const matchesFrom = !dateFrom || p.purchase_date >= dateFrom;
     const matchesTo = !dateTo || p.purchase_date <= dateTo;
     return matchesSearch && matchesStatus && matchesFrom && matchesTo;
   });
 
-  const totalPages = Math.ceil(filteredPurchases.length / PAGE_SIZE);
-  const paginated = filteredPurchases.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
+  // Group purchases by purchase_group_id
+  const groupedPurchases = filteredPurchases.reduce((acc, purchase) => {
+    const key = purchase.purchase_group_id || purchase.id;
+    if (!acc[key]) {
+      acc[key] = {
+        id: key,
+        supplier_id: purchase.supplier_id,
+        supplier: purchase.supplier,
+        purchase_date: purchase.purchase_date,
+        payment_type: purchase.payment_type || "credit",
+        invoice_url: purchase.invoice_url,
+        items: [],
+        total_amount: 0,
+        total_meters: 0,
+        paid_amount: 0,
+        remaining_amount: 0,
+        firstPurchaseId: purchase.id,
+      };
+    }
+    acc[key].items.push(purchase);
+    acc[key].total_amount += purchase.total_amount || 0;
+    acc[key].total_meters += parseFloat(purchase.meters) || 0;
+    acc[key].paid_amount += purchase.paid_amount || 0;
+    acc[key].remaining_amount += purchase.remaining_amount || 0;
+    return acc;
+  }, {});
+
+  const groupedArray = Object.values(groupedPurchases).sort(
+    (a, b) => new Date(b.purchase_date) - new Date(a.purchase_date),
   );
+
+  const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
+  const paginated = groupedArray.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const statusBadge = (status) => {
     const styles = {
@@ -294,6 +261,16 @@ export default function Purchases() {
     };
     const labels = { pending: "Pending", partial: "Partial", paid: "Paid" };
     return <span className={`badge ${styles[status]}`}>{labels[status]}</span>;
+  };
+
+  const paymentBadge = (type) => {
+    const styles = {
+      cash: "bg-accent-100 text-accent-800",
+      credit: "bg-warning-100 text-warning-800",
+      partial: "bg-blue-100 text-blue-800",
+    };
+    const labels = { cash: "Cash", credit: "Credit", partial: "Partial" };
+    return <span className={`badge ${styles[type] || styles.credit}`}>{labels[type] || "Credit"}</span>;
   };
 
   if (loading) {
@@ -317,14 +294,15 @@ export default function Purchases() {
           <button
             onClick={() =>
               exportCSV(
-                filteredPurchases.map((p) => ({
-                  date: p.purchase_date,
-                  supplier: p.supplier?.name,
-                  total: p.total_amount,
-                  paid: p.paid_amount,
-                  remaining: p.remaining_amount,
-                  status: p.status,
-                  notes: p.notes,
+                groupedArray.map((g) => ({
+                  date: g.purchase_date,
+                  supplier: g.supplier?.name || "Unknown",
+                  items: g.items.length,
+                  total_meters: g.total_meters.toFixed(2),
+                  total: g.total_amount,
+                  paid: g.paid_amount,
+                  remaining: g.remaining_amount,
+                  status: g.items[0]?.status,
                 })),
                 "purchases.csv",
               )
@@ -335,15 +313,8 @@ export default function Purchases() {
           </button>
           <button
             onClick={() => {
-              setShowForm(true);
               setEditingId(null);
-              setInvoiceFile(null);
-              setFormData({
-                supplier_id: "",
-                total_amount: "",
-                purchase_date: new Date().toISOString().split("T")[0],
-                notes: "",
-              });
+              setShowForm(true);
             }}
             className="btn btn-primary"
           >
@@ -384,176 +355,24 @@ export default function Purchases() {
         />
       </div>
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Purchase" : "New Purchase"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Supplier *
-                </label>
-                <select
-                  required
-                  value={formData.supplier_id}
-                  onChange={(e) => {
-                    setFormData({ ...formData, supplier_id: e.target.value });
-                    if (formErrors.supplier_id)
-                      setFormErrors({ ...formErrors, supplier_id: "" });
-                  }}
-                  className={`input ${formErrors.supplier_id ? "border-error-400" : ""}`}
-                >
-                  <option value="">Select supplier</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                {formErrors.supplier_id && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.supplier_id}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Total Amount *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={formData.total_amount}
-                  onChange={(e) => {
-                    setFormData({ ...formData, total_amount: e.target.value });
-                    if (formErrors.total_amount)
-                      setFormErrors({ ...formErrors, total_amount: "" });
-                  }}
-                  className={`input ${formErrors.total_amount ? "border-error-400" : ""}`}
-                  placeholder="₹0.00"
-                  onWheel={(e) => e.target.blur()}
-                />
-                {formErrors.total_amount && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.total_amount}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Purchase Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.purchase_date}
-                  onChange={(e) =>
-                    setFormData({ ...formData, purchase_date: e.target.value })
-                  }
-                  className="input w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                  placeholder="Invoice no., remarks..."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Invoice / Bill
-                </label>
-                <label
-                  className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${invoiceError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
-                >
-                  <Paperclip className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm text-gray-500 flex-1 truncate">
-                    {invoiceFile
-                      ? invoiceFile.name
-                      : editingId &&
-                          purchases.find((p) => p.id === editingId)?.invoice_url
-                        ? "Replace existing invoice"
-                        : "Attach invoice (PDF, image)"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*,.pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      setInvoiceFile(e.target.files[0] || null);
-                      if (e.target.files[0]) setInvoiceError("");
-                    }}
-                  />
-                </label>
-                {invoiceError && (
-                  <p className="text-error-600 text-sm mt-1">{invoiceError}</p>
-                )}
-                {editingId &&
-                  purchases.find((p) => p.id === editingId)?.invoice_url &&
-                  !invoiceFile && (
-                    <a
-                      href={
-                        purchases.find((p) => p.id === editingId).invoice_url
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
-                    >
-                      <FileText className="w-3 h-3" /> View current invoice
-                    </a>
-                  )}
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setEditingId(null);
-                  }}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading}
-                  className="btn btn-primary flex-1"
-                >
-                  {uploading
-                    ? "Saving..."
-                    : editingId
-                      ? "Update Purchase"
-                      : "Add Purchase"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <PurchaseForm
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          setEditingId(null);
+        }}
+        editingId={editingId}
+        onSaved={() => fetchPurchases()}
+        fabrics={fabrics}
+        suppliers={suppliers}
+      />
 
+      {/* Payment Form Modal */}
       {showPaymentForm && selectedPurchase && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Add Payment</h2>
+              <h2 className="text-xl font-semibold">Make Payment</h2>
               <button
                 onClick={() => setShowPaymentForm(false)}
                 className="p-2 hover:bg-gray-100 rounded-lg"
@@ -568,7 +387,12 @@ export default function Purchases() {
                   {selectedPurchase.supplier?.name}
                 </span>
               </p>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 mt-1 italic">
+                {selectedPurchase.items
+                  ?.map((it) => it.fabric_name || it.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() || "Item")
+                  .join(", ")}
+              </p>
+              <p className="text-sm text-gray-600 mt-2">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
                   ₹{selectedPurchase.remaining_amount.toLocaleString("en-IN")}
@@ -586,20 +410,13 @@ export default function Purchases() {
                   required
                   max={selectedPurchase.remaining_amount}
                   value={paymentData.amount}
-                  onChange={(e) => {
-                    setPaymentData({ ...paymentData, amount: e.target.value });
-                    if (paymentErrors.amount)
-                      setPaymentErrors({ ...paymentErrors, amount: "" });
-                  }}
-                  className={`input ${paymentErrors.amount ? "border-error-400" : ""}`}
+                  onChange={(e) =>
+                    setPaymentData({ ...paymentData, amount: e.target.value })
+                  }
+                  className="input"
                   placeholder="0.00"
                   onWheel={(e) => e.target.blur()}
                 />
-                {paymentErrors.amount && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {paymentErrors.amount}
-                  </p>
-                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -655,19 +472,6 @@ export default function Purchases() {
                   placeholder="Transaction ID / Check No."
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={paymentData.notes}
-                  onChange={(e) =>
-                    setPaymentData({ ...paymentData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                />
-              </div>
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -677,7 +481,7 @@ export default function Purchases() {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-accent flex-1">
-                  Add Payment
+                  Make Payment
                 </button>
               </div>
             </form>
@@ -685,6 +489,7 @@ export default function Purchases() {
         </div>
       )}
 
+      {/* Payment History Modal */}
       {selectedPurchase && !showPaymentForm && payments.length > 0 && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
@@ -707,8 +512,10 @@ export default function Purchases() {
                   {selectedPurchase.supplier?.name}
                 </span>
               </p>
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedPurchase.notes}
+              <p className="text-sm text-gray-600 mt-1 italic">
+                {selectedPurchase.items
+                  ?.map((it) => it.fabric_name || "Item")
+                  .join(", ")}
               </p>
               <div className="flex justify-between mt-2 pt-2 border-t border-gray-200">
                 <span className="text-sm">
@@ -760,32 +567,250 @@ export default function Purchases() {
                 className="btn btn-accent w-full mt-4"
               >
                 <CreditCard className="w-5 h-5 mr-2" />
-                Add Payment
+                Make Payment
               </button>
             )}
           </div>
         </div>
       )}
 
+      {/* Purchase Details Modal */}
+      {selectedGroupForDetails && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-3xl p-4 sm:p-6 m-4 sm:my-8 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Purchase Items
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {selectedGroupForDetails.supplier?.name || "Unknown"} •{" "}
+                  {new Date(
+                    selectedGroupForDetails.purchase_date,
+                  ).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedGroupForDetails(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div className="bg-gradient-to-r from-primary-50 to-blue-50 dark:from-primary-900/20 dark:to-blue-900/20 rounded-lg p-4 border border-primary-100 dark:border-primary-800">
+                <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                  Supplier
+                </p>
+                <p className="font-semibold text-gray-900 dark:text-white">
+                  {selectedGroupForDetails.supplier?.name || "Unknown"}
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-r from-accent-50 to-green-50 dark:from-accent-900/20 dark:to-green-900/20 rounded-lg p-4 border border-accent-100 dark:border-accent-800">
+                <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                  Payment
+                </p>
+                <p className="font-semibold text-gray-900 dark:text-white mb-1">
+                  {paymentBadge(selectedGroupForDetails.payment_type)}
+                </p>
+                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                  <span>
+                    Total:{" "}
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      ₹
+                      {selectedGroupForDetails.total_amount.toLocaleString(
+                        "en-IN",
+                      )}
+                    </span>
+                  </span>
+                  <span>
+                    Remaining:{" "}
+                    <span
+                      className={`font-semibold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600 dark:text-warning-400" : "text-gray-500 dark:text-gray-400"}`}
+                    >
+                      ₹
+                      {selectedGroupForDetails.remaining_amount.toLocaleString(
+                        "en-IN",
+                      )}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                  Details
+                </p>
+                <p className="text-sm text-gray-900 dark:text-white">
+                  <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5 text-gray-400 dark:text-gray-500" />
+                  {new Date(
+                    selectedGroupForDetails.purchase_date,
+                  ).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+                Items ({selectedGroupForDetails.items.length})
+              </h3>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {selectedGroupForDetails.items.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase font-bold mb-0.5">
+                          Item {idx + 1}
+                        </p>
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                          {item.fabric_name ||
+                            item.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() ||
+                            "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          Meters
+                        </p>
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                          {item.meters || 0}m
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          Price/M
+                        </p>
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                          ₹{(item.price_per_unit || 0).toLocaleString("en-IN")}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          Total
+                        </p>
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                          ₹{item.total_amount?.toLocaleString("en-IN") || 0}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          Remaining
+                        </p>
+                        <p className={`font-semibold ${item.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}>
+                          ₹{item.remaining_amount?.toLocaleString("en-IN") || 0}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-gray-50 dark:bg-gray-900/60 rounded-lg p-4 border border-gray-200 dark:border-gray-700 mb-6">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                    Total Meters
+                  </p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                    {selectedGroupForDetails.total_meters.toFixed(2)}m
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                    Total Amount
+                  </p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                    ₹
+                    {selectedGroupForDetails.total_amount.toLocaleString(
+                      "en-IN",
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                    Paid
+                  </p>
+                  <p className="text-xl font-bold text-accent-600">
+                    ₹{selectedGroupForDetails.paid_amount.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 uppercase font-semibold mb-1">
+                    Remaining
+                  </p>
+                  <p
+                    className={`text-xl font-bold ${selectedGroupForDetails.remaining_amount > 0 ? "text-warning-600 dark:text-warning-400" : "text-gray-500 dark:text-gray-400"}`}
+                  >
+                    ₹
+                    {selectedGroupForDetails.remaining_amount.toLocaleString(
+                      "en-IN",
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleViewPayments(selectedGroupForDetails)}
+                className="flex-1 btn btn-secondary"
+              >
+                <History className="w-4 h-4 mr-2" />
+                View Payments
+              </button>
+              <button
+                onClick={() => setSelectedGroupForDetails(null)}
+                className="flex-1 btn btn-primary"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Purchase List Table */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full" style={{ minWidth: "600px" }}>
+          <table className="w-full" style={{ minWidth: "700px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Supplier / Fabric
+                  Supplier
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Date
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Items
+                </th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Total Meters
+                </th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Total
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Paid
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Remaining
+                </th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Type
                 </th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
@@ -796,118 +821,86 @@ export default function Purchases() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {paginated.map((purchase) => (
+              {paginated.map((group) => (
                 <tr
-                  key={purchase.id}
+                  key={group.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">
-                      {purchase.supplier?.name}
+                      {group.supplier?.name || "Unknown"}
                     </p>
-                    {purchase.notes && (
-                      <p className="text-sm text-gray-500 max-w-xs truncate">
-                        {purchase.notes}
-                      </p>
-                    )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(purchase.purchase_date).toLocaleDateString(
+                      {new Date(group.purchase_date).toLocaleDateString(
                         "en-IN",
                         { day: "numeric", month: "short", year: "numeric" },
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
-                    ₹{purchase.total_amount.toLocaleString("en-IN")}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span className="font-medium text-gray-900">
-                      ₹{purchase.paid_amount.toLocaleString("en-IN")}
+                  <td className="px-4 py-3 text-right text-gray-600 text-sm">
+                    <span className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700">
+                      {group.items.length}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-600 text-sm">
+                    {group.total_meters.toFixed(2)}m
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
+                    ₹{group.total_amount.toLocaleString("en-IN")}
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span
                       className={
-                        purchase.remaining_amount > 0
+                        group.remaining_amount > 0
                           ? "text-warning-600 font-semibold"
                           : "text-gray-500"
                       }
                     >
-                      ₹{purchase.remaining_amount.toLocaleString("en-IN")}
+                      ₹{group.remaining_amount.toLocaleString("en-IN")}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <div
-                      className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
-                      style={{ minWidth: "64px" }}
-                      title={
-                        purchase.total_amount > 0
-                          ? `Paid: ${((purchase.paid_amount / purchase.total_amount) * 100).toFixed(1)}%  |  Pending: ${((purchase.remaining_amount / purchase.total_amount) * 100).toFixed(1)}%`
-                          : "No amount"
-                      }
-                    >
-                      {/* Background: paid (green) + pending (orange) */}
-                      <span className="absolute inset-0 bg-warning-200" />
-                      <span
-                        className="absolute inset-y-0 left-0 bg-accent-400"
-                        style={{
-                          width:
-                            purchase.total_amount > 0
-                              ? `${(purchase.paid_amount / purchase.total_amount) * 100}%`
-                              : "0%",
-                        }}
-                      />
-                      {/* Label on top */}
-                      <span
-                        className="relative z-10 font-medium"
-                        style={{ color: "#111" }}
-                      >
-                        {purchase.status.charAt(0).toUpperCase() +
-                          purchase.status.slice(1)}
-                      </span>
-                    </div>
+                    {paymentBadge(group.payment_type)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {statusBadge(group.items[0]?.status || "pending")}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
                       <button
-                        onClick={() => handleViewPayments(purchase)}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="View payments"
+                        onClick={() => setSelectedGroupForDetails(group)}
+                        className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
+                        title="View details"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleEdit(purchase)}
+                        onClick={() => handleViewPayments(group)}
                         className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="Edit purchase"
+                        title="View payments"
                       >
-                        <Pencil className="w-4 h-4" />
+                        <History className="w-4 h-4" />
                       </button>
-                      {purchase.invoice_url && (
+                      {group.remaining_amount > 0 && (
                         <button
-                          onClick={() =>
-                            setViewInvoiceUrl(purchase.invoice_url)
-                          }
-                          className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
-                          title="View invoice"
-                        >
-                          <FileText className="w-4 h-4" />
-                        </button>
-                      )}
-                      {purchase.remaining_amount > 0 && (
-                        <button
-                          onClick={() => handleAddPayment(purchase)}
+                          onClick={() => handleAddPayment(group)}
                           className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
-                          title="Add payment"
+                          title="Make payment"
                         >
                           <CreditCard className="w-4 h-4" />
                         </button>
                       )}
                       <button
-                        onClick={() => setConfirmDelete(purchase.id)}
+                        onClick={() =>
+                          setConfirmDelete({
+                            isGroup: true,
+                            purchaseIds: group.items.map((item) => item.id),
+                            itemCount: group.items.length,
+                          })
+                        }
                         className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
                         title="Delete purchase"
                       >
@@ -925,7 +918,7 @@ export default function Purchases() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-2">
           <p className="text-sm text-gray-500">
-            {filteredPurchases.length} records — page {page} of {totalPages}
+            {groupedArray.length} purchases — page {page} of {totalPages}
           </p>
           <div className="flex gap-2">
             <button
@@ -948,57 +941,23 @@ export default function Purchases() {
 
       {confirmDelete && (
         <ConfirmModal
-          message="This will permanently delete the purchase and all its payments."
+          message={
+            confirmDelete.isGroup
+              ? `This will permanently delete all ${confirmDelete.itemCount} items in this purchase group and all their payments.`
+              : "This will permanently delete the purchase and all its payments."
+          }
           onConfirm={() => handleDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
       )}
 
-      {filteredPurchases.length === 0 && (
+      {groupedArray.length === 0 && (
         <div className="text-center py-16">
           <ShoppingBag className="w-10 h-10 text-gray-200 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No purchases found</p>
           <p className="text-gray-300 text-sm mt-1">
             Try adjusting your filters
           </p>
-        </div>
-      )}
-
-      {/* Invoice Popup */}
-      {viewInvoiceUrl && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
-          onClick={() => setViewInvoiceUrl(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900">Invoice / Bill</h3>
-              <button
-                onClick={() => setViewInvoiceUrl(null)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 flex items-center justify-center bg-gray-50 max-h-[calc(90vh-60px)] overflow-y-auto">
-              {viewInvoiceUrl.match(/\.(pdf)$/i) ? (
-                <iframe
-                  src={viewInvoiceUrl}
-                  className="w-full h-[70vh] rounded-lg"
-                  title="Invoice PDF"
-                />
-              ) : (
-                <img
-                  src={viewInvoiceUrl}
-                  alt="Invoice"
-                  className="max-w-full max-h-[70vh] object-contain rounded-lg"
-                />
-              )}
-            </div>
-          </div>
         </div>
       )}
     </div>
