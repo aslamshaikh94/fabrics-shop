@@ -448,15 +448,20 @@ export default function Sales() {
         if (error) throw error;
       }
 
+      const paymentTypeChanged =
+        editGroupFields.payment_type !== selectedGroupForDetails.payment_type;
+
       if (
-        editGroupFields.payment_type !== selectedGroupForDetails.payment_type
+        paymentTypeChanged ||
+        (editGroupFields.payment_type === "partial" &&
+          parseFloat(editGroupFields.initial_payment) > 0)
       ) {
+        for (const item of selectedGroupForDetails.items) {
+          await supabase.from("sale_payments").delete().eq("sale_id", item.id);
+        }
+
         if (editGroupFields.payment_type === "cash") {
           for (const item of selectedGroupForDetails.items) {
-            await supabase
-              .from("sale_payments")
-              .delete()
-              .eq("sale_id", item.id);
             const totalAmount = item.meters * item.price_per_meter;
             await supabase.from("sale_payments").insert([
               {
@@ -467,14 +472,26 @@ export default function Sales() {
               },
             ]);
           }
-        } else if (editGroupFields.payment_type === "credit") {
+        } else if (editGroupFields.payment_type === "partial") {
+          let remaining = parseFloat(editGroupFields.initial_payment) || 0;
           for (const item of selectedGroupForDetails.items) {
-            await supabase
-              .from("sale_payments")
-              .delete()
-              .eq("sale_id", item.id);
+            if (remaining <= 0) break;
+            const itemTotal = item.meters * item.price_per_meter;
+            const pay = Math.min(remaining, itemTotal);
+            if (pay > 0) {
+              await supabase.from("sale_payments").insert([
+                {
+                  sale_id: item.id,
+                  amount: pay,
+                  payment_date: editGroupFields.sale_date,
+                  payment_method: "cash",
+                },
+              ]);
+              remaining -= pay;
+            }
           }
         }
+        // credit: no payments created (all deleted above)
       }
 
       fetchSales();
@@ -1798,6 +1815,10 @@ export default function Sales() {
                           setEditGroupFields({
                             ...editGroupFields,
                             payment_type: v,
+                            initial_payment:
+                              v === "partial"
+                                ? editGroupFields.initial_payment
+                                : "",
                           })
                         }
                         className={`py-2 rounded-xl text-sm font-medium border transition-all ${
@@ -1811,6 +1832,27 @@ export default function Sales() {
                     ))}
                   </div>
                 </div>
+                {editGroupFields.payment_type === "partial" && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Initial Payment
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editGroupFields.initial_payment}
+                      onChange={(e) =>
+                        setEditGroupFields({
+                          ...editGroupFields,
+                          initial_payment: e.target.value,
+                        })
+                      }
+                      className="input bg-white"
+                      placeholder="Amount received now"
+                      onWheel={(e) => e.target.blur()}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40">
