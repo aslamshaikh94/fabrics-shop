@@ -448,68 +448,64 @@ export default function Sales() {
         if (error) throw error;
       }
 
-      const paymentTypeChanged =
-        editGroupFields.payment_type !== selectedGroupForDetails.payment_type;
+      // Always delete AND recreate payments to ensure DB is in sync with UI selections
+      // This handles:
+      //   - cash: delete old, create full payment
+      //   - partial: delete old, create payment for initial_payment (or 0 = no payments = effectively credit)
+      //   - credit: delete old, create none
+      for (const item of selectedGroupForDetails.items) {
+        const { error: delError } = await supabase
+          .from("sale_payments")
+          .delete()
+          .eq("sale_id", item.id);
+        if (delError)
+          throw new Error(`Failed to delete payment: ${delError.message}`);
+      }
 
-      if (
-        paymentTypeChanged ||
-        (editGroupFields.payment_type === "partial" &&
-          parseFloat(editGroupFields.initial_payment) > 0)
-      ) {
+      if (editGroupFields.payment_type === "cash") {
         for (const item of selectedGroupForDetails.items) {
-          const { error: delError } = await supabase
+          const totalAmount = item.meters * item.price_per_meter;
+          const { error: insError } = await supabase
             .from("sale_payments")
-            .delete()
-            .eq("sale_id", item.id);
-          if (delError)
-            throw new Error(`Failed to delete payment: ${delError.message}`);
+            .insert([
+              {
+                sale_id: item.id,
+                amount: totalAmount,
+                payment_date: editGroupFields.sale_date,
+                payment_method: "cash",
+              },
+            ]);
+          if (insError)
+            throw new Error(
+              `Failed to create cash payment: ${insError.message}`,
+            );
         }
-
-        if (editGroupFields.payment_type === "cash") {
-          for (const item of selectedGroupForDetails.items) {
-            const totalAmount = item.meters * item.price_per_meter;
+      } else if (editGroupFields.payment_type === "partial") {
+        let remaining = parseFloat(editGroupFields.initial_payment) || 0;
+        for (const item of selectedGroupForDetails.items) {
+          if (remaining <= 0) break;
+          const itemTotal = item.meters * item.price_per_meter;
+          const pay = Math.min(remaining, itemTotal);
+          if (pay > 0) {
             const { error: insError } = await supabase
               .from("sale_payments")
               .insert([
                 {
                   sale_id: item.id,
-                  amount: totalAmount,
+                  amount: pay,
                   payment_date: editGroupFields.sale_date,
                   payment_method: "cash",
                 },
               ]);
             if (insError)
               throw new Error(
-                `Failed to create cash payment: ${insError.message}`,
+                `Failed to create partial payment: ${insError.message}`,
               );
-          }
-        } else if (editGroupFields.payment_type === "partial") {
-          let remaining = parseFloat(editGroupFields.initial_payment) || 0;
-          for (const item of selectedGroupForDetails.items) {
-            if (remaining <= 0) break;
-            const itemTotal = item.meters * item.price_per_meter;
-            const pay = Math.min(remaining, itemTotal);
-            if (pay > 0) {
-              const { error: insError } = await supabase
-                .from("sale_payments")
-                .insert([
-                  {
-                    sale_id: item.id,
-                    amount: pay,
-                    payment_date: editGroupFields.sale_date,
-                    payment_method: "cash",
-                  },
-                ]);
-              if (insError)
-                throw new Error(
-                  `Failed to create partial payment: ${insError.message}`,
-                );
-              remaining -= pay;
-            }
+            remaining -= pay;
           }
         }
-        // credit: no payments created (all deleted above)
       }
+      // credit: no payments created (all deleted above)
 
       await fetchSales();
       setShowEditSaleInfo(false);
@@ -1119,7 +1115,10 @@ export default function Sales() {
                               (g.customer_id ? "" : "Walk-in Customer"),
                             sale_date: g.sale_date,
                             payment_type: g.payment_type,
-                            initial_payment: "",
+                            initial_payment:
+                              g.payment_type === "partial"
+                                ? g.paid_amount?.toString() || ""
+                                : "",
                             invoice_file: null,
                           });
                           setSelectedGroupForDetails(g);
