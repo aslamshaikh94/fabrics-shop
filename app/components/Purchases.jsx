@@ -395,7 +395,7 @@ export default function Purchases() {
                   status: p.status,
                   notes: p.notes,
                 })),
-                "purchases.csv",
+                `purchases-${new Date().toISOString().slice(0, 10)}.csv`,
               )
             }
             className="btn btn-secondary"

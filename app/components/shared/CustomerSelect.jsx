@@ -7,8 +7,13 @@ export default function CustomerSelect({
   onChange,
   customers,
   label = "Customer",
+  customerTab: initialTab,
 }) {
-  const [tab, setTab] = useState("existing");
+  const [tab, setTab] = useState(() => {
+    // Auto-detect tab based on initial customer_id
+    if (initialTab) return initialTab;
+    return value.customer_id ? "existing" : "walkin";
+  });
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
+import Link from "next/link";
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -21,17 +23,6 @@ import {
 } from "lucide-react";
 import { getSupabase } from "../lib/supabase";
 import { useAuth } from "./AuthGuard";
-import Dashboard from "./Dashboard";
-import Purchases from "./Purchases";
-import Sales from "./Sales";
-import Suppliers from "./Suppliers";
-import Customers from "./Customers";
-import Payments from "./Payments";
-import Reports from "./Reports";
-import Fabrics from "./Fabrics";
-import QuickSale from "./QuickSale";
-import Expenses from "./Expenses";
-import Withdrawals from "./Withdrawals";
 
 const ALL_NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -60,9 +51,9 @@ const BOTTOM_NAV = [
   { id: "reports", label: "Reports", icon: BarChart2 },
 ];
 
-export default function Shell() {
-  const { isAdmin, user } = useAuth();
-  const [currentPage, setCurrentPage] = useState("dashboard");
+export default function Shell({ children }) {
+  const { isAdmin } = useAuth();
+  const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, setDark] = useState(false);
 
@@ -81,31 +72,15 @@ export default function Shell() {
   );
 
   const allowedIds = navItems.map((n) => n.id);
-  const activePage = allowedIds.includes(currentPage)
-    ? currentPage
+  const pathSegment = pathname.split("/")[1] || "";
+  const activePage = allowedIds.includes(pathSegment)
+    ? pathSegment
     : "dashboard";
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("theme", dark ? "dark" : "light");
   }, [dark]);
-
-  // Listen for custom navigate events from child components
-  useEffect(() => {
-    function handleNavigate(e) {
-      if (e.detail?.page && allowedIds.includes(e.detail.page)) {
-        setCurrentPage(e.detail.page);
-      }
-    }
-    window.addEventListener("navigate", handleNavigate);
-    return () => window.removeEventListener("navigate", handleNavigate);
-  }, [allowedIds.join(",")]);
-
-  function navigate(id) {
-    if (!allowedIds.includes(id)) return;
-    setCurrentPage(id);
-    setSidebarOpen(false);
-  }
 
   const navSections = [
     {
@@ -132,20 +107,6 @@ export default function Shell() {
     },
     { label: "Insights", items: navItems.filter((n) => n.id === "reports") },
   ];
-
-  const pageComponents = {
-    dashboard: <Dashboard />,
-    quicksale: <QuickSale />,
-    purchases: <Purchases />,
-    sales: <Sales />,
-    suppliers: <Suppliers />,
-    customers: <Customers />,
-    payments: <Payments />,
-    reports: <Reports />,
-    fabrics: <Fabrics />,
-    expenses: <Expenses />,
-    withdrawals: <Withdrawals />,
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -225,9 +186,10 @@ export default function Shell() {
                   const Icon = item.icon;
                   const active = activePage === item.id;
                   return (
-                    <button
+                    <Link
                       key={item.id}
-                      onClick={() => navigate(item.id)}
+                      href={`/${item.id}`}
+                      onClick={() => setSidebarOpen(false)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 mb-0.5 text-sm group ${
                         active
                           ? "bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400 font-medium"
@@ -241,7 +203,7 @@ export default function Shell() {
                       {active && (
                         <ChevronRight className="w-3.5 h-3.5 text-primary-400" />
                       )}
-                    </button>
+                    </Link>
                   );
                 })}
               </div>
@@ -275,7 +237,7 @@ export default function Shell() {
       <main className="lg:ml-64">
         <div className="p-4 pb-24 lg:pb-8 lg:p-8">
           <div key={activePage} className="animate-fade-in">
-            {pageComponents[activePage]}
+            {children}
           </div>
         </div>
       </main>
@@ -286,9 +248,9 @@ export default function Shell() {
           const Icon = item.icon;
           const active = activePage === item.id;
           return (
-            <button
+            <Link
               key={item.id}
-              onClick={() => navigate(item.id)}
+              href={`/${item.id}`}
               className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 transition-colors relative ${
                 active
                   ? "text-primary-600 dark:text-primary-400"
@@ -300,7 +262,7 @@ export default function Shell() {
               {active && (
                 <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary-600 dark:bg-primary-400 rounded-b-full" />
               )}
-            </button>
+            </Link>
           );
         })}
       </nav>
