@@ -1,19 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  X,
-  Search,
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Calendar, Wallet } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
+import Modal from "./shared/Modal";
+import Pagination from "./shared/Pagination";
+import LoadingSpinner from "./shared/LoadingSpinner";
 
 const PAGE_SIZE = 10;
 
@@ -138,12 +132,7 @@ export default function Withdrawals() {
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalAmount = filtered.reduce((s, w) => s + (w.amount || 0), 0);
 
-  if (loading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    );
+  if (loading) return <LoadingSpinner className="h-64" />;
 
   return (
     <div className="space-y-6">
@@ -165,7 +154,6 @@ export default function Withdrawals() {
         </button>
       </div>
 
-      {/* Summary */}
       <div className="card p-5">
         <p className="text-sm text-gray-500">Filtered Total Withdrawn</p>
         <p className="text-2xl font-bold text-red-600 mt-1">
@@ -173,7 +161,6 @@ export default function Withdrawals() {
         </p>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -195,101 +182,91 @@ export default function Withdrawals() {
         />
       </div>
 
-      {/* Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Withdrawal" : "Add Withdrawal"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={formData.amount}
-                  onChange={(e) =>
-                    setFormData({ ...formData, amount: e.target.value })
-                  }
-                  className="input"
-                  placeholder="₹0.00"
-                  onWheel={(e) => e.target.blur()}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.withdrawal_date}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      withdrawal_date: e.target.value,
-                    })
-                  }
-                  className="input w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Withdrawn By
-                </label>
-                <input
-                  type="text"
-                  value={formData.withdrawn_by}
-                  onChange={(e) =>
-                    setFormData({ ...formData, withdrawn_by: e.target.value })
-                  }
-                  className="input"
-                  placeholder="e.g., Ahmed, Partner..."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reason
-                </label>
-                <textarea
-                  value={formData.reason}
-                  onChange={(e) =>
-                    setFormData({ ...formData, reason: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                  placeholder="Purpose of withdrawal"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update" : "Add"} Withdrawal
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          setEditingId(null);
+        }}
+        title={editingId ? "Edit Withdrawal" : "Add Withdrawal"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Amount *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              required
+              value={formData.amount}
+              onChange={(e) =>
+                setFormData({ ...formData, amount: e.target.value })
+              }
+              className="input"
+              placeholder="₹0.00"
+              onWheel={(e) => e.target.blur()}
+            />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Date
+            </label>
+            <input
+              type="date"
+              value={formData.withdrawal_date}
+              onChange={(e) =>
+                setFormData({ ...formData, withdrawal_date: e.target.value })
+              }
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Withdrawn By
+            </label>
+            <input
+              type="text"
+              value={formData.withdrawn_by}
+              onChange={(e) =>
+                setFormData({ ...formData, withdrawn_by: e.target.value })
+              }
+              className="input"
+              placeholder="e.g., Ahmed, Partner..."
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Reason
+            </label>
+            <textarea
+              value={formData.reason}
+              onChange={(e) =>
+                setFormData({ ...formData, reason: e.target.value })
+              }
+              className="input"
+              rows={2}
+              placeholder="Purpose of withdrawal"
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                setEditingId(null);
+              }}
+              className="btn btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary flex-1">
+              {editingId ? "Update" : "Add"} Withdrawal
+            </button>
+          </div>
+        </form>
+      </Modal>
 
-      {/* Table */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full" style={{ minWidth: "500px" }}>
@@ -363,29 +340,13 @@ export default function Withdrawals() {
         </div>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filtered.length} withdrawals — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filtered.length}
+        label="withdrawals"
+      />
 
       {confirmDelete && (
         <ConfirmModal
@@ -396,10 +357,16 @@ export default function Withdrawals() {
       )}
 
       {filtered.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
-          {searchTerm || dateFrom || dateTo
-            ? "No withdrawals match your filters"
-            : "No withdrawals recorded yet"}
+        <div className="text-center py-16">
+          <Wallet className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+          <p className="text-gray-400 font-medium">
+            {searchTerm || dateFrom || dateTo
+              ? "No withdrawals match your filters"
+              : "No withdrawals recorded yet"}
+          </p>
+          <p className="text-gray-300 text-sm mt-1">
+            Try adjusting your filters
+          </p>
         </div>
       )}
     </div>

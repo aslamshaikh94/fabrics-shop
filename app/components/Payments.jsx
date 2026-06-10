@@ -271,7 +271,12 @@ export default function Payments() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-medium text-gray-700">All Suppliers</p>
             <button
-              onClick={() => exportCSV(supplierSummary, "supplier-summary.csv")}
+              onClick={() =>
+                exportCSV(
+                  supplierSummary,
+                  `supplier-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+                )
+              }
               className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
             >
               <Download className="w-3.5 h-3.5" />
@@ -405,7 +410,12 @@ export default function Payments() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-medium text-gray-700">All Customers</p>
             <button
-              onClick={() => exportCSV(customerSummary, "customer-summary.csv")}
+              onClick={() =>
+                exportCSV(
+                  customerSummary,
+                  `customer-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+                )
+              }
               className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
             >
               <Download className="w-3.5 h-3.5" />

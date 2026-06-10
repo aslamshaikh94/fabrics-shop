@@ -11,14 +11,16 @@ import {
   Paperclip,
   FileText,
   ExternalLink,
-  ChevronLeft,
-  ChevronRight,
   Receipt,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
+import Modal from "./shared/Modal";
+import Pagination from "./shared/Pagination";
+import LoadingSpinner from "./shared/LoadingSpinner";
+import ImageViewer from "./shared/ImageViewer";
 
 const PAGE_SIZE = 10;
 
@@ -306,217 +308,203 @@ export default function Expenses() {
         />
       </div>
 
-      {/* Add Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Expense" : "Add Expense"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  setEditingId(null);
-                }}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.title}
-                  onChange={(e) => {
-                    setFormData({ ...formData, title: e.target.value });
-                    if (formErrors.title)
-                      setFormErrors({ ...formErrors, title: "" });
-                  }}
-                  className={`input ${formErrors.title ? "border-error-400" : ""}`}
-                  placeholder="e.g., Monthly Rent"
-                />
-                {formErrors.title && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.title}
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Category
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => {
-                      setFormData({ ...formData, category: e.target.value });
-                      if (formErrors.category)
-                        setFormErrors({ ...formErrors, category: "" });
-                    }}
-                    className={`input ${formErrors.category ? "border-error-400" : ""}`}
-                  >
-                    {CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                  {formErrors.category && (
-                    <p className="text-error-600 text-sm mt-1">
-                      {formErrors.category}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Amount *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={formData.amount}
-                    onChange={(e) => {
-                      setFormData({ ...formData, amount: e.target.value });
-                      if (formErrors.amount)
-                        setFormErrors({ ...formErrors, amount: "" });
-                    }}
-                    className={`input ${formErrors.amount ? "border-error-400" : ""}`}
-                    placeholder="₹0.00"
-                    onWheel={(e) => e.target.blur()}
-                  />
-                  {formErrors.amount && (
-                    <p className="text-error-600 text-sm mt-1">
-                      {formErrors.amount}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.expense_date}
-                  onChange={(e) =>
-                    setFormData({ ...formData, expense_date: e.target.value })
-                  }
-                  className={`input w-full ${formErrors.expense_date ? "border-error-400" : ""}`}
-                />
-                {formErrors.expense_date && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.expense_date}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Paid By
-                </label>
-                <input
-                  type="text"
-                  value={formData.paid_by}
-                  onChange={(e) =>
-                    setFormData({ ...formData, paid_by: e.target.value })
-                  }
-                  className="input"
-                  placeholder="e.g., Ahmed, Owner..."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                  placeholder="Optional notes"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Payment Proof (Receipt / Bill)
-                </label>
-                <label
-                  className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${proofError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
-                >
-                  <Paperclip className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm text-gray-500 flex-1 truncate">
-                    {paymentProofFile
-                      ? paymentProofFile.name
-                      : editingId &&
-                          expenses.find((p) => p.id === editingId)
-                            ?.payment_proof_url
-                        ? "Replace existing proof"
-                        : "Upload receipt / bill (PDF, image)"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*,.pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      setPaymentProofFile(e.target.files[0] || null);
-                      if (e.target.files[0]) setProofError("");
-                    }}
-                  />
-                </label>
-                {proofError && (
-                  <p className="text-error-600 text-sm mt-1">{proofError}</p>
-                )}
-                {editingId &&
-                  expenses.find((p) => p.id === editingId)?.payment_proof_url &&
-                  !paymentProofFile && (
-                    <a
-                      href={
-                        expenses.find((p) => p.id === editingId)
-                          .payment_proof_url
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
-                    >
-                      <FileText className="w-3 h-3" /> View current proof
-                    </a>
-                  )}
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setEditingId(null);
-                  }}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading}
-                  className="btn btn-primary flex-1"
-                >
-                  {uploading
-                    ? "Saving..."
-                    : editingId
-                      ? "Update Expense"
-                      : "Add Expense"}
-                </button>
-              </div>
-            </form>
+      {/* Add/Edit Expense Modal */}
+      <Modal
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          setEditingId(null);
+        }}
+        title={editingId ? "Edit Expense" : "Add Expense"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Title *
+            </label>
+            <input
+              type="text"
+              required
+              value={formData.title}
+              onChange={(e) => {
+                setFormData({ ...formData, title: e.target.value });
+                if (formErrors.title)
+                  setFormErrors({ ...formErrors, title: "" });
+              }}
+              className={`input ${formErrors.title ? "border-error-400" : ""}`}
+              placeholder="e.g., Monthly Rent"
+            />
+            {formErrors.title && (
+              <p className="text-error-600 text-sm mt-1">{formErrors.title}</p>
+            )}
           </div>
-        </div>
-      )}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category
+              </label>
+              <select
+                value={formData.category}
+                onChange={(e) => {
+                  setFormData({ ...formData, category: e.target.value });
+                  if (formErrors.category)
+                    setFormErrors({ ...formErrors, category: "" });
+                }}
+                className={`input ${formErrors.category ? "border-error-400" : ""}`}
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              {formErrors.category && (
+                <p className="text-error-600 text-sm mt-1">
+                  {formErrors.category}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={formData.amount}
+                onChange={(e) => {
+                  setFormData({ ...formData, amount: e.target.value });
+                  if (formErrors.amount)
+                    setFormErrors({ ...formErrors, amount: "" });
+                }}
+                className={`input ${formErrors.amount ? "border-error-400" : ""}`}
+                placeholder="₹0.00"
+                onWheel={(e) => e.target.blur()}
+              />
+              {formErrors.amount && (
+                <p className="text-error-600 text-sm mt-1">
+                  {formErrors.amount}
+                </p>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Date
+            </label>
+            <input
+              type="date"
+              value={formData.expense_date}
+              onChange={(e) =>
+                setFormData({ ...formData, expense_date: e.target.value })
+              }
+              className={`input w-full ${formErrors.expense_date ? "border-error-400" : ""}`}
+            />
+            {formErrors.expense_date && (
+              <p className="text-error-600 text-sm mt-1">
+                {formErrors.expense_date}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Paid By
+            </label>
+            <input
+              type="text"
+              value={formData.paid_by}
+              onChange={(e) =>
+                setFormData({ ...formData, paid_by: e.target.value })
+              }
+              className="input"
+              placeholder="e.g., Ahmed, Owner..."
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Notes
+            </label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) =>
+                setFormData({ ...formData, notes: e.target.value })
+              }
+              className="input"
+              rows={2}
+              placeholder="Optional notes"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Payment Proof (Receipt / Bill)
+            </label>
+            <label
+              className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${proofError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
+            >
+              <Paperclip className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-500 flex-1 truncate">
+                {paymentProofFile
+                  ? paymentProofFile.name
+                  : editingId &&
+                      expenses.find((p) => p.id === editingId)
+                        ?.payment_proof_url
+                    ? "Replace existing proof"
+                    : "Upload receipt / bill (PDF, image)"}
+              </span>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  setPaymentProofFile(e.target.files[0] || null);
+                  if (e.target.files[0]) setProofError("");
+                }}
+              />
+            </label>
+            {proofError && (
+              <p className="text-error-600 text-sm mt-1">{proofError}</p>
+            )}
+            {editingId &&
+              expenses.find((p) => p.id === editingId)?.payment_proof_url &&
+              !paymentProofFile && (
+                <a
+                  href={
+                    expenses.find((p) => p.id === editingId).payment_proof_url
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
+                >
+                  <FileText className="w-3 h-3" /> View current proof
+                </a>
+              )}
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                setEditingId(null);
+              }}
+              className="btn btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={uploading}
+              className="btn btn-primary flex-1"
+            >
+              {uploading
+                ? "Saving..."
+                : editingId
+                  ? "Update Expense"
+                  : "Add Expense"}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Expenses List */}
       <div className="card overflow-hidden">
@@ -621,29 +609,13 @@ export default function Expenses() {
         </div>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filtered.length} expenses — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filtered.length}
+        label="expenses"
+      />
 
       {confirmDelete && (
         <ConfirmModal
@@ -669,43 +641,11 @@ export default function Expenses() {
         </div>
       )}
 
-      {/* Payment Proof Popup */}
-      {viewProofUrl && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
-          onClick={() => setViewProofUrl(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900">Payment Proof</h3>
-              <button
-                onClick={() => setViewProofUrl(null)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 flex items-center justify-center bg-gray-50 max-h-[calc(90vh-60px)] overflow-y-auto">
-              {viewProofUrl.match(/\.(pdf)$/i) ? (
-                <iframe
-                  src={viewProofUrl}
-                  className="w-full h-[70vh] rounded-lg"
-                  title="Payment Proof PDF"
-                />
-              ) : (
-                <img
-                  src={viewProofUrl}
-                  alt="Payment proof"
-                  className="max-w-full max-h-[70vh] object-contain rounded-lg"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ImageViewer
+        url={viewProofUrl}
+        onClose={() => setViewProofUrl(null)}
+        title="Payment Proof"
+      />
     </div>
   );
 }

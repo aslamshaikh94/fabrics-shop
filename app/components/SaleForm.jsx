@@ -533,7 +533,7 @@ export default function SaleForm({
                   setCustomerTab("walkin");
                   setFormData({
                     ...formData,
-                    customer_id: null,
+                    customer_id: "",
                     customer_name: "Walk-in Customer",
                   });
                   setCustomerSearch("");
@@ -658,7 +658,7 @@ export default function SaleForm({
                     const val = e.target.value;
                     setFormData({
                       ...formData,
-                      customer_id: null,
+                      customer_id: "",
                       customer_name: val || "Walk-in Customer",
                     });
                   }}
