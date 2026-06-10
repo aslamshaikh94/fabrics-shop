@@ -27,8 +27,34 @@ import {
 import { validateInvoiceFile } from "../utils/upload";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import Modal from "./shared/Modal";
+import Pagination from "./shared/Pagination";
+import ImageViewer from "./shared/ImageViewer";
 
 const PAGE_SIZE = 10;
+
+const INITIAL_FORM = {
+  supplier_id: "",
+  total_amount: "",
+  purchase_date: new Date().toISOString().split("T")[0],
+  notes: "",
+};
+
+const INITIAL_PAYMENT = {
+  amount: "",
+  payment_date: new Date().toISOString().split("T")[0],
+  payment_method: "cash",
+  reference_number: "",
+  notes: "",
+};
+
+const PAYMENT_METHODS = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "check", label: "Check" },
+  { value: "other", label: "Other" },
+];
 
 export default function Purchases() {
   const toast = useToast();
@@ -36,7 +62,7 @@ export default function Purchases() {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
   const [purchaseFabrics, setPurchaseFabrics] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -53,24 +79,12 @@ export default function Purchases() {
   const [viewInvoiceUrl, setViewInvoiceUrl] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
-  const [formData, setFormData] = useState({
-    supplier_id: "",
-    total_amount: "",
-    purchase_date: new Date().toISOString().split("T")[0],
-    notes: "",
-  });
-  const [paymentData, setPaymentData] = useState({
-    amount: "",
-    payment_date: new Date().toISOString().split("T")[0],
-    payment_method: "cash",
-    reference_number: "",
-    notes: "",
-  });
+  const [formData, setFormData] = useState({ ...INITIAL_FORM });
+  const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
 
   useEffect(() => {
     fetchPurchases();
     fetchSuppliers();
-    // Check if we need to prefill search from fabrics page
     const prefill = localStorage.getItem("prefill_purchase_number");
     if (prefill) {
       setSearchTerm(prefill);
@@ -103,6 +117,14 @@ export default function Purchases() {
     } catch (error) {
       console.error("Error fetching suppliers:", error);
     }
+  }
+
+  function resetForm() {
+    setFormData({ ...INITIAL_FORM });
+    setFormErrors({});
+    setInvoiceFile(null);
+    setInvoiceError("");
+    setEditingId(null);
   }
 
   async function handleSubmit(e) {
@@ -170,16 +192,7 @@ export default function Purchases() {
         toast("Purchase added successfully");
       }
       setShowForm(false);
-      setEditingId(null);
-      setInvoiceFile(null);
-      setInvoiceError("");
-      setFormErrors({});
-      setFormData({
-        supplier_id: "",
-        total_amount: "",
-        purchase_date: new Date().toISOString().split("T")[0],
-        notes: "",
-      });
+      resetForm();
       fetchPurchases();
     } catch (error) {
       console.error("Error saving purchase:", error);
@@ -211,14 +224,8 @@ export default function Purchases() {
         },
       ]);
       if (error) throw error;
-      setShowPaymentForm(false);
-      setPaymentData({
-        amount: "",
-        payment_date: new Date().toISOString().split("T")[0],
-        payment_method: "cash",
-        reference_number: "",
-        notes: "",
-      });
+      setShowPaymentModal(false);
+      setPaymentData({ ...INITIAL_PAYMENT });
       fetchPurchases();
       fetchPayments(selectedPurchase.id);
       toast("Payment added");
@@ -273,7 +280,7 @@ export default function Purchases() {
 
   function handleAddPayment(purchase) {
     setSelectedPurchase(purchase);
-    setShowPaymentForm(true);
+    setShowPaymentModal(true);
   }
 
   async function handleDelete(id) {
@@ -288,6 +295,11 @@ export default function Purchases() {
     } finally {
       setConfirmDelete(null);
     }
+  }
+
+  function handleFieldChange(field, value) {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (formErrors[field]) setFormErrors((prev) => ({ ...prev, [field]: "" }));
   }
 
   const filteredPurchases = purchases.filter((p) => {
@@ -318,6 +330,40 @@ export default function Purchases() {
     const labels = { pending: "Pending", partial: "Partial", paid: "Paid" };
     return <span className={`badge ${styles[status]}`}>{labels[status]}</span>;
   };
+
+  function FormField({
+    field,
+    label,
+    type = "text",
+    required = false,
+    placeholder = "",
+    children,
+  }) {
+    const value = formData[field];
+    const error = formErrors[field];
+    const cls = `input ${error ? "border-error-400" : ""}`;
+
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label} {required && "*"}
+        </label>
+        {children || (
+          <input
+            type={type}
+            step={type === "number" ? "0.01" : undefined}
+            required={required}
+            value={value}
+            onChange={(e) => handleFieldChange(field, e.target.value)}
+            className={cls}
+            placeholder={placeholder}
+            onWheel={(e) => e.target.blur()}
+          />
+        )}
+        {error && <p className="text-error-600 text-sm mt-1">{error}</p>}
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -358,15 +404,8 @@ export default function Purchases() {
           </button>
           <button
             onClick={() => {
+              resetForm();
               setShowForm(true);
-              setEditingId(null);
-              setInvoiceFile(null);
-              setFormData({
-                supplier_id: "",
-                total_amount: "",
-                purchase_date: new Date().toISOString().split("T")[0],
-                notes: "",
-              });
             }}
             className="btn btn-primary"
           >
@@ -407,183 +446,124 @@ export default function Purchases() {
         />
       </div>
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Purchase" : "New Purchase"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Supplier *
-                </label>
-                <select
-                  required
-                  value={formData.supplier_id}
-                  onChange={(e) => {
-                    setFormData({ ...formData, supplier_id: e.target.value });
-                    if (formErrors.supplier_id)
-                      setFormErrors({ ...formErrors, supplier_id: "" });
-                  }}
-                  className={`input ${formErrors.supplier_id ? "border-error-400" : ""}`}
+      {/* Purchase Form Modal */}
+      <Modal
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          resetForm();
+        }}
+        title={editingId ? "Edit Purchase" : "New Purchase"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <FormField field="supplier_id" label="Supplier" required>
+            <select
+              required
+              value={formData.supplier_id}
+              onChange={(e) => handleFieldChange("supplier_id", e.target.value)}
+              className={`input ${formErrors.supplier_id ? "border-error-400" : ""}`}
+            >
+              <option value="">Select supplier</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField
+            field="total_amount"
+            label="Total Amount"
+            type="number"
+            required
+            placeholder="₹0.00"
+          />
+          <FormField field="purchase_date" label="Purchase Date" type="date" />
+          <FormField field="notes" label="Notes">
+            <textarea
+              value={formData.notes}
+              onChange={(e) => handleFieldChange("notes", e.target.value)}
+              className="input"
+              rows={2}
+              placeholder="Invoice no., remarks..."
+            />
+          </FormField>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Invoice / Bill
+            </label>
+            <label
+              className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${invoiceError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
+            >
+              <Paperclip className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-500 flex-1 truncate">
+                {invoiceFile
+                  ? invoiceFile.name
+                  : editingId &&
+                      purchases.find((p) => p.id === editingId)?.invoice_url
+                    ? "Replace existing invoice"
+                    : "Attach invoice (PDF, image)"}
+              </span>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  setInvoiceFile(e.target.files[0] || null);
+                  if (e.target.files[0]) setInvoiceError("");
+                }}
+              />
+            </label>
+            {invoiceError && (
+              <p className="text-error-600 text-sm mt-1">{invoiceError}</p>
+            )}
+            {editingId &&
+              purchases.find((p) => p.id === editingId)?.invoice_url &&
+              !invoiceFile && (
+                <a
+                  href={purchases.find((p) => p.id === editingId).invoice_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
                 >
-                  <option value="">Select supplier</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                {formErrors.supplier_id && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.supplier_id}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Total Amount *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={formData.total_amount}
-                  onChange={(e) => {
-                    setFormData({ ...formData, total_amount: e.target.value });
-                    if (formErrors.total_amount)
-                      setFormErrors({ ...formErrors, total_amount: "" });
-                  }}
-                  className={`input ${formErrors.total_amount ? "border-error-400" : ""}`}
-                  placeholder="₹0.00"
-                  onWheel={(e) => e.target.blur()}
-                />
-                {formErrors.total_amount && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.total_amount}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Purchase Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.purchase_date}
-                  onChange={(e) =>
-                    setFormData({ ...formData, purchase_date: e.target.value })
-                  }
-                  className="input w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                  placeholder="Invoice no., remarks..."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Invoice / Bill
-                </label>
-                <label
-                  className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${invoiceError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
-                >
-                  <Paperclip className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm text-gray-500 flex-1 truncate">
-                    {invoiceFile
-                      ? invoiceFile.name
-                      : editingId &&
-                          purchases.find((p) => p.id === editingId)?.invoice_url
-                        ? "Replace existing invoice"
-                        : "Attach invoice (PDF, image)"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*,.pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      setInvoiceFile(e.target.files[0] || null);
-                      if (e.target.files[0]) setInvoiceError("");
-                    }}
-                  />
-                </label>
-                {invoiceError && (
-                  <p className="text-error-600 text-sm mt-1">{invoiceError}</p>
-                )}
-                {editingId &&
-                  purchases.find((p) => p.id === editingId)?.invoice_url &&
-                  !invoiceFile && (
-                    <a
-                      href={
-                        purchases.find((p) => p.id === editingId).invoice_url
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
-                    >
-                      <FileText className="w-3 h-3" /> View current invoice
-                    </a>
-                  )}
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setEditingId(null);
-                  }}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading}
-                  className="btn btn-primary flex-1"
-                >
-                  {uploading
-                    ? "Saving..."
-                    : editingId
-                      ? "Update Purchase"
-                      : "Add Purchase"}
-                </button>
-              </div>
-            </form>
+                  <FileText className="w-3 h-3" /> View current invoice
+                </a>
+              )}
           </div>
-        </div>
-      )}
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                resetForm();
+              }}
+              className="btn btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={uploading}
+              className="btn btn-primary flex-1"
+            >
+              {uploading
+                ? "Saving..."
+                : editingId
+                  ? "Update Purchase"
+                  : "Add Purchase"}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
-      {showPaymentForm && selectedPurchase && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Add Payment</h2>
-              <button
-                onClick={() => setShowPaymentForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Payment Modal */}
+      <Modal
+        open={showPaymentModal && !!selectedPurchase}
+        onClose={() => setShowPaymentModal(false)}
+        title="Add Payment"
+      >
+        {selectedPurchase && (
+          <>
             <div className="bg-gray-50 rounded-lg p-3 mb-4">
               <p className="text-sm text-gray-600">
                 Supplier:{" "}
@@ -654,11 +634,11 @@ export default function Purchases() {
                   }
                   className="input"
                 >
-                  <option value="cash">Cash</option>
-                  <option value="upi">UPI</option>
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="check">Check</option>
-                  <option value="other">Other</option>
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -694,7 +674,7 @@ export default function Purchases() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentForm(false)}
+                  onClick={() => setShowPaymentModal(false)}
                   className="btn btn-secondary flex-1"
                 >
                   Cancel
@@ -704,26 +684,23 @@ export default function Purchases() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
 
-      {selectedPurchase && !showPaymentForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Purchase Details</h2>
-              <button
-                onClick={() => {
-                  setSelectedPurchase(null);
-                  setPurchaseFabrics([]);
-                  setPayments([]);
-                }}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Purchase Details Modal */}
+      <Modal
+        open={!!selectedPurchase && !showPaymentModal}
+        onClose={() => {
+          setSelectedPurchase(null);
+          setPurchaseFabrics([]);
+          setPayments([]);
+        }}
+        title="Purchase Details"
+        maxWidth="max-w-2xl"
+      >
+        {selectedPurchase && (
+          <>
             <div className="bg-gray-50 rounded-lg p-3 mb-4">
               <p className="text-sm">
                 Supplier:{" "}
@@ -834,17 +811,18 @@ export default function Purchases() {
 
             {selectedPurchase.remaining_amount > 0 && (
               <button
-                onClick={() => setShowPaymentForm(true)}
+                onClick={() => setShowPaymentModal(true)}
                 className="btn btn-accent w-full mt-4"
               >
                 <CreditCard className="w-5 h-5 mr-2" />
                 Add Payment
               </button>
             )}
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
 
+      {/* Table */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full" style={{ minWidth: "600px" }}>
@@ -902,7 +880,11 @@ export default function Purchases() {
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
                       {new Date(purchase.purchase_date).toLocaleDateString(
                         "en-IN",
-                        { day: "numeric", month: "short", year: "numeric" },
+                        {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        },
                       )}
                     </div>
                   </td>
@@ -935,7 +917,6 @@ export default function Purchases() {
                           : "No amount"
                       }
                     >
-                      {/* Background: paid (green) + pending (orange) */}
                       <span className="absolute inset-0 bg-warning-200" />
                       <span
                         className="absolute inset-y-0 left-0 bg-accent-400"
@@ -946,7 +927,6 @@ export default function Purchases() {
                               : "0%",
                         }}
                       />
-                      {/* Label on top */}
                       <span
                         className="relative z-10 font-medium"
                         style={{ color: "#111" }}
@@ -1008,29 +988,13 @@ export default function Purchases() {
         </div>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filteredPurchases.length} records — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filteredPurchases.length}
+        label="records"
+      />
 
       {confirmDelete && (
         <ConfirmModal
@@ -1050,43 +1014,11 @@ export default function Purchases() {
         </div>
       )}
 
-      {/* Invoice Popup */}
-      {viewInvoiceUrl && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
-          onClick={() => setViewInvoiceUrl(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900">Invoice / Bill</h3>
-              <button
-                onClick={() => setViewInvoiceUrl(null)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 flex items-center justify-center bg-gray-50 max-h-[calc(90vh-60px)] overflow-y-auto">
-              {viewInvoiceUrl.match(/\.(pdf)$/i) ? (
-                <iframe
-                  src={viewInvoiceUrl}
-                  className="w-full h-[70vh] rounded-lg"
-                  title="Invoice PDF"
-                />
-              ) : (
-                <img
-                  src={viewInvoiceUrl}
-                  alt="Invoice"
-                  className="max-w-full max-h-[70vh] object-contain rounded-lg"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ImageViewer
+        url={viewInvoiceUrl}
+        onClose={() => setViewInvoiceUrl(null)}
+        title="Invoice / Bill"
+      />
     </div>
   );
 }

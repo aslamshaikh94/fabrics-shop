@@ -1,10 +1,10 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import { supabase } from "../lib/supabase";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { supabase, safeQuery, withRetry } from "../lib/supabase";
 
 /**
  * Custom hook for fetching data from Supabase
- * Handles loading, error states, and automatic refetching
+ * Handles loading, error states, automatic refetching, and cleanup
  */
 export function useFetch(table, options = {}) {
   const [data, setData] = useState([]);
@@ -19,60 +19,82 @@ export function useFetch(table, options = {}) {
     dependencies = [],
   } = options;
 
-  const fetch = useCallback(async () => {
+  // Track mounted state to avoid state updates after unmount
+  const mountedRef = useRef(true);
+
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      let query = supabase.from(table).select(select);
+      const result = await withRetry(async () => {
+        let query = supabase.from(table).select(select);
 
-      if (filter) {
-        Object.entries(filter).forEach(([key, value]) => {
-          if (value.operator) {
-            query = query[value.operator](key, value.value);
-          } else {
-            query = query.eq(key, value);
+        if (filter) {
+          for (const [key, value] of Object.entries(filter)) {
+            if (value && typeof value === "object" && value.operator) {
+              query = query[value.operator](key, value.value);
+            } else {
+              query = query.eq(key, value);
+            }
           }
-        });
+        }
+
+        if (orderBy) {
+          query = query.order(orderBy.column, {
+            ascending: orderBy.ascending !== false,
+          });
+        }
+
+        if (limit) {
+          query = query.limit(limit);
+        }
+
+        return safeQuery(query);
+      });
+
+      if (mountedRef.current) {
+        if (result.error) {
+          setError(result.error);
+        } else {
+          setData(result.data);
+        }
       }
-
-      if (orderBy) {
-        query = query.order(orderBy.column, {
-          ascending: orderBy.ascending !== false,
-        });
-      }
-
-      if (limit) {
-        query = query.limit(limit);
-      }
-
-      const { data: result, error: err } = await query;
-
-      if (err) throw err;
-      setData(result || []);
     } catch (err) {
-      setError(err.message);
-      console.error(`Error fetching ${table}:`, err);
+      if (mountedRef.current) {
+        setError(err.message || "Error fetching data");
+        console.error(`Error fetching ${table}:`, err);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [table, select, orderBy, limit, filter]);
 
   useEffect(() => {
-    fetch();
-  }, [fetch, ...dependencies]);
+    mountedRef.current = true;
+    fetchData();
 
-  return { data, loading, error, refetch: fetch };
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [fetchData, ...dependencies]);
+
+  return { data, loading, error, refetch: fetchData };
 }
 
 /**
- * Custom hook for fetching a single item
+ * Custom hook for fetching a single item with cleanup
  */
 export function useFetchOne(table, id, select = "*") {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
+
     if (!id) {
       setData(null);
       setLoading(false);
@@ -83,21 +105,34 @@ export function useFetchOne(table, id, select = "*") {
       setLoading(true);
       setError(null);
       try {
-        const { data: result, error: err } = await supabase
-          .from(table)
-          .select(select)
-          .eq("id", id)
-          .single();
+        const result = await withRetry(async () => {
+          return safeQuery(
+            supabase.from(table).select(select).eq("id", id).single(),
+          );
+        });
 
-        if (err) throw err;
-        setData(result);
+        if (mountedRef.current) {
+          if (result.error) {
+            setError(result.error);
+          } else {
+            setData(result.data);
+          }
+        }
       } catch (err) {
-        setError(err.message);
-        console.error(`Error fetching ${table} with id ${id}:`, err);
+        if (mountedRef.current) {
+          setError(err.message || "Error fetching data");
+          console.error(`Error fetching ${table} with id ${id}:`, err);
+        }
       } finally {
-        setLoading(false);
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
     })();
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [table, id, select]);
 
   return { data, loading, error };
