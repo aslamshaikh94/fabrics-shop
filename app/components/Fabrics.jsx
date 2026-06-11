@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileUp,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
