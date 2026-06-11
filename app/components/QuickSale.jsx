@@ -1,7 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { ScanLine, Search, X, CircleCheck as CheckCircle, Zap } from "lucide-react";
+import {
+  ScanLine,
+  Search,
+  X,
+  CircleCheck as CheckCircle,
+  Zap,
+} from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
 
@@ -90,6 +96,7 @@ export default function QuickSale() {
             sale_date: new Date().toISOString().split("T")[0],
             payment_type: paymentType,
             status: paymentType === "cash" ? "completed" : "partial",
+            fabric_name: selectedFabric.name,
             notes: `Fabric: ${selectedFabric.name}`,
           },
         ])

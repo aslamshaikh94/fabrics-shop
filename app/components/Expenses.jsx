@@ -12,8 +12,10 @@ import {
   FileText,
   ExternalLink,
   Receipt,
+  Download,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
+import { exportCSV } from "../utils/export";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -237,19 +239,39 @@ export default function Expenses() {
           <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
           <p className="text-gray-500 mt-1">Track shop operating expenses</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingId(null);
-            setFormData(emptyForm);
-            setPaymentProofFile(null);
-            setProofError("");
-            setShowForm(true);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Expense
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filtered.map((e) => ({
+                  title: e.title,
+                  category: e.category,
+                  amount: e.amount,
+                  date: e.expense_date,
+                  paid_by: e.paid_by || "",
+                  notes: e.notes || "",
+                })),
+                `expenses-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setFormData(emptyForm);
+              setPaymentProofFile(null);
+              setProofError("");
+              setShowForm(true);
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Expense
+          </button>
+        </div>
       </div>
 
       {/* Summary */}

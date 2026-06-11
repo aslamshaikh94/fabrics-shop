@@ -14,10 +14,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
+  Download,
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import { exportCSV } from "../utils/export";
 
 const PAGE_SIZE = 9;
 
@@ -187,22 +189,41 @@ export default function Customers() {
           <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
           <p className="text-gray-500 mt-1">Manage your customer base</p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-            setFormData({
-              name: "",
-              phone: "",
-              address: "",
-              notes: "",
-            });
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Customer
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filteredCustomers.map((c) => ({
+                  name: c.name,
+                  phone: c.phone || "",
+                  address: c.address || "",
+                  dues: customerDues[c.id] || 0,
+                  notes: c.notes || "",
+                })),
+                `customers-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData({
+                name: "",
+                phone: "",
+                address: "",
+                notes: "",
+              });
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Customer
+          </button>
+        </div>
       </div>
 
       <div className="relative">

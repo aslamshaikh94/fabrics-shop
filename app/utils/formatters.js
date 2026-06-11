@@ -17,7 +17,7 @@ export function formatDate(dateString) {
 
 /**
  * Format a sale's customer name, handling both existing and walk-in customers.
- * Walk-in names are stored in sale.notes as "(Name: John Doe)".
+ * Walk-in names are stored in sale.customer_name column.
  */
 export function formatCustomerName(saleOrGroup) {
   if (!saleOrGroup) return "Walk-in";
@@ -25,9 +25,13 @@ export function formatCustomerName(saleOrGroup) {
   // If they have a customer object with a name, use it
   if (saleOrGroup.customer?.name) return saleOrGroup.customer.name;
 
-  // Walk-in: try to extract name from the notes field
+  // Walk-in: try customer_name field from the first item or group
+  const name =
+    saleOrGroup.items?.[0]?.customer_name || saleOrGroup.customer_name || "";
+  if (name) return name;
+
+  // Legacy fallback: try to extract from notes
   if (!saleOrGroup.customer_id) {
-    // Check multiple possible notes locations
     const notes = saleOrGroup.items?.[0]?.notes || saleOrGroup.notes || "";
     const match = notes.match(/Name:\s*([^)]+)/);
     if (match) return match[1].trim();
