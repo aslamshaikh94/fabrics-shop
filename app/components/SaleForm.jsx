@@ -307,6 +307,13 @@ export default function SaleForm({
           .eq("sale_id", editingId);
         if (deletePayErr) throw deletePayErr;
 
+        // Strip auto-generated metadata from notes to keep only real user notes
+        const cleanNotes = (item.notes || "")
+          .replace(/Fabric:\s*[^(|\n]+/i, "")
+          .replace(/\(Name:\s*[^)]+\)/g, "")
+          .replace(/^[\s,;]+/, "")
+          .replace(/[\s,;]+$/, "")
+          .trim();
         const salePayload = {
           customer_id: formData.customer_id || null,
           fabric_id: item.fabric_id || null,
@@ -315,7 +322,13 @@ export default function SaleForm({
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
           payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${!formData.customer_id && formData.customer_name && formData.customer_name !== "Walk-in Customer" ? ` (Name: ${formData.customer_name})` : ""}`,
+          customer_name: !formData.customer_id
+            ? formData.customer_name !== "Walk-in Customer"
+              ? formData.customer_name
+              : ""
+            : "",
+          fabric_name: item.fabric_name,
+          notes: cleanNotes || "",
           invoice_url,
         };
         const { error: updateError } = await supabase
@@ -369,6 +382,12 @@ export default function SaleForm({
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
           payment_type: formData.payment_type,
+          customer_name: !formData.customer_id
+            ? formData.customer_name !== "Walk-in Customer"
+              ? formData.customer_name
+              : ""
+            : "",
+          fabric_name: item.fabric_name,
           notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
           sale_group_id: saleGroupId,
           invoice_url,
@@ -455,18 +474,25 @@ export default function SaleForm({
   }
 
   function loadSaleForEdit(sale) {
-    const notes = sale.notes || "";
-    const fabricMatch = notes.match(/Fabric:\s*([^(|\n]+)/);
     const isWalkin = !sale.customer_id;
     setCustomerTab(isWalkin ? "walkin" : "existing");
+    // Strip auto-generated Fabric:/Name: prefixes from notes to get real user notes
+    const cleanNotes = (sale.notes || "")
+      .replace(/Fabric:\s*[^(|\n]+/i, "")
+      .replace(/\(Name:\s*[^)]+\)/g, "")
+      .replace(/^[\s,;]+/, "")
+      .replace(/[\s,;]+$/, "")
+      .trim();
     setFormData({
       customer_id: sale.customer_id || "",
       customer_name:
-        sale.customer?.name || (sale.customer_id ? "" : "Walk-in Customer"),
+        sale.customer?.name ||
+        sale.customer_name ||
+        (sale.customer_id ? "" : "Walk-in Customer"),
       items: [
         {
           fabric_id: sale.fabric_id || "",
-          fabric_name: fabricMatch ? fabricMatch[1].trim() : "",
+          fabric_name: sale.fabric_name || "",
           meters: sale.meters.toString(),
           price_per_meter: sale.price_per_meter.toString(),
           cost_price_per_meter: sale.cost_price_per_meter.toString(),
@@ -478,6 +504,29 @@ export default function SaleForm({
       invoice_file: null,
     });
     setEditingId(sale.id);
+  }
+
+  async function handleRemoveNotesMeta(
+    saleId,
+    fabricName,
+    customerName,
+    cleanNotes,
+  ) {
+    // Clean the auto-generated metadata from the notes field
+    const notes = (cleanNotes || "")
+      .replace(/Fabric:\s*[^(|\n]+/i, "")
+      .replace(/\(Name:\s*[^)]+\)/g, "")
+      .replace(/^[\s,;]+/, "")
+      .replace(/[\s,;]+$/, "")
+      .trim();
+    await supabase
+      .from("sales")
+      .update({
+        fabric_name: fabricName,
+        customer_name: customerName,
+        notes: notes,
+      })
+      .eq("id", saleId);
   }
 
   if (!open) return null;

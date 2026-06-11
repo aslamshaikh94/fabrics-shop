@@ -1,7 +1,16 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Plus, Pencil, Trash2, Search, Calendar, Wallet } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  Calendar,
+  Wallet,
+  Download,
+} from "lucide-react";
+import { exportCSV } from "../utils/export";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -141,17 +150,35 @@ export default function Withdrawals() {
           <h1 className="text-2xl font-bold text-gray-900">Withdrawals</h1>
           <p className="text-gray-500 mt-1">Track owner/partner withdrawals</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingId(null);
-            setFormData(emptyForm);
-            setShowForm(true);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Withdrawal
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filtered.map((w) => ({
+                  amount: w.amount,
+                  date: w.withdrawal_date,
+                  withdrawn_by: w.withdrawn_by || "",
+                  reason: w.reason || "",
+                })),
+                `withdrawals-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setFormData(emptyForm);
+              setShowForm(true);
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Withdrawal
+          </button>
+        </div>
       </div>
 
       <div className="card p-5">

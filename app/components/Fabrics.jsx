@@ -12,11 +12,13 @@ import {
   ScanLine,
   ChevronLeft,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
+import { exportCSV } from "../utils/export";
 import { formatDate } from "../utils/formatters";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
@@ -287,18 +289,40 @@ export default function Fabrics() {
           <h1 className="text-2xl font-bold text-gray-900">Fabrics</h1>
           <p className="text-gray-500 mt-1">Manage your fabric inventory</p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-            setFormData(emptyForm);
-            setRows([{ ...emptyRow }]);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Fabric
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filtered.map((f) => ({
+                  name: f.name,
+                  barcode: f.barcode || "",
+                  quantity: f.quantity || "",
+                  supplier: f.supplier?.name || "",
+                  total_meters: f.total_meters,
+                  available_meters: f.available_meters,
+                  buy_price_per_meter: f.purchase_price_per_meter,
+                  total_price: f.total_meters * f.purchase_price_per_meter,
+                })),
+                `fabrics-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData(emptyForm);
+              setRows([{ ...emptyRow }]);
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Fabric
+          </button>
+        </div>
       </div>
 
       {lowStock.length > 0 && (

@@ -11,6 +11,7 @@ import {
   History,
   TrendingUp,
   Download,
+  FileUp,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validatePayment, hasErrors } from "../utils/validators";
@@ -19,6 +20,7 @@ import { useToast } from "./Toast";
 import SaleForm from "./SaleForm";
 import SalePaymentModal from "./SalePaymentModal";
 import SaleDetailsModal from "./SaleDetailsModal";
+import SalesImport from "./SalesImport";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName } from "../utils/formatters";
 
@@ -56,6 +58,7 @@ export default function Sales() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     fetchSales();
@@ -180,11 +183,16 @@ export default function Sales() {
   const filteredSales = useMemo(
     () =>
       sales.filter((s) => {
+        const term = searchTerm.toLowerCase();
         const c = s.customer?.name?.toLowerCase() || "";
         const n = s.notes?.toLowerCase() || "";
+        const f = s.fabric_name?.toLowerCase() || "";
+        const cust = s.customer_name?.toLowerCase() || "";
         return (
-          (c.includes(searchTerm.toLowerCase()) ||
-            n.includes(searchTerm.toLowerCase())) &&
+          (c.includes(term) ||
+            n.includes(term) ||
+            f.includes(term) ||
+            cust.includes(term)) &&
           (filterType === "all" || s.payment_type === filterType) &&
           (!dateFrom || s.sale_date >= dateFrom) &&
           (!dateTo || s.sale_date <= dateTo)
@@ -248,11 +256,19 @@ export default function Sales() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
+          <button
             onClick={() =>
               exportCSV(
                 filteredSales.map((s) => ({
                   date: s.sale_date,
-                  customer: s.customer?.name || "Walk-in",
+                  customer: s.customer?.name || s.customer_name || "Walk-in",
+                  fabric_name: s.fabric_name || "",
                   notes: s.notes,
                   meters: s.meters,
                   price_per_meter: s.price_per_meter,
@@ -333,6 +349,18 @@ export default function Sales() {
         }}
         editingId={editingId}
         onSaved={() => fetchSales()}
+        fabrics={fabrics}
+        customers={customers}
+      />
+
+      <SalesImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => {
+          fetchSales();
+          fetchCustomers();
+          fetchFabrics();
+        }}
         fabrics={fabrics}
         customers={customers}
       />

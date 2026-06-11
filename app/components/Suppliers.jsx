@@ -13,8 +13,10 @@ import {
   ChevronLeft,
   ChevronRight,
   DollarSign,
+  Download,
 } from "lucide-react";
 import { validateSupplier, hasErrors } from "../utils/validators";
+import { exportCSV } from "../utils/export";
 import SupplierLedger from "./SupplierLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
@@ -148,17 +150,35 @@ export default function Suppliers() {
             Manage your wholesalers and vendors
           </p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-            setFormData({ name: "", phone: "", address: "", notes: "" });
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Supplier
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filteredSuppliers.map((s) => ({
+                  name: s.name,
+                  phone: s.phone || "",
+                  address: s.address || "",
+                  notes: s.notes || "",
+                })),
+                `suppliers-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData({ name: "", phone: "", address: "", notes: "" });
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Supplier
+          </button>
+        </div>
       </div>
 
       <div className="relative">

@@ -373,8 +373,7 @@ export default function Dashboard() {
                     {sale.customer?.name || "Walk-in"}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
-                    {sale.notes?.split("|")[0]?.replace("Fabric:", "").trim() ||
-                      "—"}
+                    {sale.fabric_name || "—"}
                   </p>
                 </div>
                 <div className="text-right shrink-0">

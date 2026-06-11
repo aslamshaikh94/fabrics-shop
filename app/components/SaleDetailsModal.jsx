@@ -97,6 +97,7 @@ export default function SaleDetailsModal({
           price_per_meter: parseFloat(editItemForm.price_per_meter) || 0,
           cost_price_per_meter:
             parseFloat(editItemForm.cost_price_per_meter) || 0,
+          fabric_name: editItemForm.fabric_name,
           notes: `Fabric: ${editItemForm.fabric_name}`,
         })
         .eq("id", itemId);
@@ -203,6 +204,7 @@ export default function SaleDetailsModal({
           sale_date: group.sale_date,
           payment_type: group.payment_type,
           sale_group_id: group.id,
+          fabric_name: newItemForm.fabric_name,
           notes: `Fabric: ${newItemForm.fabric_name}`,
         },
       ]);
@@ -217,10 +219,9 @@ export default function SaleDetailsModal({
 
   const setEditForView = () => {
     // Extract walk-in name from notes if no customer_id
-    const walkInName =
-      !group.customer_id && group.items[0]?.notes
-        ? group.items[0].notes.match(/Name:\s*([^)]+)/)?.[1]?.trim() || ""
-        : "";
+    const walkInName = !group.customer_id
+      ? group.items[0]?.customer_name || ""
+      : "";
     const isWalkin = !group.customer_id;
     setCustomerTab(isWalkin ? "walkin" : "existing");
     setEditGroupFields({
@@ -466,17 +467,12 @@ export default function SaleDetailsModal({
                           Item {idx + 1}
                         </p>
                         <p className="font-semibold text-gray-900">
-                          {item.notes
-                            ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
-                            ?.trim() || "N/A"}
+                          {item.fabric_name || "N/A"}
                         </p>
                       </div>
                       <button
                         onClick={() => {
-                          const n =
-                            item.notes
-                              ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
-                              ?.trim() || "";
+                          const n = item.fabric_name || "";
                           setEditItemForm({
                             fabric_id: item.fabric_id || "",
                             fabric_name: n,
