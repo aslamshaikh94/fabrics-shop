@@ -18,6 +18,8 @@ import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
 import { formatDate } from "../utils/formatters";
+import Modal from "./shared/Modal";
+import Pagination from "./shared/Pagination";
 
 const PAGE_SIZE = 10;
 
@@ -348,276 +350,258 @@ export default function Fabrics() {
         />
       </div>
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Fabric" : "Add Fabrics"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  Supplier
-                </span>
-                <select
-                  value={formData.supplier_id}
-                  onChange={(e) =>
-                    setFormData({ ...formData, supplier_id: e.target.value })
-                  }
-                  className="input"
-                >
-                  <option value="">Select supplier</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editingId ? "Edit Fabric" : "Add Fabrics"}
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Supplier
+            </span>
+            <select
+              value={formData.supplier_id}
+              onChange={(e) =>
+                setFormData({ ...formData, supplier_id: e.target.value })
+              }
+              className="input"
+            >
+              <option value="">Select supplier</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              {/* Link to existing purchase */}
-              {!editingId && (
-                <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Link to Existing Purchase (optional)
-                  </span>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="input flex-1"
-                      value={formData.purchase_number}
-                      onChange={async (e) => {
-                        const val = e.target.value;
-                        setFormData({ ...formData, purchase_number: val });
-                        if (!val.trim()) {
-                          setExistingPurchaseInfo(null);
-                          return;
-                        }
-                        // Look up purchase by number
-                        const { data } = await supabase
-                          .from("purchases")
-                          .select(
-                            "id, purchase_number, total_amount, supplier:suppliers(name)",
-                          )
-                          .eq("purchase_number", val.trim())
-                          .single();
-                        if (data) {
-                          setExistingPurchaseInfo(data);
-                        } else {
-                          setExistingPurchaseInfo(null);
-                        }
-                      }}
-                      placeholder="Enter purchase number (e.g. PUR-00001)"
-                    />
-                  </div>
-                  {existingPurchaseInfo && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                      <p className="text-sm font-medium text-green-800">
-                        ✓ Linked to {existingPurchaseInfo.purchase_number}
-                      </p>
-                      <p className="text-xs text-green-600 mt-0.5">
-                        Supplier: {existingPurchaseInfo.supplier?.name} — ₹
-                        {existingPurchaseInfo.total_amount.toLocaleString(
-                          "en-IN",
-                        )}
-                      </p>
-                    </div>
-                  )}
+          {/* Link to existing purchase */}
+          {!editingId && (
+            <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Link to Existing Purchase (optional)
+              </span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="input flex-1"
+                  value={formData.purchase_number}
+                  onChange={async (e) => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, purchase_number: val });
+                    if (!val.trim()) {
+                      setExistingPurchaseInfo(null);
+                      return;
+                    }
+                    // Look up purchase by number
+                    const { data } = await supabase
+                      .from("purchases")
+                      .select(
+                        "id, purchase_number, total_amount, supplier:suppliers(name)",
+                      )
+                      .eq("purchase_number", val.trim())
+                      .single();
+                    if (data) {
+                      setExistingPurchaseInfo(data);
+                    } else {
+                      setExistingPurchaseInfo(null);
+                    }
+                  }}
+                  placeholder="Enter purchase number (e.g. PUR-00001)"
+                />
+              </div>
+              {existingPurchaseInfo && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-green-800">
+                    ✓ Linked to {existingPurchaseInfo.purchase_number}
+                  </p>
+                  <p className="text-xs text-green-600 mt-0.5">
+                    Supplier: {existingPurchaseInfo.supplier?.name} — ₹
+                    {existingPurchaseInfo.total_amount.toLocaleString("en-IN")}
+                  </p>
                 </div>
               )}
+            </div>
+          )}
 
-              <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
-                    Fabric Items
-                  </span>
-                  {rows.length > 1 && !editingId && (
-                    <span className="text-xs font-medium text-white bg-accent-500 px-2.5 py-1.5 rounded-full">
-                      {rows.length - 1} added
-                    </span>
-                  )}
-                </div>
+          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                Fabric Items
+              </span>
+              {rows.length > 1 && !editingId && (
+                <span className="text-xs font-medium text-white bg-accent-500 px-2.5 py-1.5 rounded-full">
+                  {rows.length - 1} added
+                </span>
+              )}
+            </div>
 
-                {/* Display Added Items (all except the last one) */}
-                {rows.length > 1 && !editingId && (
-                  <div className="space-y-2 mb-3 pb-3 border-b border-gray-200">
-                    {rows.slice(0, -1).map((row, idx) => (
-                      <div
-                        key={idx}
-                        className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-center justify-between"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-2 h-2 rounded-full bg-green-600" />
-                            <p className="font-semibold text-gray-900">
-                              {row.name || `Item ${idx + 1}`}
-                            </p>
-                          </div>
-                          <p className="text-xs text-gray-700 font-medium">
-                            {row.total_meters ? `${row.total_meters}m` : ""}
-                            {row.purchase_price_per_meter
-                              ? ` @ ₹${row.purchase_price_per_meter}/m`
-                              : ""}
-                            {row.quantity ? ` • ${row.quantity}` : ""}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRows((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="ml-2 p-2 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
-                          title="Remove item"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Current Item Form */}
-                {(() => {
-                  const currentIdx = rows.length - 1;
-                  const row = rows[currentIdx];
-                  return (
-                    <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-white">
-                      <span className="text-[10px] font-bold text-gray-900 uppercase bg-gray-100 px-2 py-1 rounded">
-                        {editingId ? "Edit Fabric" : `New Item ${rows.length}`}
-                      </span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Name *
-                          </label>
-                          <input
-                            className="input bg-white"
-                            value={row.name}
-                            onChange={(e) =>
-                              updateRow(currentIdx, "name", e.target.value)
-                            }
-                            placeholder="Fabric name"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Quantity
-                          </label>
-                          <input
-                            className="input bg-white"
-                            value={row.quantity}
-                            onChange={(e) =>
-                              updateRow(currentIdx, "quantity", e.target.value)
-                            }
-                            placeholder="e.g. 10 Rolls"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Meters
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="input bg-white"
-                            value={row.total_meters}
-                            onChange={(e) =>
-                              updateRow(
-                                currentIdx,
-                                "total_meters",
-                                e.target.value,
-                              )
-                            }
-                            placeholder="0"
-                            onWheel={(e) => e.target.blur()}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Buy ₹/m
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="input bg-white"
-                            value={row.purchase_price_per_meter}
-                            onChange={(e) =>
-                              updateRow(
-                                currentIdx,
-                                "purchase_price_per_meter",
-                                e.target.value,
-                              )
-                            }
-                            placeholder="0"
-                            onWheel={(e) => e.target.blur()}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Barcode
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            className="input bg-white flex-1"
-                            value={row.barcode}
-                            onChange={(e) =>
-                              updateRow(currentIdx, "barcode", e.target.value)
-                            }
-                            placeholder="Scan or type barcode"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setScanningRowIdx(currentIdx)}
-                            className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 hover:text-primary-600 transition-colors"
-                          >
-                            <ScanLine className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {!editingId && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRows((prev) => [...prev, { ...emptyRow }])
-                    }
-                    className="w-full btn btn-primary flex items-center justify-center gap-2 text-sm"
+            {/* Display Added Items (all except the last one) */}
+            {rows.length > 1 && !editingId && (
+              <div className="space-y-2 mb-3 pb-3 border-b border-gray-200">
+                {rows.slice(0, -1).map((row, idx) => (
+                  <div
+                    key={idx}
+                    className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-center justify-between"
                   >
-                    <Plus className="w-4 h-4" /> Add Item
-                  </button>
-                )}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-2 h-2 rounded-full bg-green-600" />
+                        <p className="font-semibold text-gray-900">
+                          {row.name || `Item ${idx + 1}`}
+                        </p>
+                      </div>
+                      <p className="text-xs text-gray-700 font-medium">
+                        {row.total_meters ? `${row.total_meters}m` : ""}
+                        {row.purchase_price_per_meter
+                          ? ` @ ₹${row.purchase_price_per_meter}/m`
+                          : ""}
+                        {row.quantity ? ` • ${row.quantity}` : ""}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRows((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                      className="ml-2 p-2 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
+                      title="Remove item"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
               </div>
+            )}
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update" : "Add"} Fabric
-                </button>
-              </div>
-            </form>
+            {/* Current Item Form */}
+            {(() => {
+              const currentIdx = rows.length - 1;
+              const row = rows[currentIdx];
+              return (
+                <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-white">
+                  <span className="text-[10px] font-bold text-gray-900 uppercase bg-gray-100 px-2 py-1 rounded">
+                    {editingId ? "Edit Fabric" : `New Item ${rows.length}`}
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-900 mb-1">
+                        Name *
+                      </label>
+                      <input
+                        className="input bg-white"
+                        value={row.name}
+                        onChange={(e) =>
+                          updateRow(currentIdx, "name", e.target.value)
+                        }
+                        placeholder="Fabric name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-900 mb-1">
+                        Quantity
+                      </label>
+                      <input
+                        className="input bg-white"
+                        value={row.quantity}
+                        onChange={(e) =>
+                          updateRow(currentIdx, "quantity", e.target.value)
+                        }
+                        placeholder="e.g. 10 Rolls"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-900 mb-1">
+                        Meters
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="input bg-white"
+                        value={row.total_meters}
+                        onChange={(e) =>
+                          updateRow(currentIdx, "total_meters", e.target.value)
+                        }
+                        placeholder="0"
+                        onWheel={(e) => e.target.blur()}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-900 mb-1">
+                        Buy ₹/m
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="input bg-white"
+                        value={row.purchase_price_per_meter}
+                        onChange={(e) =>
+                          updateRow(
+                            currentIdx,
+                            "purchase_price_per_meter",
+                            e.target.value,
+                          )
+                        }
+                        placeholder="0"
+                        onWheel={(e) => e.target.blur()}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-900 mb-1">
+                      Barcode
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        className="input bg-white flex-1"
+                        value={row.barcode}
+                        onChange={(e) =>
+                          updateRow(currentIdx, "barcode", e.target.value)
+                        }
+                        placeholder="Scan or type barcode"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setScanningRowIdx(currentIdx)}
+                        className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 hover:text-primary-600 transition-colors"
+                      >
+                        <ScanLine className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!editingId && (
+              <button
+                type="button"
+                onClick={() => setRows((prev) => [...prev, { ...emptyRow }])}
+                className="w-full btn btn-primary flex items-center justify-center gap-2 text-sm"
+              >
+                <Plus className="w-4 h-4" /> Add Item
+              </button>
+            )}
           </div>
-        </div>
-      )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="btn btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary flex-1">
+              {editingId ? "Update" : "Add"} Fabric
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {scanningRowIdx !== null && (
         <BarcodeScanner
@@ -777,29 +761,13 @@ export default function Fabrics() {
         </table>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filtered.length} fabrics — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filtered.length}
+        label="fabrics"
+      />
 
       {confirmDelete && (
         <ConfirmModal
