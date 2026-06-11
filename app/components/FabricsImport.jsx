@@ -168,20 +168,55 @@ export default function FabricsImport({
         return;
       }
 
-      // Group by supplier to create purchase records
-      const groups = {};
+      // Split into groups: with supplier (creates purchase) and without (inserts fabric directly)
+      const withSupplier = {};
+      const withoutSupplier = [];
       validRows.forEach((row, idx) => {
-        const supplierId = row.supplier_id || "none";
-        if (!groups[supplierId])
-          groups[supplierId] = { rows: [], groupId: generateUUID() };
-        groups[supplierId].rows.push({ ...row, idx });
+        if (row.supplier_id) {
+          if (!withSupplier[row.supplier_id])
+            withSupplier[row.supplier_id] = {
+              rows: [],
+              groupId: generateUUID(),
+            };
+          withSupplier[row.supplier_id].rows.push({ ...row, idx });
+        } else {
+          withoutSupplier.push({ ...row, idx });
+        }
       });
 
-      for (const [supplierKey, group] of Object.entries(groups)) {
-        const supplierId = supplierKey === "none" ? null : supplierKey;
-        const firstRow = group.rows[0];
+      // 1) Insert fabrics with no supplier directly (no purchase record)
+      if (withoutSupplier.length > 0) {
+        const directPayloads = withoutSupplier.map((row) => ({
+          name: row.name,
+          barcode: row.barcode || "",
+          quantity: row.quantity || "",
+          total_meters: parseFloat(row.total_meters) || 0,
+          available_meters: parseFloat(row.total_meters) || 0,
+          purchase_price_per_meter:
+            parseFloat(row.purchase_price_per_meter) || 0,
+          selling_price_per_meter: parseFloat(row.selling_price_per_meter) || 0,
+          supplier_id: null,
+          type: row.type || "",
+          color: row.color || "",
+          notes: row.notes || "",
+        }));
+        const { error: directError } = await supabase
+          .from("fabrics")
+          .insert(directPayloads);
+        if (directError) {
+          console.error(
+            "Error inserting fabrics without supplier:",
+            directError,
+          );
+          toast(`Fabric insert error: ${directError.message}`, "error");
+          failed += withoutSupplier.length;
+        } else {
+          imported += withoutSupplier.length;
+        }
+      }
 
-        // Calculate total for this group
+      // 2) For each supplier group, create a purchase + fabric entries
+      for (const [supplierId, group] of Object.entries(withSupplier)) {
         const groupTotal = group.rows.reduce(
           (sum, row) =>
             sum +
@@ -190,7 +225,7 @@ export default function FabricsImport({
           0,
         );
 
-        // Create a single purchase record for this batch
+        // Create a purchase record for this batch
         const { data: purchaseData, error: purchaseError } = await supabase
           .from("purchases")
           .insert([
@@ -212,7 +247,7 @@ export default function FabricsImport({
           continue;
         }
 
-        // Build fabric payloads
+        // Build fabric payloads with purchase_id
         const fabricPayloads = group.rows.map((row) => ({
           name: row.name,
           barcode: row.barcode || "",
