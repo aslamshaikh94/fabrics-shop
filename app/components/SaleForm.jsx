@@ -307,13 +307,6 @@ export default function SaleForm({
           .eq("sale_id", editingId);
         if (deletePayErr) throw deletePayErr;
 
-        // Strip auto-generated metadata from notes to keep only real user notes
-        const cleanNotes = (item.notes || "")
-          .replace(/Fabric:\s*[^(|\n]+/i, "")
-          .replace(/\(Name:\s*[^)]+\)/g, "")
-          .replace(/^[\s,;]+/, "")
-          .replace(/[\s,;]+$/, "")
-          .trim();
         const salePayload = {
           customer_id: formData.customer_id || null,
           fabric_id: item.fabric_id || null,
@@ -328,7 +321,6 @@ export default function SaleForm({
               : ""
             : "",
           fabric_name: item.fabric_name,
-          notes: cleanNotes || "",
           invoice_url,
         };
         const { error: updateError } = await supabase
@@ -507,29 +499,6 @@ export default function SaleForm({
       invoice_file: null,
     });
     setEditingId(sale.id);
-  }
-
-  async function handleRemoveNotesMeta(
-    saleId,
-    fabricName,
-    customerName,
-    cleanNotes,
-  ) {
-    // Clean the auto-generated metadata from the notes field
-    const notes = (cleanNotes || "")
-      .replace(/Fabric:\s*[^(|\n]+/i, "")
-      .replace(/\(Name:\s*[^)]+\)/g, "")
-      .replace(/^[\s,;]+/, "")
-      .replace(/[\s,;]+$/, "")
-      .trim();
-    await supabase
-      .from("sales")
-      .update({
-        fabric_name: fabricName,
-        customer_name: customerName,
-        notes: notes,
-      })
-      .eq("id", saleId);
   }
 
   if (!open) return null;
