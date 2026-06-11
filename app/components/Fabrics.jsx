@@ -22,6 +22,7 @@ import { exportCSV } from "../utils/export";
 import { formatDate } from "../utils/formatters";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
+import FabricsImport from "./FabricsImport";
 
 const PAGE_SIZE = 10;
 
@@ -52,6 +53,7 @@ export default function Fabrics() {
   const [linkingPurchase, setLinkingPurchase] = useState(false);
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     fetchFabrics();
@@ -291,6 +293,13 @@ export default function Fabrics() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
+          <button
             onClick={() =>
               exportCSV(
                 filtered.map((f) => ({
@@ -373,6 +382,16 @@ export default function Fabrics() {
           resetPage={() => setPage(1)}
         />
       </div>
+
+      <FabricsImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => {
+          fetchFabrics();
+          fetchSuppliers();
+        }}
+        suppliers={suppliers}
+      />
 
       <Modal
         open={showForm}
