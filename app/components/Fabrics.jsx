@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -55,6 +55,7 @@ export default function Fabrics() {
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const purchaseLookupTimer = useRef(null);
 
   useEffect(() => {
     fetchFabrics();
@@ -432,26 +433,24 @@ export default function Fabrics() {
                   type="text"
                   className="input flex-1"
                   value={formData.purchase_number}
-                  onChange={async (e) => {
+                  onChange={(e) => {
                     const val = e.target.value;
                     setFormData({ ...formData, purchase_number: val });
+                    clearTimeout(purchaseLookupTimer.current);
                     if (!val.trim()) {
                       setExistingPurchaseInfo(null);
                       return;
                     }
-                    // Look up purchase by number
-                    const { data } = await supabase
-                      .from("purchases")
-                      .select(
-                        "id, purchase_number, total_amount, supplier:suppliers(name)",
-                      )
-                      .eq("purchase_number", val.trim())
-                      .single();
-                    if (data) {
-                      setExistingPurchaseInfo(data);
-                    } else {
-                      setExistingPurchaseInfo(null);
-                    }
+                    purchaseLookupTimer.current = setTimeout(async () => {
+                      const { data } = await supabase
+                        .from("purchases")
+                        .select(
+                          "id, purchase_number, total_amount, supplier:suppliers(name)",
+                        )
+                        .eq("purchase_number", val.trim())
+                        .single();
+                      setExistingPurchaseInfo(data || null);
+                    }, 400);
                   }}
                   placeholder="Enter purchase number (e.g. PUR-00001)"
                 />

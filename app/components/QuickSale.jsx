@@ -80,6 +80,14 @@ export default function QuickSale() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!selectedFabric || !meters || !price) return;
+    if (parseFloat(meters) <= 0 || parseFloat(price) < 0) {
+      toast("Please enter valid meters and price", "error");
+      return;
+    }
+    if (parseFloat(meters) > selectedFabric.available_meters) {
+      toast(`Only ${selectedFabric.available_meters}m available`, "error");
+      return;
+    }
     setSaving(true);
     try {
       const m = parseFloat(meters);
@@ -235,9 +243,6 @@ export default function QuickSale() {
                             {f.selling_price_per_meter
                               ? `₹${f.selling_price_per_meter}/m`
                               : "Price not set"}
-                          </p>
-                          <p className="text-xs text-gray-400">
-                            {f.available_meters}m left
                           </p>
                         </div>
                       </button>

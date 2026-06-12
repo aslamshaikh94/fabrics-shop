@@ -16,6 +16,7 @@ import FabricSelect from "./shared/FabricSelect";
 import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
+import { formatCustomerName } from "../utils/formatters";
 
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
@@ -160,6 +161,11 @@ export default function SaleDetailsModal({
           .from("sales")
           .update({
             customer_id: editGroupFields.customer_id || null,
+            customer_name: !editGroupFields.customer_id
+              ? editGroupFields.customer_name !== "Walk-in Customer"
+                ? editGroupFields.customer_name
+                : ""
+              : "",
             sale_date: editGroupFields.sale_date,
             payment_type: editGroupFields.payment_type,
             invoice_url,
@@ -278,7 +284,7 @@ export default function SaleDetailsModal({
               Sale Items
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {group.customer?.name || "Walk-in"} •{" "}
+              {formatCustomerName(group)} •{" "}
               {new Date(group.sale_date).toLocaleDateString("en-IN", {
                 day: "numeric",
                 month: "short",
@@ -312,7 +318,7 @@ export default function SaleDetailsModal({
               Customer
             </p>
             <p className="font-semibold text-gray-900">
-              {group.customer?.name || "Walk-in Customer"}
+              {formatCustomerName(group)}
             </p>
             {group.customer?.phone && (
               <p className="text-xs text-gray-500 mt-0.5">

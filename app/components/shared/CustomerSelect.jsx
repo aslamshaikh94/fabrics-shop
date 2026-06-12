@@ -10,13 +10,20 @@ export default function CustomerSelect({
   customerTab: initialTab,
 }) {
   const [tab, setTab] = useState(() => {
-    // Auto-detect tab based on initial customer_id
     if (initialTab) return initialTab;
     return value.customer_id ? "existing" : "walkin";
   });
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  // Remember names separately so switching tabs restores them
+  const [savedWalkinName, setSavedWalkinName] = useState(() =>
+    !value.customer_id && value.customer_name && value.customer_name !== "Walk-in Customer"
+      ? value.customer_name
+      : ""
+  );
+  const [savedExistingId, setSavedExistingId] = useState(() => value.customer_id || "");
+  const [savedExistingName, setSavedExistingName] = useState(() => value.customer_id ? value.customer_name || "" : "");
 
   const walkinName =
     value.customer_name === "Walk-in Customer" ? "" : value.customer_name;
@@ -43,9 +50,13 @@ export default function CustomerSelect({
         <button
           type="button"
           onClick={() => {
+            // Save current walk-in name before switching
+            if (tab === "walkin") {
+              setSavedWalkinName(value.customer_name && value.customer_name !== "Walk-in Customer" ? value.customer_name : savedWalkinName);
+            }
             setTab("existing");
-            setSearch("");
-            onChange({ customer_id: "", customer_name: "" });
+            setSearch(savedExistingName);
+            onChange({ ...value, customer_id: savedExistingId, customer_name: savedExistingName });
           }}
           className={`py-2 rounded-xl text-sm font-medium border transition-all ${
             tab === "existing"
@@ -59,9 +70,15 @@ export default function CustomerSelect({
         <button
           type="button"
           onClick={() => {
+            // Save current existing customer before switching
+            if (tab === "existing" && value.customer_id) {
+              setSavedExistingId(value.customer_id);
+              setSavedExistingName(value.customer_name || "");
+            }
             setTab("walkin");
             setSearch("");
-            onChange({ customer_id: "", customer_name: "Walk-in Customer" });
+            const nameToRestore = savedWalkinName || (value.customer_name && value.customer_name !== "Walk-in Customer" ? value.customer_name : "");
+            onChange({ ...value, customer_id: "", customer_name: nameToRestore || "Walk-in Customer" });
           }}
           className={`py-2 rounded-xl text-sm font-medium border transition-all ${
             tab === "walkin"
@@ -84,6 +101,8 @@ export default function CustomerSelect({
               value={open ? search : value.customer_name || ""}
               onChange={(e) => {
                 setSearch(e.target.value);
+                setSavedExistingName(e.target.value);
+                setSavedExistingId("");
                 onChange({
                   ...value,
                   customer_id: "",
@@ -115,6 +134,8 @@ export default function CustomerSelect({
                     key={c.id}
                     type="button"
                     onClick={() => {
+                      setSavedExistingId(c.id);
+                      setSavedExistingName(c.name);
                       onChange({
                         ...value,
                         customer_id: c.id,
@@ -140,6 +161,7 @@ export default function CustomerSelect({
             type="text"
             value={walkinName}
             onChange={(e) => {
+              setSavedWalkinName(e.target.value);
               onChange({
                 ...value,
                 customer_id: "",
