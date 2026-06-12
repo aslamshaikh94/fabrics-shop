@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -58,25 +58,22 @@ export default function Fabrics() {
   const purchaseLookupTimer = useRef(null);
 
   useEffect(() => {
-    fetchFabrics();
-    fetchSuppliers();
+    fetchAll();
   }, []);
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm, filterSupplier, dateFrom, dateTo]);
-
-  async function fetchFabrics() {
+  async function fetchAll() {
     try {
-      const { data, error } = await supabase
-        .from("fabrics")
-        .select("*, supplier:suppliers(*)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      const [fabricsRes, suppliersRes] = await Promise.all([
+        supabase.from("fabrics").select("*, supplier:suppliers(*)").order("created_at", { ascending: false }),
+        supabase.from("suppliers").select("*").order("name"),
+      ]);
+      if (fabricsRes.error) throw fabricsRes.error;
+      setSuppliers(suppliersRes.data || []);
 
-      // Fetch purchase numbers for fabrics that have purchase_id
-      const fabricsWithPurchase = (data || []).filter((f) => f.purchase_id);
-      const purchaseIds = fabricsWithPurchase.map((f) => f.purchase_id);
+      const purchaseIds = (fabricsRes.data || [])
+        .filter((f) => f.purchase_id)
+        .map((f) => f.purchase_id);
+
       let purchaseMap = {};
       if (purchaseIds.length > 0) {
         const { data: purchases } = await supabase
@@ -84,37 +81,59 @@ export default function Fabrics() {
           .select("id, purchase_number")
           .in("id", purchaseIds);
         if (purchases) {
-          purchaseMap = Object.fromEntries(
-            purchases.map((p) => [p.id, p.purchase_number]),
-          );
+          purchaseMap = Object.fromEntries(purchases.map((p) => [p.id, p.purchase_number]));
         }
       }
 
-      const enriched = (data || []).map((f) => ({
-        ...f,
-        purchase: f.purchase_id
-          ? { purchase_number: purchaseMap[f.purchase_id] || null }
-          : null,
-      }));
-      setFabrics(enriched);
+      setFabrics(
+        (fabricsRes.data || []).map((f) => ({
+          ...f,
+          purchase: f.purchase_id
+            ? { purchase_number: purchaseMap[f.purchase_id] || null }
+            : null,
+        }))
+      );
     } catch (err) {
-      console.error("Error fetching fabrics:", err);
+      console.error("Error fetching fabrics data:", err);
     } finally {
       setLoading(false);
     }
   }
 
+  async function fetchFabrics() {
+    await fetchAll();
+  }
+
   async function fetchSuppliers() {
     try {
-      const { data } = await supabase
-        .from("suppliers")
-        .select("*")
-        .order("name");
+      const { data } = await supabase.from("suppliers").select("*").order("name");
       setSuppliers(data || []);
     } catch (err) {
       console.error("Error fetching suppliers:", err);
     }
   }
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterSupplier, dateFrom, dateTo]);
+
+  const handlePurchaseNumberChange = useCallback((e) => {
+    const val = e.target.value;
+    setFormData((prev) => ({ ...prev, purchase_number: val }));
+    clearTimeout(purchaseLookupTimer.current);
+    if (!val.trim()) {
+      setExistingPurchaseInfo(null);
+      return;
+    }
+    purchaseLookupTimer.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from("purchases")
+        .select("id, purchase_number, total_amount, supplier:suppliers(name)")
+        .eq("purchase_number", val.trim())
+        .single();
+      setExistingPurchaseInfo(data || null);
+    }, 400);
+  }, []);
 
   function updateRow(idx, field, value) {
     setRows((prev) =>
@@ -388,10 +407,7 @@ export default function Fabrics() {
       <FabricsImport
         open={showImport}
         onClose={() => setShowImport(false)}
-        onImported={() => {
-          fetchFabrics();
-          fetchSuppliers();
-        }}
+        onImported={() => fetchAll()}
         suppliers={suppliers}
       />
 
@@ -433,25 +449,7 @@ export default function Fabrics() {
                   type="text"
                   className="input flex-1"
                   value={formData.purchase_number}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({ ...formData, purchase_number: val });
-                    clearTimeout(purchaseLookupTimer.current);
-                    if (!val.trim()) {
-                      setExistingPurchaseInfo(null);
-                      return;
-                    }
-                    purchaseLookupTimer.current = setTimeout(async () => {
-                      const { data } = await supabase
-                        .from("purchases")
-                        .select(
-                          "id, purchase_number, total_amount, supplier:suppliers(name)",
-                        )
-                        .eq("purchase_number", val.trim())
-                        .single();
-                      setExistingPurchaseInfo(data || null);
-                    }, 400);
-                  }}
+                  onChange={handlePurchaseNumberChange}
                   placeholder="Enter purchase number (e.g. PUR-00001)"
                 />
               </div>
@@ -648,10 +646,7 @@ export default function Fabrics() {
 
       {scanningRowIdx !== null && (
         <BarcodeScanner
-          onScan={(code) => {
-            updateRow(scanningRowIdx, "barcode", code);
-            setScanningRowIdx(null);
-          }}
+          onScan={(code) => { updateRow(scanningRowIdx, "barcode", code); setScanningRowIdx(null); }}
           onClose={() => setScanningRowIdx(null)}
         />
       )}

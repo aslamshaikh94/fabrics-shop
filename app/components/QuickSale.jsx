@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
+import CustomerSelect from "./shared/CustomerSelect";
 
 export default function QuickSale() {
   const toast = useToast();
@@ -22,7 +23,11 @@ export default function QuickSale() {
   const [selectedFabric, setSelectedFabric] = useState(null);
   const [meters, setMeters] = useState("");
   const [price, setPrice] = useState("");
-  const [customerId, setCustomerId] = useState("");
+  const [customer, setCustomer] = useState({
+    customer_id: "",
+    customer_name: "Walk-in Customer",
+  });
+  const [customerTab, setCustomerTab] = useState("walkin");
   const [paymentType, setPaymentType] = useState("cash");
   const [done, setDone] = useState(false);
   const [lastSale, setLastSale] = useState(null);
@@ -71,7 +76,8 @@ export default function QuickSale() {
     setSelectedFabric(null);
     setMeters("");
     setPrice("");
-    setCustomerId("");
+    setCustomer({ customer_id: "", customer_name: "Walk-in Customer" });
+    setCustomerTab("walkin");
     setPaymentType("cash");
     setSearch("");
     setDone(false);
@@ -92,11 +98,16 @@ export default function QuickSale() {
     try {
       const m = parseFloat(meters);
       const p = parseFloat(price);
+      const walkInName =
+        !customer.customer_id && customer.customer_name !== "Walk-in Customer"
+          ? customer.customer_name
+          : "";
       const { data: saleData, error } = await supabase
         .from("sales")
         .insert([
           {
-            customer_id: customerId || null,
+            customer_id: customer.customer_id || null,
+            customer_name: walkInName,
             fabric_id: selectedFabric.id,
             meters: m,
             price_per_meter: p,
@@ -117,6 +128,11 @@ export default function QuickSale() {
         meters: m,
         total: m * p,
         paymentType,
+        customerName: customer.customer_id
+          ? customers.find((c) => c.id === customer.customer_id)?.name
+          : customer.customer_name !== "Walk-in Customer"
+            ? customer.customer_name
+            : null,
       });
       setDone(true);
       toast("Sale recorded!");
@@ -154,6 +170,11 @@ export default function QuickSale() {
           <CheckCircle className="w-16 h-16 text-accent-500 mx-auto" />
           <div>
             <h2 className="text-xl font-bold text-gray-900">Sale Recorded!</h2>
+            {lastSale.customerName && (
+              <p className="text-sm text-gray-500 mt-1">
+                {lastSale.customerName}
+              </p>
+            )}
             <p className="text-gray-500 mt-1">
               {lastSale.fabric} — {lastSale.meters}m
             </p>
@@ -310,23 +331,15 @@ export default function QuickSale() {
                 Step 3 — Customer & Payment
               </p>
               <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Customer
-                  </label>
-                  <select
-                    value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
-                    className="input"
-                  >
-                    <option value="">Walk-in customer</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <CustomerSelect
+                  value={customer}
+                  onChange={(val) => {
+                    setCustomer(val);
+                    if (val.customer_id) setCustomerTab("existing");
+                  }}
+                  customers={customers}
+                  customerTab={customerTab}
+                />
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     Payment
@@ -358,9 +371,33 @@ export default function QuickSale() {
               disabled={saving}
               className="btn btn-primary w-full py-3 text-base"
             >
-              {saving
-                ? "Saving..."
-                : `Record Sale — ₹${total.toLocaleString("en-IN")}`}
+              {saving ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                `Record Sale — ₹${total.toLocaleString("en-IN")}`
+              )}
             </button>
           )}
         </form>
