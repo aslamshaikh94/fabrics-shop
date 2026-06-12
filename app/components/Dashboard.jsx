@@ -338,7 +338,7 @@ export default function Dashboard() {
       </div>
 
       {/* Inventory, Customers */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card p-4 flex items-center gap-3">
           <div className="bg-primary-100 p-3 rounded-xl shrink-0">
             <Package className="w-6 h-6 text-primary-600" />
@@ -360,6 +360,18 @@ export default function Dashboard() {
               {stats.totalFabricQuantity}
             </p>
             <p className="text-xs text-blue-500 mt-0.5">units</p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="bg-indigo-100 p-3 rounded-xl shrink-0">
+            <Package className="w-6 h-6 text-indigo-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Total Stock</p>
+            <p className="text-2xl font-bold text-indigo-700">
+              {stats.totalFabricMeters.toFixed(2)}
+            </p>
+            <p className="text-xs text-indigo-500 mt-0.5">meters</p>
           </div>
         </div>
         <div className="card p-4 flex items-center gap-3">
