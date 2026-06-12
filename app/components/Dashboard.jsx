@@ -29,6 +29,7 @@ export default function Dashboard() {
     pendingSalePayments: 0,
     totalFabrics: 0,
     totalFabricMeters: 0,
+    totalFabricQuantity: 0,
     totalCustomers: 0,
     totalPurchases: 0,
     collectedAmount: 0,
@@ -64,7 +65,7 @@ export default function Dashboard() {
           .select("total_amount, paid_amount, remaining_amount"),
         supabase
           .from("fabrics")
-          .select("available_meters, purchase_price_per_meter"),
+          .select("available_meters, purchase_price_per_meter, quantity"),
         supabase.from("customers").select("id", { count: "exact", head: true }),
         supabase
           .from("sales")
@@ -92,6 +93,12 @@ export default function Dashboard() {
       const totalMeters =
         fabricsRes.data?.reduce((s, f) => s + (f.available_meters || 0), 0) ||
         0;
+      // Extract numeric value from quantity text (e.g. "10 Rolls" -> 10)
+      const totalQuantity =
+        fabricsRes.data?.reduce((s, f) => {
+          const num = parseFloat((f.quantity || "").replace(/[^0-9.]/g, ""));
+          return s + (isNaN(num) ? 0 : num);
+        }, 0) || 0;
 
       const currSales =
         thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
@@ -119,6 +126,7 @@ export default function Dashboard() {
           purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
         totalFabrics: fabricsRes.data?.length || 0,
         totalFabricMeters: totalMeters,
+        totalFabricQuantity: totalQuantity,
         inventoryValue: invValue,
         totalCustomers: customersRes.count || 0,
         totalPurchases:
@@ -347,11 +355,11 @@ export default function Dashboard() {
             <Package className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <p className="text-xs text-gray-500">Total Stock</p>
+            <p className="text-xs text-gray-500">Total Quantity</p>
             <p className="text-2xl font-bold text-blue-700">
-              {stats.totalFabricMeters.toFixed(2)}
+              {stats.totalFabricQuantity}
             </p>
-            <p className="text-xs text-blue-500 mt-0.5">meters</p>
+            <p className="text-xs text-blue-500 mt-0.5">units</p>
           </div>
         </div>
         <div className="card p-4 flex items-center gap-3">
