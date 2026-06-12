@@ -74,8 +74,10 @@ export default function Sales() {
         .order("sale_date", { ascending: false });
       if (error) throw error;
       setSales(data || []);
+      return data || [];
     } catch (error) {
       console.error("Error fetching sales:", error);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -162,11 +164,16 @@ export default function Sales() {
   async function handleDelete(deleteInfo) {
     try {
       if (deleteInfo.isGroup) {
-        await supabase
+        const { error: paymentsError } = await supabase
           .from("sale_payments")
           .delete()
           .in("sale_id", deleteInfo.saleIds);
-        await supabase.from("sales").delete().in("id", deleteInfo.saleIds);
+        if (paymentsError) throw paymentsError;
+        const { error: salesError } = await supabase
+          .from("sales")
+          .delete()
+          .in("id", deleteInfo.saleIds);
+        if (salesError) throw salesError;
         toast("Sales group deleted");
       } else {
         await supabase.from("sales").delete().eq("id", deleteInfo);
@@ -634,7 +641,30 @@ export default function Sales() {
         group={selectedGroupForDetails}
         fabrics={fabrics}
         customers={customers}
-        onSaleUpdated={() => fetchSales()}
+        onSaleUpdated={async () => {
+          const fresh = await fetchSales();
+          if (selectedGroupForDetails) {
+            const key = selectedGroupForDetails.id;
+            // Rebuild the group from fresh data
+            const items = fresh.filter(
+              (s) => (s.sale_group_id || s.id) === key,
+            );
+            if (items.length > 0) {
+              setSelectedGroupForDetails({
+                ...selectedGroupForDetails,
+                customer_id: items[0].customer_id,
+                customer: items[0].customer,
+                sale_date: items[0].sale_date,
+                payment_type: items[0].payment_type,
+                items,
+                total_amount: items.reduce((s, i) => s + i.total_amount, 0),
+                margin: items.reduce((s, i) => s + i.margin, 0),
+                remaining_amount: items.reduce((s, i) => s + i.remaining_amount, 0),
+                paid_amount: items.reduce((s, i) => s + i.paid_amount, 0),
+              });
+            }
+          }
+        }}
         onViewPayments={(group) => {
           setSelectedSale(group);
           fetchPayments(group.items.map((i) => i.id));

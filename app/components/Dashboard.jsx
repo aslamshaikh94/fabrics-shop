@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [changes, setChanges] = useState({});
   const [recentSales, setRecentSales] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchStats();
@@ -141,6 +142,7 @@ export default function Dashboard() {
       setRecentSales(recentRes.data || []);
     } catch (err) {
       console.error("Error fetching stats:", err);
+      setError("Failed to load dashboard data. Please refresh.");
     } finally {
       setLoading(false);
     }
@@ -150,6 +152,14 @@ export default function Dashboard() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-red-500">{error}</p>
       </div>
     );
   }
