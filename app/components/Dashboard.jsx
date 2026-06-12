@@ -28,6 +28,7 @@ export default function Dashboard() {
     paidPurchasePayments: 0,
     pendingSalePayments: 0,
     totalFabrics: 0,
+    totalFabricMeters: 0,
     totalCustomers: 0,
     totalPurchases: 0,
     collectedAmount: 0,
@@ -88,6 +89,9 @@ export default function Dashboard() {
           (s, f) => s + (f.available_meters * f.purchase_price_per_meter || 0),
           0,
         ) || 0;
+      const totalMeters =
+        fabricsRes.data?.reduce((s, f) => s + (f.available_meters || 0), 0) ||
+        0;
 
       const currSales =
         thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
@@ -114,6 +118,7 @@ export default function Dashboard() {
         paidPurchasePayments:
           purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
         totalFabrics: fabricsRes.data?.length || 0,
+        totalFabricMeters: totalMeters,
         inventoryValue: invValue,
         totalCustomers: customersRes.count || 0,
         totalPurchases:
@@ -325,7 +330,7 @@ export default function Dashboard() {
       </div>
 
       {/* Inventory, Customers */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="card p-4 flex items-center gap-3">
           <div className="bg-primary-100 p-3 rounded-xl shrink-0">
             <Package className="w-6 h-6 text-primary-600" />
@@ -334,6 +339,17 @@ export default function Dashboard() {
             <p className="text-xs text-gray-500">Fabric Types</p>
             <p className="text-2xl font-bold text-gray-900">
               {stats.totalFabrics}
+            </p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="bg-blue-100 p-3 rounded-xl shrink-0">
+            <Package className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Total Stock</p>
+            <p className="text-2xl font-bold text-blue-700">
+              {stats.totalFabricMeters.toFixed(2)}m
             </p>
           </div>
         </div>
