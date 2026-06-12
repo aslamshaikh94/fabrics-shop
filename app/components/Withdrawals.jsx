@@ -9,8 +9,10 @@ import {
   Calendar,
   Wallet,
   Download,
+  FileUp,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
+import WithdrawalsImport from "./WithdrawalsImport";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -38,6 +40,7 @@ export default function Withdrawals() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
+  const [showImport, setShowImport] = useState(false);
   const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
@@ -129,9 +132,10 @@ export default function Withdrawals() {
   }
 
   const filtered = withdrawals.filter((w) => {
+    const term = searchTerm.toLowerCase();
     const matchSearch =
-      w.reason.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      w.withdrawn_by.toLowerCase().includes(searchTerm.toLowerCase());
+      (w.reason || "").toLowerCase().includes(term) ||
+      (w.withdrawn_by || "").toLowerCase().includes(term);
     const matchesFrom = !dateFrom || w.withdrawal_date >= dateFrom;
     const matchesTo = !dateTo || w.withdrawal_date <= dateTo;
     return matchSearch && matchesFrom && matchesTo;
@@ -151,6 +155,13 @@ export default function Withdrawals() {
           <p className="text-gray-500 mt-1">Track owner/partner withdrawals</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
           <button
             onClick={() =>
               exportCSV(
@@ -396,6 +407,15 @@ export default function Withdrawals() {
           </p>
         </div>
       )}
+
+      <WithdrawalsImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => {
+          fetchWithdrawals();
+          setShowImport(false);
+        }}
+      />
     </div>
   );
 }

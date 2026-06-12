@@ -5,7 +5,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  X,
   Search,
   Phone,
   MapPin,
@@ -18,6 +17,7 @@ import {
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
+import Modal from "./shared/Modal";
 import { useToast } from "./Toast";
 import { exportCSV } from "../utils/export";
 
@@ -26,7 +26,6 @@ const PAGE_SIZE = 9;
 export default function Customers() {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
-  const [customerDues, setCustomerDues] = useState({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -43,29 +42,11 @@ export default function Customers() {
 
   useEffect(() => {
     fetchCustomers();
-    fetchCustomerDues();
   }, []);
 
   useEffect(() => {
     setPage(1);
   }, [searchTerm]);
-
-  async function fetchCustomerDues() {
-    try {
-      const { data } = await supabase
-        .from("sales")
-        .select("customer_id, remaining_amount")
-        .gt("remaining_amount", 0);
-      const map = {};
-      (data || []).forEach((s) => {
-        if (s.customer_id)
-          map[s.customer_id] = (map[s.customer_id] || 0) + s.remaining_amount;
-      });
-      setCustomerDues(map);
-    } catch (err) {
-      console.error(err);
-    }
-  }
 
   async function fetchCustomers() {
     try {
@@ -133,7 +114,7 @@ export default function Customers() {
   }
 
   function handleWhatsApp(customer) {
-    const due = customerDues[customer.id] || 0;
+    const due = customer.current_balance || 0;
     const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString("en-IN")}. Please clear at your earliest convenience. Thank you!`;
     const phone = customer.phone?.replace(/\D/g, "");
     const url = phone
@@ -197,7 +178,7 @@ export default function Customers() {
                   name: c.name,
                   phone: c.phone || "",
                   address: c.address || "",
-                  dues: customerDues[c.id] || 0,
+                  dues: c.current_balance || 0,
                   notes: c.notes || "",
                 })),
                 `customers-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -237,94 +218,83 @@ export default function Customers() {
         />
       </div>
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Customer" : "Add Customer"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Customer name"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone
-                </label>
-                <input
-                  type="text"
-                  value={formData.phone}
-                  onChange={(e) =>
-                    setFormData({ ...formData, phone: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Phone number"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address
-                </label>
-                <input
-                  type="text"
-                  value={formData.address}
-                  onChange={(e) =>
-                    setFormData({ ...formData, address: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Address"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={3}
-                  placeholder="Additional notes"
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update" : "Add"} Customer
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editingId ? "Edit Customer" : "Add Customer"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Name *
+            </label>
+            <input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) =>
+                setFormData({ ...formData, name: e.target.value })
+              }
+              className="input"
+              placeholder="Customer name"
+            />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone
+            </label>
+            <input
+              type="text"
+              value={formData.phone}
+              onChange={(e) =>
+                setFormData({ ...formData, phone: e.target.value })
+              }
+              className="input"
+              placeholder="Phone number"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Address
+            </label>
+            <input
+              type="text"
+              value={formData.address}
+              onChange={(e) =>
+                setFormData({ ...formData, address: e.target.value })
+              }
+              className="input"
+              placeholder="Address"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Notes
+            </label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) =>
+                setFormData({ ...formData, notes: e.target.value })
+              }
+              className="input"
+              rows={3}
+              placeholder="Additional notes"
+            />
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="btn btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary flex-1">
+              {editingId ? "Update" : "Add"} Customer
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredCustomers.map((customer) => (
@@ -345,7 +315,7 @@ export default function Customers() {
                 >
                   <Pencil className="w-4 h-4" />
                 </button>
-                {customerDues[customer.id] > 0 && (
+                {customer.current_balance > 0 && (
                   <button
                     onClick={() => handleWhatsApp(customer)}
                     className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
@@ -376,10 +346,10 @@ export default function Customers() {
                 </div>
               )}
             </div>
-            {customerDues[customer.id] > 0 && (
+            {customer.current_balance > 0 && (
               <div className="mt-3 pt-3 border-t border-gray-100">
                 <p className="text-sm text-warning-600 font-semibold">
-                  Due: ₹{customerDues[customer.id].toLocaleString("en-IN")}
+                  Due: ₹{Number(customer.current_balance).toLocaleString("en-IN")}
                 </p>
               </div>
             )}

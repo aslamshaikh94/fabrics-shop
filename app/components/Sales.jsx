@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -61,10 +61,31 @@ export default function Sales() {
   const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
-    fetchSales();
-    fetchCustomers();
-    fetchFabrics();
+    fetchAll();
   }, []);
+
+  async function fetchAll() {
+    try {
+      const [salesRes, customersRes, fabricsRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("*, customer:customers(*)")
+          .order("sale_date", { ascending: false }),
+        supabase.from("customers").select("*").order("name"),
+        supabase.from("fabrics").select("*").order("name"),
+      ]);
+      if (salesRes.error) throw salesRes.error;
+      setSales(salesRes.data || []);
+      setCustomers(customersRes.data || []);
+      setFabrics(fabricsRes.data || []);
+      return salesRes.data || [];
+    } catch (error) {
+      console.error("Error fetching sales data:", error);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function fetchSales() {
     try {
@@ -78,29 +99,6 @@ export default function Sales() {
     } catch (error) {
       console.error("Error fetching sales:", error);
       return [];
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchCustomers() {
-    try {
-      const { data } = await supabase
-        .from("customers")
-        .select("*")
-        .order("name");
-      setCustomers(data || []);
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  async function fetchFabrics() {
-    try {
-      const { data } = await supabase.from("fabrics").select("*").order("name");
-      setFabrics(data || []);
-    } catch (error) {
-      console.error(error);
     }
   }
 
@@ -138,6 +136,27 @@ export default function Sales() {
         .from("sale_payments")
         .insert(paymentInserts);
       if (error) throw error;
+
+      // Update payment_type based on remaining amount after this payment
+      for (const item of selectedSale.items || []) {
+        const paymentForItem = paymentInserts.find(
+          (p) => p.sale_id === item.id,
+        );
+        if (!paymentForItem) continue;
+        const newRemaining = item.remaining_amount - paymentForItem.amount;
+        if (newRemaining <= 0) {
+          await supabase
+            .from("sales")
+            .update({ payment_type: "cash" })
+            .eq("id", item.id);
+        } else if (item.payment_type === "credit") {
+          await supabase
+            .from("sales")
+            .update({ payment_type: "partial" })
+            .eq("id", item.id);
+        }
+      }
+
       setShowPaymentForm(false);
       setPaymentData({ ...INITIAL_PAYMENT });
       fetchSales();
@@ -176,7 +195,16 @@ export default function Sales() {
         if (salesError) throw salesError;
         toast("Sales group deleted");
       } else {
-        await supabase.from("sales").delete().eq("id", deleteInfo);
+        const { error: paymentsError } = await supabase
+          .from("sale_payments")
+          .delete()
+          .eq("sale_id", deleteInfo);
+        if (paymentsError) throw paymentsError;
+        const { error: salesError } = await supabase
+          .from("sales")
+          .delete()
+          .eq("id", deleteInfo);
+        if (salesError) throw salesError;
         toast("Sale deleted");
       }
       fetchSales();
@@ -237,6 +265,39 @@ export default function Sales() {
     );
   }, [filteredSales]);
 
+  const handleSaleUpdated = useCallback(async () => {
+    const fresh = await fetchSales();
+    setSelectedGroupForDetails((prev) => {
+      if (!prev) return prev;
+      const key = prev.id;
+      const items = fresh.filter((s) => (s.sale_group_id || s.id) === key);
+      if (items.length === 0) return prev;
+      return {
+        ...prev,
+        customer_id: items[0].customer_id,
+        customer: items[0].customer,
+        sale_date: items[0].sale_date,
+        payment_type: items[0].payment_type,
+        items,
+        total_amount: items.reduce((s, i) => s + i.total_amount, 0),
+        margin: items.reduce((s, i) => s + i.margin, 0),
+        remaining_amount: items.reduce((s, i) => s + i.remaining_amount, 0),
+        paid_amount: items.reduce((s, i) => s + i.paid_amount, 0),
+      };
+    });
+  }, []);
+
+  const handleViewPayments = useCallback((group) => {
+    setSelectedSale(group);
+    fetchPayments(group.items.map((i) => i.id));
+  }, []);
+
+  const handleCloseDetails = useCallback(() => setSelectedGroupForDetails(null), []);
+  const handleOpenNewSale = useCallback(() => { setEditingId(null); setShowForm(true); }, []);
+  const handleCloseSaleForm = useCallback(() => { setShowForm(false); setEditingId(null); }, []);
+  const handleCloseImport = useCallback(() => setShowImport(false), []);
+  const handleClosePaymentForm = useCallback(() => setShowPaymentForm(false), []);
+
   const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
   const paginated = groupedArray.slice(
     (page - 1) * PAGE_SIZE,
@@ -292,10 +353,7 @@ export default function Sales() {
             <Download className="w-4 h-4" />
           </button>
           <button
-            onClick={() => {
-              setEditingId(null);
-              setShowForm(true);
-            }}
+            onClick={handleOpenNewSale}
             className="btn btn-primary"
           >
             <Plus className="w-5 h-5 mr-2" /> New Sale
@@ -350,10 +408,7 @@ export default function Sales() {
 
       <SaleForm
         open={showForm}
-        onClose={() => {
-          setShowForm(false);
-          setEditingId(null);
-        }}
+        onClose={handleCloseSaleForm}
         editingId={editingId}
         onSaved={() => fetchSales()}
         fabrics={fabrics}
@@ -362,19 +417,15 @@ export default function Sales() {
 
       <SalesImport
         open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={() => {
-          fetchSales();
-          fetchCustomers();
-          fetchFabrics();
-        }}
+        onClose={handleCloseImport}
+        onImported={() => fetchAll()}
         fabrics={fabrics}
         customers={customers}
       />
 
       <SalePaymentModal
         open={showPaymentForm}
-        onClose={() => setShowPaymentForm(false)}
+        onClose={handleClosePaymentForm}
         selectedSale={selectedSale}
         onPaymentSubmit={handlePaymentSubmit}
       />
@@ -637,38 +688,12 @@ export default function Sales() {
 
       <SaleDetailsModal
         open={!!selectedGroupForDetails}
-        onClose={() => setSelectedGroupForDetails(null)}
+        onClose={handleCloseDetails}
         group={selectedGroupForDetails}
         fabrics={fabrics}
         customers={customers}
-        onSaleUpdated={async () => {
-          const fresh = await fetchSales();
-          if (selectedGroupForDetails) {
-            const key = selectedGroupForDetails.id;
-            // Rebuild the group from fresh data
-            const items = fresh.filter(
-              (s) => (s.sale_group_id || s.id) === key,
-            );
-            if (items.length > 0) {
-              setSelectedGroupForDetails({
-                ...selectedGroupForDetails,
-                customer_id: items[0].customer_id,
-                customer: items[0].customer,
-                sale_date: items[0].sale_date,
-                payment_type: items[0].payment_type,
-                items,
-                total_amount: items.reduce((s, i) => s + i.total_amount, 0),
-                margin: items.reduce((s, i) => s + i.margin, 0),
-                remaining_amount: items.reduce((s, i) => s + i.remaining_amount, 0),
-                paid_amount: items.reduce((s, i) => s + i.paid_amount, 0),
-              });
-            }
-          }
-        }}
-        onViewPayments={(group) => {
-          setSelectedSale(group);
-          fetchPayments(group.items.map((i) => i.id));
-        }}
+        onSaleUpdated={handleSaleUpdated}
+        onViewPayments={handleViewPayments}
       />
 
       {confirmDelete && (

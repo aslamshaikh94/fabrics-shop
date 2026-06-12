@@ -656,24 +656,74 @@ export default function SaleDetailsModal({
               </div>
             </div>
             {editGroupFields.payment_type === "partial" && (
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Initial Payment
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={editGroupFields.initial_payment}
-                  onChange={(e) =>
-                    setEditGroupFields({
-                      ...editGroupFields,
-                      initial_payment: e.target.value,
-                    })
-                  }
-                  className="input bg-white"
-                  placeholder="Amount received now"
-                  onWheel={(e) => e.target.blur()}
-                />
+              <div className="space-y-2">
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Total Sale Amount</span>
+                    <span className="font-semibold">
+                      ₹{group.total_amount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-green-700">
+                    <span>Already Paid (recorded)</span>
+                    <span className="font-semibold">
+                      ₹{group.paid_amount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t border-blue-200 pt-1 text-warning-700">
+                    <span>Outstanding</span>
+                    <span className="font-semibold">
+                      ₹{group.remaining_amount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Amount Already Paid
+                    <span className="ml-1 text-gray-400 font-normal">
+                      (will reset & reapply payments)
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editGroupFields.initial_payment}
+                    onChange={(e) =>
+                      setEditGroupFields({
+                        ...editGroupFields,
+                        initial_payment: e.target.value,
+                      })
+                    }
+                    className="input bg-white"
+                    placeholder="0"
+                    max={group.total_amount}
+                    onWheel={(e) => e.target.blur()}
+                  />
+                </div>
+                {parseFloat(editGroupFields.initial_payment) >= 0 &&
+                  editGroupFields.initial_payment !== "" && (
+                    <div className="flex justify-between text-xs px-1">
+                      <span className="text-gray-500">
+                        New remaining balance
+                      </span>
+                      <span
+                        className={`font-semibold ${
+                          group.total_amount -
+                            (parseFloat(editGroupFields.initial_payment) || 0) >
+                          0
+                            ? "text-warning-600"
+                            : "text-accent-600"
+                        }`}
+                      >
+                        ₹
+                        {Math.max(
+                          0,
+                          group.total_amount -
+                            (parseFloat(editGroupFields.initial_payment) || 0),
+                        ).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  )}
               </div>
             )}
           </div>
@@ -719,7 +769,33 @@ export default function SaleDetailsModal({
               disabled={savingGroupFields}
               className="btn btn-primary flex-1"
             >
-              {savingGroupFields ? "Saving..." : "Save Changes"}
+              {savingGroupFields ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
             </button>
           </div>
         </div>

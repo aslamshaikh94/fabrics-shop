@@ -15,9 +15,11 @@ import {
   Paperclip,
   FileText,
   Download,
+  FileUp,
   ShoppingBag,
 } from "lucide-react";
 import DateRangeFilter from "./DateRangeFilter";
+import PurchasesImport from "./PurchasesImport";
 import { exportCSV } from "../utils/export";
 import {
   validatePurchase,
@@ -56,6 +58,43 @@ const PAYMENT_METHODS = [
   { value: "other", label: "Other" },
 ];
 
+function FormField({
+  field,
+  label,
+  type = "text",
+  required = false,
+  placeholder = "",
+  children,
+  formData,
+  formErrors,
+  onFieldChange,
+}) {
+  const value = formData[field];
+  const error = formErrors[field];
+  const cls = `input ${error ? "border-error-400" : ""}`;
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label} {required && "*"}
+      </label>
+      {children || (
+        <input
+          type={type}
+          step={type === "number" ? "0.01" : undefined}
+          required={required}
+          value={value}
+          onChange={(e) => onFieldChange(field, e.target.value)}
+          className={cls}
+          placeholder={placeholder}
+          onWheel={(e) => e.target.blur()}
+        />
+      )}
+      {error && <p className="text-error-600 text-sm mt-1">{error}</p>}
+    </div>
+  );
+}
+
 export default function Purchases() {
   const toast = useToast();
   const [purchases, setPurchases] = useState([]);
@@ -76,6 +115,7 @@ export default function Purchases() {
   const [invoiceFile, setInvoiceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [invoiceError, setInvoiceError] = useState("");
+  const [showImport, setShowImport] = useState(false);
   const [viewInvoiceUrl, setViewInvoiceUrl] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
@@ -83,14 +123,32 @@ export default function Purchases() {
   const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
 
   useEffect(() => {
-    fetchPurchases();
-    fetchSuppliers();
+    fetchAll();
     const prefill = localStorage.getItem("prefill_purchase_number");
     if (prefill) {
       setSearchTerm(prefill);
       localStorage.removeItem("prefill_purchase_number");
     }
   }, []);
+
+  async function fetchAll() {
+    try {
+      const [purchasesRes, suppliersRes] = await Promise.all([
+        supabase
+          .from("purchases")
+          .select("*, supplier:suppliers(*)")
+          .order("purchase_date", { ascending: false }),
+        supabase.from("suppliers").select("*").order("name"),
+      ]);
+      if (purchasesRes.error) throw purchasesRes.error;
+      setPurchases(purchasesRes.data || []);
+      setSuppliers(suppliersRes.data || []);
+    } catch (error) {
+      console.error("Error fetching purchases data:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function fetchPurchases() {
     try {
@@ -102,20 +160,6 @@ export default function Purchases() {
       setPurchases(data || []);
     } catch (error) {
       console.error("Error fetching purchases:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchSuppliers() {
-    try {
-      const { data } = await supabase
-        .from("suppliers")
-        .select("*")
-        .order("name");
-      setSuppliers(data || []);
-    } catch (error) {
-      console.error("Error fetching suppliers:", error);
     }
   }
 
@@ -178,17 +222,24 @@ export default function Purchases() {
         if (error) throw error;
         toast("Purchase updated");
       } else {
-        const { error } = await supabase.from("purchases").insert([
-          {
-            supplier_id: formData.supplier_id,
-            total_amount: parseFloat(formData.total_amount),
-            purchase_date: formData.purchase_date,
-            notes: formData.notes,
-            status: "pending",
-            invoice_url,
-          },
-        ]);
+        const { data: newPurchase, error } = await supabase
+          .from("purchases")
+          .insert([
+            {
+              supplier_id: formData.supplier_id,
+              total_amount: parseFloat(formData.total_amount),
+              purchase_date: formData.purchase_date,
+              notes: formData.notes,
+              status: "pending",
+              invoice_url,
+            },
+          ])
+          .select();
         if (error) throw error;
+        // Merge new purchase into local state immediately so it shows up right away
+        if (newPurchase?.[0]) {
+          setPurchases((prev) => [newPurchase[0], ...prev]);
+        }
         toast("Purchase added successfully");
       }
       setShowForm(false);
@@ -274,8 +325,17 @@ export default function Purchases() {
 
   function handleViewPayments(purchase) {
     setSelectedPurchase(purchase);
-    fetchPayments(purchase.id);
-    fetchPurchaseFabrics(purchase.id);
+    Promise.all([
+      supabase
+        .from("purchase_payments")
+        .select("*")
+        .eq("purchase_id", purchase.id)
+        .order("payment_date", { ascending: false }),
+      supabase.from("fabrics").select("*").eq("purchase_id", purchase.id),
+    ]).then(([paymentsRes, fabricsRes]) => {
+      setPayments(paymentsRes.data || []);
+      setPurchaseFabrics(fabricsRes.data || []);
+    });
   }
 
   function handleAddPayment(purchase) {
@@ -285,6 +345,11 @@ export default function Purchases() {
 
   async function handleDelete(id) {
     try {
+      const { error: payErr } = await supabase
+        .from("purchase_payments")
+        .delete()
+        .eq("purchase_id", id);
+      if (payErr) throw payErr;
       const { error } = await supabase.from("purchases").delete().eq("id", id);
       if (error) throw error;
       toast("Purchase deleted");
@@ -331,40 +396,6 @@ export default function Purchases() {
     return <span className={`badge ${styles[status]}`}>{labels[status]}</span>;
   };
 
-  function FormField({
-    field,
-    label,
-    type = "text",
-    required = false,
-    placeholder = "",
-    children,
-  }) {
-    const value = formData[field];
-    const error = formErrors[field];
-    const cls = `input ${error ? "border-error-400" : ""}`;
-
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label} {required && "*"}
-        </label>
-        {children || (
-          <input
-            type={type}
-            step={type === "number" ? "0.01" : undefined}
-            required={required}
-            value={value}
-            onChange={(e) => handleFieldChange(field, e.target.value)}
-            className={cls}
-            placeholder={placeholder}
-            onWheel={(e) => e.target.blur()}
-          />
-        )}
-        {error && <p className="text-error-600 text-sm mt-1">{error}</p>}
-      </div>
-    );
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -384,9 +415,17 @@ export default function Purchases() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
+          <button
             onClick={() =>
               exportCSV(
                 filteredPurchases.map((p) => ({
+                  purchase_id: p.purchase_number || p.id,
                   date: p.purchase_date,
                   supplier: p.supplier?.name,
                   total: p.total_amount,
@@ -456,7 +495,14 @@ export default function Purchases() {
         title={editingId ? "Edit Purchase" : "New Purchase"}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <FormField field="supplier_id" label="Supplier" required>
+          <FormField
+            field="supplier_id"
+            label="Supplier"
+            required
+            formData={formData}
+            formErrors={formErrors}
+            onFieldChange={handleFieldChange}
+          >
             <select
               required
               value={formData.supplier_id}
@@ -477,9 +523,25 @@ export default function Purchases() {
             type="number"
             required
             placeholder="₹0.00"
+            formData={formData}
+            formErrors={formErrors}
+            onFieldChange={handleFieldChange}
           />
-          <FormField field="purchase_date" label="Purchase Date" type="date" />
-          <FormField field="notes" label="Notes">
+          <FormField
+            field="purchase_date"
+            label="Purchase Date"
+            type="date"
+            formData={formData}
+            formErrors={formErrors}
+            onFieldChange={handleFieldChange}
+          />
+          <FormField
+            field="notes"
+            label="Notes"
+            formData={formData}
+            formErrors={formErrors}
+            onFieldChange={handleFieldChange}
+          >
             <textarea
               value={formData.notes}
               onChange={(e) => handleFieldChange("notes", e.target.value)}
@@ -546,11 +608,35 @@ export default function Purchases() {
               disabled={uploading}
               className="btn btn-primary flex-1"
             >
-              {uploading
-                ? "Saving..."
-                : editingId
-                  ? "Update Purchase"
-                  : "Add Purchase"}
+              {uploading ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : editingId ? (
+                "Update Purchase"
+              ) : (
+                "Add Purchase"
+              )}
             </button>
           </div>
         </form>
@@ -1013,6 +1099,16 @@ export default function Purchases() {
           </p>
         </div>
       )}
+
+      <PurchasesImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => {
+          fetchAll();
+          setShowImport(false);
+        }}
+        suppliers={suppliers}
+      />
 
       <ImageViewer
         url={viewInvoiceUrl}
