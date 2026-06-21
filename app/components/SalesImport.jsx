@@ -262,7 +262,11 @@ export default function SalesImport({
           const fabric = fabricMap[fabricName.toLowerCase()];
           const meters = parseFloat(row.meters) || 0;
           const pricePerMeter = parseFloat(row.price_per_meter) || 0;
-          const costPrice = parseFloat(row.cost_price_per_meter) || 0;
+          // If cost not provided in CSV, auto-fill from fabric's purchase price
+          let costPrice = parseFloat(row.cost_price_per_meter) || 0;
+          if (costPrice <= 0 && fabric) {
+            costPrice = fabric.purchase_price_per_meter || 0;
+          }
 
           // Build notes from scratch (don't reuse uploaded notes as they already contain Fabric info)
           let notesStr = `Fabric: ${fabricName}`;
@@ -273,7 +277,7 @@ export default function SalesImport({
             fabric_id: fabric?.id || null,
             meters,
             price_per_meter: pricePerMeter,
-            cost_price_per_meter: costPrice || 0,
+            cost_price_per_meter: costPrice,
             sale_date: saleDate,
             payment_type: paymentType,
             sale_group_id: groupId,
@@ -303,16 +307,50 @@ export default function SalesImport({
           continue;
         }
 
-        // Create payments based on payment type
-        if (paymentType === "cash") {
-          const paymentInserts = (insertedSales || []).map((s) => ({
-            sale_id: s.id,
-            amount: s.total_amount,
-            payment_date: saleDate,
-            payment_method: "cash",
-          }));
-          if (paymentInserts.length > 0) {
-            await supabase.from("sale_payments").insert(paymentInserts);
+        // Create payments based on the paid amount from CSV
+        // This ensures paid_amount, remaining_amount, and status are correctly set via DB trigger
+        const paymentInserts = [];
+        for (let i = 0; i < (insertedSales || []).length; i++) {
+          const s = insertedSales[i];
+          const row = group.rows[i];
+          const paidAmount = parseFloat(row.paid) || 0;
+          if (paidAmount > 0) {
+            paymentInserts.push({
+              sale_id: s.id,
+              amount: paidAmount,
+              payment_date: saleDate,
+              payment_method: "cash",
+            });
+          }
+        }
+        if (paymentInserts.length > 0) {
+          const { error: paymentError } = await supabase
+            .from("sale_payments")
+            .insert(paymentInserts);
+          if (paymentError) {
+            console.error("Error inserting payments:", paymentError);
+          }
+        }
+
+        // Update payment_type for each sale based on actual paid vs total
+        for (let i = 0; i < (insertedSales || []).length; i++) {
+          const s = insertedSales[i];
+          const row = group.rows[i];
+          const paidAmount = parseFloat(row.paid) || 0;
+          const totalAmount = parseFloat(row.total) || s.total_amount || 0;
+          let actualPaymentType = row.payment_type?.toLowerCase() || "cash";
+          if (paidAmount >= totalAmount && totalAmount > 0) {
+            actualPaymentType = "cash";
+          } else if (paidAmount > 0 && paidAmount < totalAmount) {
+            actualPaymentType = "partial";
+          } else if (paidAmount <= 0) {
+            actualPaymentType = "credit";
+          }
+          if (actualPaymentType !== s.payment_type) {
+            await supabase
+              .from("sales")
+              .update({ payment_type: actualPaymentType })
+              .eq("id", s.id);
           }
         }
 

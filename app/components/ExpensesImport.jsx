@@ -12,53 +12,54 @@ import {
 } from "lucide-react";
 import { useToast } from "./Toast";
 
+const CATEGORIES = [
+  "Rent",
+  "Electricity",
+  "Staff Salary",
+  "Transport",
+  "Packaging",
+  "Maintenance",
+  "Marketing",
+  "Other",
+];
+
+// Expected/optional columns mapped to DB fields
+const COLUMN_MAP = {
+  title: "title",
+  category: "category",
+  amount: "amount",
+  date: "expense_date",
+  expense_date: "expense_date",
+  paid_by: "paid_by",
+  paidby: "paid_by",
+  notes: "notes",
+};
+
+const REQUIRED_COLS = ["title", "amount"];
+
 /**
  * Convert an Excel serial date number to a YYYY-MM-DD date string.
+ * Excel serial date 1 = January 1, 1900.
+ * Supports both integer (date only) and fractional (date + time) values.
  */
 function excelSerialToDateStr(serial) {
-  const epoch = new Date(1899, 11, 30);
+  const epoch = new Date(1899, 11, 30); // Dec 30, 1899 (accounts for the leap year bug)
   const days = Math.floor(serial);
   const date = new Date(epoch.getTime() + days * 86400000);
-  return date.toISOString().split("T")[0];
+  return date.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
+/** Check if a value is an Excel serial date number (positive number, not already a string). */
 function isExcelSerialDate(value) {
   return typeof value === "number" && value > 40000 && value < 70000;
 }
 
-const COLUMN_MAP = {
-  supplier: "supplier_name",
-  supplier_name: "supplier_name",
-  total: "total_amount",
-  total_amount: "total_amount",
-  amount: "total_amount",
-  date: "purchase_date",
-  purchase_date: "purchase_date",
-  notes: "notes",
-  status: "status",
-  paid: "paid_amount",
-  paid_amount: "paid_amount",
-  remaining: "remaining",
-};
-
-const REQUIRED_COLS = ["supplier_name", "total_amount"];
-
-export default function PurchasesImport({
-  open,
-  onClose,
-  onImported,
-  suppliers,
-}) {
+export default function ExpensesImport({ open, onClose, onImported }) {
   const toast = useToast();
   const [rows, setRows] = useState([]);
   const [errors, setErrors] = useState([]);
   const [importing, setImporting] = useState(false);
-  const [stage, setStage] = useState("upload");
-
-  const supplierMap = {};
-  (suppliers || []).forEach((s) => {
-    supplierMap[s.name.toLowerCase()] = s;
-  });
+  const [stage, setStage] = useState("upload"); // upload | preview | done
 
   const handleFile = useCallback(
     async (e) => {
@@ -83,27 +84,27 @@ export default function PurchasesImport({
           return;
         }
 
-        // Normalise keys
+        // Normalise keys: lowercase, trim
         const normalised = json.map((row) => {
           const nr = {};
           Object.keys(row).forEach((key) => {
             const k = key.toLowerCase().trim();
-            const targetKey =
-              COLUMN_MAP[k] || COLUMN_MAP[k.replace(/[\s]+/g, "")] || k;
+            const targetKey = COLUMN_MAP[k] || k;
             const rawValue = row[key];
-            if (
-              ["purchase_date", "date"].includes(targetKey) &&
-              isExcelSerialDate(rawValue)
-            ) {
+            // Convert Excel serial date numbers to date strings
+            if (targetKey === "expense_date" && isExcelSerialDate(rawValue)) {
               nr[targetKey] = excelSerialToDateStr(rawValue);
             } else {
               nr[targetKey] = String(rawValue).trim();
             }
           });
 
-          // Map supplier column to supplier_name
-          if (nr.supplier && !nr.supplier_name) {
-            nr.supplier_name = nr.supplier;
+          // Normalise category to title case match
+          if (nr.category) {
+            const match = CATEGORIES.find(
+              (c) => c.toLowerCase() === nr.category.toLowerCase(),
+            );
+            if (match) nr.category = match;
           }
 
           return nr;
@@ -113,18 +114,15 @@ export default function PurchasesImport({
         const rowErrors = [];
         normalised.forEach((row, idx) => {
           const errs = [];
-          if (!row.supplier_name) errs.push("Missing supplier name");
+          if (!row.title) errs.push("Missing title");
           if (
-            !row.total_amount ||
-            isNaN(parseFloat(row.total_amount)) ||
-            parseFloat(row.total_amount) <= 0
+            !row.amount ||
+            isNaN(parseFloat(row.amount)) ||
+            parseFloat(row.amount) <= 0
           )
-            errs.push("Invalid total amount");
-          if (
-            row.status &&
-            !["pending", "partial", "paid"].includes(row.status.toLowerCase())
-          )
-            errs.push("Status must be pending/partial/paid");
+            errs.push("Invalid amount");
+          if (row.category && !CATEGORIES.includes(row.category))
+            errs.push(`Category must be one of: ${CATEGORIES.join(", ")}`);
           if (errs.length > 0) rowErrors.push({ row: idx + 2, errors: errs });
         });
 
@@ -139,7 +137,7 @@ export default function PurchasesImport({
         );
       }
     },
-    [suppliers, toast],
+    [toast],
   );
 
   async function handleImport() {
@@ -148,6 +146,7 @@ export default function PurchasesImport({
       let imported = 0;
       let failed = 0;
 
+      // Build set of error row indices to skip
       const errorIndices = new Set(errors.map((e) => e.row - 2));
       const validRows = rows.filter((_, idx) => !errorIndices.has(idx));
 
@@ -157,77 +156,36 @@ export default function PurchasesImport({
         return;
       }
 
-      for (const row of validRows) {
-        const supplierName = row.supplier_name?.toLowerCase() || "";
-        const existingSupplier = supplierMap[supplierName];
-        let supplierId = existingSupplier?.id || null;
+      // Build expense payloads
+      const expensePayloads = validRows.map((row) => ({
+        title: row.title,
+        category: row.category || "Other",
+        amount: parseFloat(row.amount) || 0,
+        expense_date:
+          row.expense_date || new Date().toISOString().split("T")[0],
+        paid_by: row.paid_by || "",
+        notes: row.notes || "",
+      }));
 
-        // If supplier doesn't exist, create one
-        if (!supplierId && supplierName) {
-          const { data: newSupplier, error: createErr } = await supabase
-            .from("suppliers")
-            .insert([{ name: row.supplier_name }])
-            .select()
-            .single();
-          if (createErr) {
-            console.error("Error creating supplier:", createErr);
-            failed++;
-            continue;
-          }
-          supplierId = newSupplier.id;
-          supplierMap[supplierName] = newSupplier;
-        }
+      const { error: insertError } = await supabase
+        .from("expenses")
+        .insert(expensePayloads);
 
-        const purchaseDate =
-          row.purchase_date || new Date().toISOString().split("T")[0];
-        const totalAmount = parseFloat(row.total_amount) || 0;
-        const status = row.status?.toLowerCase() || "pending";
-
-        const { data: newPurchase, error: purchaseError } = await supabase
-          .from("purchases")
-          .insert([
-            {
-              supplier_id: supplierId,
-              total_amount: totalAmount,
-              purchase_date: purchaseDate,
-              notes: row.notes || "",
-              status,
-            },
-          ])
-          .select()
-          .single();
-
-        if (purchaseError) {
-          console.error("Error inserting purchase:", purchaseError);
-          failed++;
-          continue;
-        }
-
-        // Create payment record from the paid_amount column if provided
-        const paidAmount = parseFloat(row.paid_amount) || 0;
-        if (paidAmount > 0 && newPurchase?.id) {
-          const { error: payError } = await supabase
-            .from("purchase_payments")
-            .insert([
-              {
-                purchase_id: newPurchase.id,
-                amount: paidAmount,
-                payment_date: purchaseDate,
-                payment_method: "cash",
-              },
-            ]);
-          if (payError) {
-            console.error("Error inserting payment:", payError);
-          }
-        }
-
-        imported++;
+      if (insertError) {
+        console.error("Error inserting expenses:", insertError);
+        toast(
+          `Import error: ${insertError.message || JSON.stringify(insertError)}`,
+          "error",
+        );
+        failed = validRows.length;
+      } else {
+        imported = validRows.length;
       }
 
       if (failed > 0) {
-        toast(`${imported} purchases imported, ${failed} failed`, "warning");
+        toast(`${imported} expenses imported, ${failed} failed`, "warning");
       } else {
-        toast(`${imported} purchases imported successfully`);
+        toast(`${imported} expenses imported successfully`);
       }
 
       onImported?.();
@@ -257,10 +215,10 @@ export default function PurchasesImport({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Import Purchases
+              Import Expenses
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              Upload an Excel (.xlsx) or CSV file with purchase records
+              Upload an Excel (.xlsx) or CSV file with expense records
             </p>
           </div>
           <button
@@ -280,28 +238,35 @@ export default function PurchasesImport({
               </h3>
               <div className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
                 <p>
-                  <strong>supplier / supplier_name</strong> — Supplier name
-                  (creates new supplier if doesn't exist)
+                  <strong>title</strong> — Expense title / description
                 </p>
                 <p>
-                  <strong>total / total_amount / amount</strong> — Purchase
-                  total amount (number)
+                  <strong>amount</strong> — Expense amount (number, must be
+                  positive)
                 </p>
               </div>
               <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-200 mt-3 mb-2">
-                Optional Columns
+                Optional Columns (export format compatible)
               </h3>
               <div className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
                 <p>
-                  <strong>date / purchase_date</strong> — Purchase date
-                  (defaults to today)
+                  <strong>category</strong> — One of: Rent, Electricity, Staff
+                  Salary, Transport, Packaging, Maintenance, Marketing, Other
+                  (defaults to Other)
                 </p>
                 <p>
-                  <strong>notes</strong> — Invoice number, remarks...
+                  <strong>date / expense_date</strong> — Expense date (defaults
+                  to today)
                 </p>
                 <p>
-                  <strong>status</strong> — pending / partial / paid (defaults
-                  to pending)
+                  <strong>paid_by</strong> — Who paid the expense
+                </p>
+                <p>
+                  <strong>notes</strong> — Additional notes
+                </p>
+                <p className="mt-2 text-blue-500">
+                  You can directly re-upload the exported expenses CSV file
+                  without any changes!
                 </p>
               </div>
             </div>
@@ -377,19 +342,19 @@ export default function PurchasesImport({
                       #
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-gray-500">
-                      Supplier
+                      Title
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-500">
+                      Category
                     </th>
                     <th className="px-3 py-2 text-right font-medium text-gray-500">
                       Amount
-                    </th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500">
-                      Status
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-gray-500">
                       Date
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-gray-500">
-                      Notes
+                      Paid By
                     </th>
                     <th className="px-3 py-2 text-center font-medium text-gray-500">
                       Status
@@ -405,27 +370,20 @@ export default function PurchasesImport({
                         className={`${hasError ? "bg-warning-50" : "hover:bg-gray-50"}`}
                       >
                         <td className="px-3 py-2 text-gray-500">{idx + 1}</td>
-                        <td className="px-3 py-2 font-medium">
-                          {row.supplier_name}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          ₹
-                          {parseFloat(row.total_amount || 0).toLocaleString(
-                            "en-IN",
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span
-                            className={`badge ${row.status === "paid" ? "bg-accent-100 text-accent-800" : row.status === "partial" ? "bg-warning-100 text-warning-800" : "bg-gray-100 text-gray-800"}`}
-                          >
-                            {row.status || "pending"}
+                        <td className="px-3 py-2 font-medium">{row.title}</td>
+                        <td className="px-3 py-2">
+                          <span className="badge bg-gray-100 text-gray-800">
+                            {row.category || "Other"}
                           </span>
                         </td>
-                        <td className="px-3 py-2">
-                          {row.purchase_date || "Today"}
+                        <td className="px-3 py-2 text-right font-medium text-red-600">
+                          ₹{parseFloat(row.amount || 0).toLocaleString("en-IN")}
                         </td>
-                        <td className="px-3 py-2 text-gray-500 max-w-[150px] truncate">
-                          {row.notes || "—"}
+                        <td className="px-3 py-2">
+                          {row.expense_date || "Today"}
+                        </td>
+                        <td className="px-3 py-2 text-gray-600">
+                          {row.paid_by || "—"}
                         </td>
                         <td className="px-3 py-2 text-center">
                           {hasError ? (
