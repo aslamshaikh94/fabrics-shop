@@ -20,6 +20,7 @@ import {
   LogOut,
   Zap,
   ChevronRight,
+  Handshake,
 } from "lucide-react";
 import { getSupabase } from "../lib/supabase";
 import { useAuth } from "./AuthGuard";
@@ -40,6 +41,7 @@ const ALL_NAV = [
   { id: "fabrics", label: "Fabrics", icon: Package, adminOnly: true },
   { id: "suppliers", label: "Suppliers", icon: DollarSign, adminOnly: true },
   { id: "customers", label: "Customers", icon: Users },
+  { id: "partners", label: "Partners", icon: Handshake, adminOnly: true },
   { id: "reports", label: "Reports", icon: BarChart2 },
 ];
 
@@ -102,6 +104,7 @@ export default function Shell({ children }) {
           "suppliers",
           "customers",
           "expenses",
+          "partners",
         ].includes(n.id),
       ),
     },
