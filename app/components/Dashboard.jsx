@@ -13,6 +13,7 @@ import {
   CreditCard,
   Receipt,
 } from "lucide-react";
+import { useShowAmount } from "./ShowAmountProvider";
 
 function pctChange(curr, prev) {
   if (!prev) return null;
@@ -20,7 +21,13 @@ function pctChange(curr, prev) {
   return { value: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`, up: diff >= 0 };
 }
 
+function fmtAmt(n, show) {
+  if (!show) return "₹•••";
+  return `₹${Number(n || 0).toLocaleString("en-IN")}`;
+}
+
 export default function Dashboard() {
+  const { showAmount } = useShowAmount();
   const [stats, setStats] = useState({
     thisMonthSales: 0,
     thisMonthProfit: 0,
@@ -224,7 +231,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <p className={`text-xl font-bold ${card.valueBg}`}>
-                ₹{card.value.toLocaleString("en-IN")}
+                {fmtAmt(card.value, showAmount)}
               </p>
               {card.change && (
                 <p
@@ -260,13 +267,13 @@ export default function Dashboard() {
           <div>
             <p className="text-xs text-gray-400">Base Cost</p>
             <p className="text-lg font-bold text-gray-900 mt-0.5">
-              ₹{stats.inventoryValue.toLocaleString("en-IN")}
+              {fmtAmt(stats.inventoryValue, showAmount)}
             </p>
           </div>
           <div>
             <p className="text-xs text-gray-400">IGST (5%)</p>
             <p className="text-lg font-bold text-gray-500 mt-0.5">
-              + ₹{(stats.inventoryValue * 0.05).toLocaleString("en-IN")}
+              + {fmtAmt(stats.inventoryValue * 0.05, showAmount)}
             </p>
           </div>
           <div className="col-span-2 sm:col-span-1 pt-3 sm:pt-0 border-t sm:border-0 border-gray-100">
@@ -274,7 +281,7 @@ export default function Dashboard() {
               Total Value with GST
             </p>
             <p className="text-2xl font-black text-primary-700 mt-0.5">
-              ₹{(stats.inventoryValue * 1.05).toLocaleString("en-IN")}
+              {fmtAmt(stats.inventoryValue * 1.05, showAmount)}
             </p>
           </div>
         </div>
@@ -289,19 +296,19 @@ export default function Dashboard() {
           <div>
             <p className="text-xs text-gray-400">Purchased</p>
             <p className="text-sm font-bold text-gray-900 mt-0.5">
-              ₹{stats.totalPurchases.toLocaleString("en-IN")}
+              {fmtAmt(stats.totalPurchases, showAmount)}
             </p>
           </div>
           <div>
             <p className="text-xs text-gray-400">Paid</p>
             <p className="text-sm font-bold text-green-600 mt-0.5">
-              ₹{stats.paidPurchasePayments.toLocaleString("en-IN")}
+              {fmtAmt(stats.paidPurchasePayments, showAmount)}
             </p>
           </div>
           <div>
             <p className="text-xs text-gray-400">Pending</p>
             <p className="text-sm font-bold text-orange-600 mt-0.5">
-              ₹{stats.pendingPurchasePayments.toLocaleString("en-IN")}
+              {fmtAmt(stats.pendingPurchasePayments, showAmount)}
             </p>
           </div>
         </div>
@@ -425,7 +432,7 @@ export default function Dashboard() {
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-semibold text-gray-900 text-sm">
-                    ₹{sale.total_amount.toLocaleString("en-IN")}
+                    {fmtAmt(sale.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
                     {new Date(sale.sale_date).toLocaleDateString("en-IN", {

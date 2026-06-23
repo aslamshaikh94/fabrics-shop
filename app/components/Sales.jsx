@@ -59,6 +59,14 @@ export default function Sales() {
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [showMargin, setShowMargin] = useState(true);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("salesShowMargin");
+    if (saved !== null) {
+      setShowMargin(saved === "true");
+    }
+  }, []);
 
   useEffect(() => {
     fetchAll();
@@ -292,11 +300,23 @@ export default function Sales() {
     fetchPayments(group.items.map((i) => i.id));
   }, []);
 
-  const handleCloseDetails = useCallback(() => setSelectedGroupForDetails(null), []);
-  const handleOpenNewSale = useCallback(() => { setEditingId(null); setShowForm(true); }, []);
-  const handleCloseSaleForm = useCallback(() => { setShowForm(false); setEditingId(null); }, []);
+  const handleCloseDetails = useCallback(
+    () => setSelectedGroupForDetails(null),
+    [],
+  );
+  const handleOpenNewSale = useCallback(() => {
+    setEditingId(null);
+    setShowForm(true);
+  }, []);
+  const handleCloseSaleForm = useCallback(() => {
+    setShowForm(false);
+    setEditingId(null);
+  }, []);
   const handleCloseImport = useCallback(() => setShowImport(false), []);
-  const handleClosePaymentForm = useCallback(() => setShowPaymentForm(false), []);
+  const handleClosePaymentForm = useCallback(
+    () => setShowPaymentForm(false),
+    [],
+  );
 
   const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
   const paginated = groupedArray.slice(
@@ -323,6 +343,19 @@ export default function Sales() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() =>
+              setShowMargin((v) => {
+                const next = !v;
+                localStorage.setItem("salesShowMargin", String(next));
+                return next;
+              })
+            }
+            className={`btn ${showMargin ? "btn-secondary" : "btn-ghost"}`}
+            title={showMargin ? "Hide margin column" : "Show margin column"}
+          >
+            <TrendingUp className="w-4 h-4" />
+          </button>
           <button
             onClick={() => setShowImport(true)}
             className="btn btn-secondary"
@@ -352,10 +385,7 @@ export default function Sales() {
           >
             <Download className="w-4 h-4" />
           </button>
-          <button
-            onClick={handleOpenNewSale}
-            className="btn btn-primary"
-          >
+          <button onClick={handleOpenNewSale} className="btn btn-primary">
             <Plus className="w-5 h-5 mr-2" /> New Sale
           </button>
         </div>
@@ -543,7 +573,7 @@ export default function Sales() {
                   "Total Meters",
                   "Total",
                   "Paid",
-                  "Margin",
+                  ...(showMargin ? ["Margin"] : []),
                   "Remaining",
                   "Type",
                   "Actions",
@@ -606,11 +636,13 @@ export default function Sales() {
                       ₹{group.paid_amount.toLocaleString("en-IN")}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span className="text-accent-600 font-medium">
-                      ₹{group.margin.toLocaleString("en-IN")}
-                    </span>
-                  </td>
+                  {showMargin && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className="text-accent-600 font-medium">
+                        ₹{group.margin.toLocaleString("en-IN")}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-right text-sm">
                     <span
                       className={

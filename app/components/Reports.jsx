@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { useShowAmount } from "./ShowAmountProvider";
 import {
   BarChart,
   Bar,
@@ -39,10 +40,12 @@ const MONTHS = [
   "Nov",
   "Dec",
 ];
-function fmt(n) {
+function fmt(n, show = true) {
+  if (!show) return "₹•••";
   return `₹${Number(n || 0).toLocaleString("en-IN")}`;
 }
-function fmtShort(n) {
+function fmtShort(n, show = true) {
+  if (!show) return "₹•••";
   n = Number(n || 0);
   if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
   if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
@@ -84,6 +87,7 @@ export default function Reports() {
   ]);
   const [chartView, setChartView] = useState("all");
   const [rankView, setRankView] = useState("revenue");
+  const { showAmount } = useShowAmount();
 
   useEffect(() => {
     fetchYears();
@@ -172,7 +176,7 @@ export default function Reports() {
           supabase
             .from("sales")
             .select(
-              "sale_date, total_amount, margin, remaining_amount, meters, notes, customer:customers(name)",
+              "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer:customers(name)",
             )
             .gte("sale_date", startDate)
             .lte("sale_date", endDate),
@@ -364,17 +368,19 @@ export default function Reports() {
             Business performance — {year}
           </p>
         </div>
-        <select
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-          className="input w-28"
-        >
-          {availableYears.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="input w-28"
+          >
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -419,10 +425,10 @@ export default function Reports() {
                     </div>
                   </div>
                   <p className={`text-base font-bold ${card.text}`}>
-                    {fmtShort(card.value)}
+                    {fmtShort(card.value, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {fmt(card.value)}
+                    {fmt(card.value, showAmount)}
                   </p>
                   {yoy && (
                     <p
@@ -474,7 +480,7 @@ export default function Reports() {
                   tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
                   width={42}
                 />
-                <Tooltip formatter={(v) => fmt(v)} />
+                <Tooltip formatter={(v) => fmt(v, showAmount)} />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
                 {(chartView === "all" || chartView === "sales") && (
                   <Line
@@ -527,7 +533,7 @@ export default function Reports() {
                   tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
                   width={42}
                 />
-                <Tooltip formatter={(v) => fmt(v)} />
+                <Tooltip formatter={(v) => fmt(v, showAmount)} />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
                 <Bar
                   dataKey="sales"
@@ -603,12 +609,12 @@ export default function Reports() {
                             </span>
                             {rankView !== "pending" && c.pending > 0 && (
                               <span className="shrink-0 text-xs text-warning-600 font-medium">
-                                ({fmt(c.pending)} due)
+                                ({fmt(c.pending, showAmount)} due)
                               </span>
                             )}
                           </div>
                           <span className="text-gray-600 shrink-0 ml-2">
-                            {fmtShort(val)}
+                            {fmtShort(val, showAmount)}
                           </span>
                         </div>
                         <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -666,7 +672,7 @@ export default function Reports() {
                           <span className="text-gray-600 shrink-0 ml-2">
                             {rankView === "meters"
                               ? `${f.meters.toFixed(1)}m`
-                              : fmtShort(f.revenue)}
+                              : fmtShort(f.revenue, showAmount)}
                           </span>
                         </div>
                         <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -719,7 +725,7 @@ export default function Reports() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="font-semibold text-warning-600 text-sm">
-                        {fmt(c.pending)}
+                        {fmt(c.pending, showAmount)}
                       </span>
                       {c.phone && (
                         <a
@@ -764,7 +770,7 @@ export default function Reports() {
                       {s.name}
                     </p>
                     <span className="font-semibold text-orange-600 text-sm">
-                      {fmt(s.pending)}
+                      {fmt(s.pending, showAmount)}
                     </span>
                   </div>
                 ))}
