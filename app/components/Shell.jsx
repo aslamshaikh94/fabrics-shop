@@ -21,9 +21,12 @@ import {
   Zap,
   ChevronRight,
   Handshake,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { getSupabase } from "../lib/supabase";
 import { useAuth } from "./AuthGuard";
+import { useShowAmount } from "./ShowAmountProvider";
 
 const ALL_NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -58,6 +61,7 @@ export default function Shell({ children }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, setDark] = useState(false);
+  const { showAmount, setShowAmount } = useShowAmount();
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
@@ -215,6 +219,17 @@ export default function Shell({ children }) {
         </nav>
 
         <div className="px-3 pb-4 pt-2 border-t border-gray-100 dark:border-gray-700/50 space-y-0.5">
+          <button
+            onClick={() => setShowAmount((v) => !v)}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all text-sm"
+          >
+            {showAmount ? (
+              <Eye className="w-[18px] h-[18px]" />
+            ) : (
+              <EyeOff className="w-[18px] h-[18px]" />
+            )}
+            <span>{showAmount ? "Hide Amounts" : "Show Amounts"}</span>
+          </button>
           <button
             onClick={() => setDark((d) => !d)}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all text-sm"
