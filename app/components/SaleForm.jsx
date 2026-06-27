@@ -87,11 +87,22 @@ export default function SaleForm({
   async function fetchSaleForEditing(id) {
     const { data, error } = await supabase
       .from("sales")
-      .select("*, customer:customers(*)")
+      .select("*")
       .eq("id", id)
       .single();
 
     if (data) {
+      // Fetch the customer separately to avoid schema cache join issues
+      if (data.customer_id) {
+        const { data: customerData } = await supabase
+          .from("customers")
+          .select("*")
+          .eq("id", data.customer_id)
+          .single();
+        data.customer = customerData || null;
+      } else {
+        data.customer = null;
+      }
       loadSaleForEdit(data);
     }
   }
