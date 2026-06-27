@@ -45,6 +45,7 @@ function makeEmptyForm() {
     sale_date: new Date().toISOString().split("T")[0],
     payment_type: "cash",
     initial_payment: "",
+    discount_amount: "",
     invoice_file: null,
   };
 }
@@ -121,7 +122,6 @@ export default function SaleForm({
   }
 
   function addItem() {
-    // Validate only the current (last) item before adding
     const currentItem = formData.items[formData.items.length - 1];
     const itemErrors = validateCurrentItem(currentItem);
     if (Object.keys(itemErrors).length > 0) {
@@ -131,7 +131,6 @@ export default function SaleForm({
     }
 
     setItemJustAdded(true);
-    // Clear errors for the validated item fields
     const clearedErrors = { ...formErrors };
     delete clearedErrors.fabric_name;
     delete clearedErrors.meters;
@@ -155,7 +154,7 @@ export default function SaleForm({
     setTimeout(() => setItemJustAdded(false), 100);
   }
 
-  function calculateTotal() {
+  function calculateSubtotal() {
     return formData.items
       .reduce(
         (sum, item) =>
@@ -167,22 +166,26 @@ export default function SaleForm({
       .toFixed(2);
   }
 
-  function calculateMargin() {
-    return formData.items
-      .reduce(
-        (sum, item) =>
-          sum +
-          (parseFloat(item.meters) || 0) *
-            ((parseFloat(item.price_per_meter) || 0) -
-              (parseFloat(item.cost_price_per_meter) || 0)),
-        0,
-      )
-      .toFixed(2);
+  function calculateNetTotal() {
+    return Math.max(
+      parseFloat(calculateSubtotal()) -
+        (parseFloat(formData.discount_amount) || 0),
+      0,
+    );
   }
 
-  function calculateRemaining() {
-    return (
-      parseFloat(calculateTotal()) - (parseFloat(formData.initial_payment) || 0)
+  function calculateMargin() {
+    const totalMargin = formData.items.reduce(
+      (sum, item) =>
+        sum +
+        (parseFloat(item.meters) || 0) *
+          ((parseFloat(item.price_per_meter) || 0) -
+            (parseFloat(item.cost_price_per_meter) || 0)),
+      0,
+    );
+    return Math.max(
+      totalMargin - (parseFloat(formData.discount_amount) || 0),
+      0,
     ).toFixed(2);
   }
 
@@ -243,7 +246,6 @@ export default function SaleForm({
       return;
     }
 
-    // Filter out the active "new item" row if it hasn't been filled
     const itemsToSave = formData.items.filter((item, idx) => {
       if (formData.items.length === 1) return true;
       if (idx === formData.items.length - 1) {
@@ -252,7 +254,7 @@ export default function SaleForm({
       return true;
     });
 
-    const totalAmount = itemsToSave.reduce(
+    const subtotal = itemsToSave.reduce(
       (sum, item) =>
         sum +
         (parseFloat(item.meters) || 0) *
@@ -262,6 +264,7 @@ export default function SaleForm({
 
     setSaving(true);
     try {
+      const discountAmount = parseFloat(formData.discount_amount) || 0;
       const initialPayment = parseFloat(formData.initial_payment) || 0;
 
       let invoice_url = "";
@@ -279,12 +282,13 @@ export default function SaleForm({
       }
 
       // Check credit limit for credit/partial
+      const netTotal = Math.max(subtotal - discountAmount, 0);
       if (formData.customer_id && formData.payment_type !== "cash") {
         const customer = allCustomers.find(
           (c) => c.id === formData.customer_id,
         );
         if (customer?.credit_limit > 0) {
-          const newRemaining = totalAmount - initialPayment;
+          const newRemaining = netTotal - initialPayment;
           const currentDue = customerDues?.[customer.id] || 0;
           if (currentDue + newRemaining > customer.credit_limit) {
             toast(
@@ -300,7 +304,6 @@ export default function SaleForm({
       if (editingId) {
         const item = itemsToSave[0] || {};
 
-        // Delete old payments for this sale before updating
         const { error: deletePayErr } = await supabase
           .from("sale_payments")
           .delete()
@@ -322,6 +325,7 @@ export default function SaleForm({
             : "",
           fabric_name: item.fabric_name,
           invoice_url,
+          discount_amount: discountAmount,
         };
         const { error: updateError } = await supabase
           .from("sales")
@@ -329,17 +333,13 @@ export default function SaleForm({
           .eq("id", editingId);
         if (updateError) throw updateError;
 
-        const totalAmount =
-          parseFloat(item.meters) * parseFloat(item.price_per_meter);
-        const initialPayment = parseFloat(formData.initial_payment) || 0;
-
         if (formData.payment_type === "cash") {
           const { error: payErr } = await supabase
             .from("sale_payments")
             .insert([
               {
                 sale_id: editingId,
-                amount: totalAmount,
+                amount: netTotal,
                 payment_date: formData.sale_date,
                 payment_method: "cash",
               },
@@ -351,7 +351,7 @@ export default function SaleForm({
             .insert([
               {
                 sale_id: editingId,
-                amount: initialPayment,
+                amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
                 payment_method: "cash",
               },
@@ -366,24 +366,28 @@ export default function SaleForm({
           formData.customer_name !== "Walk-in Customer"
             ? ` (Name: ${formData.customer_name})`
             : "";
-        const salePayloads = itemsToSave.map((item) => ({
-          customer_id: formData.customer_id || null,
-          fabric_id: item.fabric_id || null,
-          meters: parseFloat(item.meters) || 0,
-          price_per_meter: parseFloat(item.price_per_meter) || 0,
-          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
-          sale_date: formData.sale_date,
-          payment_type: formData.payment_type,
-          customer_name: !formData.customer_id
-            ? formData.customer_name !== "Walk-in Customer"
-              ? formData.customer_name
-              : ""
-            : "",
-          fabric_name: item.fabric_name,
-          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
-          sale_group_id: saleGroupId,
-          invoice_url,
-        }));
+        // Apply discount to first item only (group-level discount)
+        const salePayloads = itemsToSave.map((item, idx) => {
+          return {
+            customer_id: formData.customer_id || null,
+            fabric_id: item.fabric_id || null,
+            meters: parseFloat(item.meters) || 0,
+            price_per_meter: parseFloat(item.price_per_meter) || 0,
+            cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+            sale_date: formData.sale_date,
+            payment_type: formData.payment_type,
+            customer_name: !formData.customer_id
+              ? formData.customer_name !== "Walk-in Customer"
+                ? formData.customer_name
+                : ""
+              : "",
+            fabric_name: item.fabric_name,
+            notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
+            sale_group_id: saleGroupId,
+            invoice_url,
+            discount_amount: idx === 0 ? discountAmount : 0,
+          };
+        });
 
         let saleRows;
         const { data: data1, error: error1 } = await supabase
@@ -406,6 +410,7 @@ export default function SaleForm({
         }
 
         if (saleRows && saleRows.length > 0) {
+          // Payment logic without splitting by discount
           if (formData.payment_type === "cash") {
             const paymentInserts = saleRows.map((row) => ({
               sale_id: row.id,
@@ -418,11 +423,12 @@ export default function SaleForm({
               .insert(paymentInserts);
             if (payErr) throw payErr;
           } else if (initialPayment > 0) {
-            let remaining = initialPayment;
+            let remaining = Math.min(initialPayment, netTotal);
             const paymentInserts = [];
             for (const row of saleRows) {
-              const itemTotal = row.meters * row.price_per_meter;
-              const pay = Math.min(remaining, itemTotal);
+              if (remaining <= 0) break;
+              const rowTotal = row.meters * row.price_per_meter;
+              const pay = Math.min(remaining, rowTotal);
               if (pay > 0) {
                 paymentInserts.push({
                   sale_id: row.id,
@@ -432,7 +438,6 @@ export default function SaleForm({
                 });
                 remaining -= pay;
               }
-              if (remaining <= 0) break;
             }
             if (paymentInserts.length > 0) {
               const { error: payErr } = await supabase
@@ -468,7 +473,6 @@ export default function SaleForm({
   function loadSaleForEdit(sale) {
     const isWalkin = !sale.customer_id;
     setCustomerTab(isWalkin ? "walkin" : "existing");
-    // Strip auto-generated Fabric:/Name: prefixes from notes to get real user notes
     const cleanNotes = (sale.notes || "")
       .replace(/Fabric:\s*[^(|\n]+/i, "")
       .replace(/\(Name:\s*[^)]+\)/g, "")
@@ -493,12 +497,17 @@ export default function SaleForm({
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
       initial_payment: "",
+      discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
     setEditingId(sale.id);
   }
 
   if (!open) return null;
+
+  const netTotal = calculateNetTotal();
+  const subtotal = parseFloat(calculateSubtotal());
+  const discountValue = parseFloat(formData.discount_amount) || 0;
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
@@ -768,7 +777,6 @@ export default function SaleForm({
                               fabric_id: "",
                               fabric_name: e.target.value,
                             });
-                            // Clear fabric_name error on change
                             if (formErrors.fabric_name) {
                               const { fabric_name, ...rest } = formErrors;
                               setFormErrors(rest);
@@ -1035,6 +1043,41 @@ export default function SaleForm({
             )}
           </div>
 
+          {/* Discount Section (Flat Amount) */}
+          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Discount (Applied on Total)
+            </span>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Discount Amount (₹)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.discount_amount}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "" || parseFloat(val) >= 0) {
+                    setFormData({ ...formData, discount_amount: val });
+                  }
+                }}
+                className="input bg-white"
+                placeholder="e.g. 500 for ₹500 off"
+                onWheel={(e) => e.target.blur()}
+              />
+              {discountValue > 0 && (
+                <div className="mt-2 flex justify-between text-xs text-primary-600">
+                  <span>Discount Applied:</span>
+                  <span className="font-semibold">
+                    -{formatCurrency(discountValue)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Date & Invoice */}
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -1062,12 +1105,12 @@ export default function SaleForm({
             />
           </div>
 
-          {parseFloat(calculateTotal()) > 0 && (
+          {subtotal > 0 && (
             <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Total Amount:</span>
+                <span className="text-gray-600">Subtotal:</span>
                 <span className="font-semibold">
-                  {formatCurrency(calculateTotal())}
+                  {formatCurrency(subtotal)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
@@ -1076,6 +1119,20 @@ export default function SaleForm({
                   {formatCurrency(calculateMargin())}
                 </span>
               </div>
+              {discountValue > 0 && (
+                <>
+                  <div className="flex justify-between text-sm border-t border-gray-200 pt-1 mt-1">
+                    <span className="text-primary-600">Discount:</span>
+                    <span className="font-semibold text-primary-600">
+                      -{formatCurrency(discountValue)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold border-t border-gray-300 pt-1 mt-1">
+                    <span>Net Total:</span>
+                    <span>{formatCurrency(netTotal)}</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
           <div className="flex gap-3 pt-2">

@@ -346,18 +346,24 @@ export default function Customers() {
                 </div>
               )}
             </div>
-            {customer.current_balance > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className="text-sm text-warning-600 font-semibold">
-                  Due: ₹{Number(customer.current_balance).toLocaleString("en-IN")}
-                </p>
-              </div>
-            )}
             {customer.notes && (
               <p className="text-gray-500 italic text-xs mt-2">
                 {customer.notes}
               </p>
             )}
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p
+                className={`text-sm font-semibold ${
+                  customer.current_balance > 0
+                    ? "text-warning-600"
+                    : "text-accent-600"
+                }`}
+              >
+                {customer.current_balance > 0
+                  ? `Due: ₹${Number(customer.current_balance).toLocaleString("en-IN")}`
+                  : "Cleared ✓"}
+              </p>
+            </div>
           </div>
         ))}
       </div>

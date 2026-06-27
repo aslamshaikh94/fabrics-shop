@@ -60,6 +60,10 @@ export const validateSale = (formData) => {
   ) {
     errors.initial_payment = "Initial payment must be 0 or greater";
   }
+  // Validate discount amount
+  if (formData.discount_amount && parseFloat(formData.discount_amount) < 0) {
+    errors.discount_amount = "Discount amount must be 0 or greater";
+  }
   return errors;
 };
 

@@ -78,7 +78,8 @@ export default function Sales() {
         supabase
           .from("sales")
           .select("*, customer:customers(*)")
-          .order("sale_date", { ascending: false }),
+          .order("sale_date", { ascending: false })
+          .order("created_at", { ascending: false }),
         supabase.from("customers").select("*").order("name"),
         supabase.from("fabrics").select("*").order("name"),
       ]);
@@ -100,7 +101,8 @@ export default function Sales() {
       const { data, error } = await supabase
         .from("sales")
         .select("*, customer:customers(*)")
-        .order("sale_date", { ascending: false });
+        .order("sale_date", { ascending: false })
+        .order("created_at", { ascending: false });
       if (error) throw error;
       setSales(data || []);
       return data || [];
@@ -259,6 +261,8 @@ export default function Sales() {
           margin: 0,
           remaining_amount: 0,
           paid_amount: 0,
+          discount_amount: 0,
+          createdAt: sale.created_at || sale.sale_date,
           firstSaleId: sale.id,
         };
       acc[key].items.push(sale);
@@ -266,11 +270,21 @@ export default function Sales() {
       acc[key].margin += sale.margin;
       acc[key].remaining_amount += sale.remaining_amount;
       acc[key].paid_amount += sale.paid_amount;
+      // Get discount from first item only (group-level discount)
+      if (acc[key].items.length === 1) {
+        acc[key].discount_amount = sale.discount_amount || 0;
+      }
+      // Keep the latest created_at for the group
+      if (sale.created_at > acc[key].createdAt) {
+        acc[key].createdAt = sale.created_at;
+      }
       return acc;
     }, {});
-    return Object.values(groups).sort(
-      (a, b) => new Date(b.sale_date) - new Date(a.sale_date),
-    );
+    return Object.values(groups).sort((a, b) => {
+      const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
+      if (dateDiff !== 0) return dateDiff;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
   }, [filteredSales]);
 
   const handleSaleUpdated = useCallback(async () => {
@@ -291,6 +305,7 @@ export default function Sales() {
         margin: items.reduce((s, i) => s + i.margin, 0),
         remaining_amount: items.reduce((s, i) => s + i.remaining_amount, 0),
         paid_amount: items.reduce((s, i) => s + i.paid_amount, 0),
+        discount_amount: items[0]?.discount_amount || 0,
       };
     });
   }, []);
@@ -374,6 +389,7 @@ export default function Sales() {
                   meters: s.meters,
                   price_per_meter: s.price_per_meter,
                   total: s.total_amount,
+                  discount: s.discount_amount || 0,
                   paid: s.paid_amount,
                   remaining: s.remaining_amount,
                   type: s.payment_type,
@@ -574,6 +590,7 @@ export default function Sales() {
                   "Total",
                   "Paid",
                   ...(showMargin ? ["Margin"] : []),
+                  "Disc.",
                   "Remaining",
                   "Type",
                   "Actions",
@@ -643,6 +660,15 @@ export default function Sales() {
                       </span>
                     </td>
                   )}
+                  <td className="px-4 py-3 text-right text-sm">
+                    {group.discount_amount > 0 ? (
+                      <span className="font-medium text-primary-600">
+                        -₹{group.discount_amount.toLocaleString("en-IN")}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span
                       className={

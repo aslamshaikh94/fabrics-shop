@@ -29,6 +29,7 @@ export default function QuickSale() {
   });
   const [customerTab, setCustomerTab] = useState("walkin");
   const [paymentType, setPaymentType] = useState("cash");
+  const [discountAmount, setDiscountAmount] = useState("");
   const [done, setDone] = useState(false);
   const [lastSale, setLastSale] = useState(null);
 
@@ -79,6 +80,7 @@ export default function QuickSale() {
     setCustomer({ customer_id: "", customer_name: "Walk-in Customer" });
     setCustomerTab("walkin");
     setPaymentType("cash");
+    setDiscountAmount("");
     setSearch("");
     setDone(false);
   }
@@ -98,6 +100,7 @@ export default function QuickSale() {
     try {
       const m = parseFloat(meters);
       const p = parseFloat(price);
+      const disc = parseFloat(discountAmount) || 0;
       const walkInName =
         !customer.customer_id && customer.customer_name !== "Walk-in Customer"
           ? customer.customer_name
@@ -117,16 +120,18 @@ export default function QuickSale() {
             status: paymentType === "cash" ? "completed" : "partial",
             fabric_name: selectedFabric.name,
             notes: `Fabric: ${selectedFabric.name}`,
+            discount_amount: disc,
           },
         ])
         .select()
         .single();
       if (error) throw error;
 
+      const netTotal = Math.max(m * p - disc, 0);
       setLastSale({
         fabric: selectedFabric.name,
         meters: m,
-        total: m * p,
+        total: netTotal,
         paymentType,
         customerName: customer.customer_id
           ? customers.find((c) => c.id === customer.customer_id)?.name
@@ -314,12 +319,48 @@ export default function QuickSale() {
                 </div>
               </div>
               {total > 0 && (
-                <div className="mt-3 bg-accent-50 rounded-xl p-3 flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Total Amount</span>
-                  <span className="text-xl font-bold text-accent-600">
-                    ₹{total.toLocaleString("en-IN")}
-                  </span>
-                </div>
+                <>
+                  <div className="mt-3 bg-accent-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Total Amount</span>
+                    <span className="text-xl font-bold text-accent-600">
+                      ₹{total.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Discount Amount (₹)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={discountAmount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "" || parseFloat(val) >= 0) {
+                          setDiscountAmount(val);
+                        }
+                      }}
+                      className="input"
+                      placeholder="e.g. 500"
+                      onWheel={(e) => e.target.blur()}
+                    />
+                    {discountAmount && parseFloat(discountAmount) > 0 && (
+                      <div className="mt-1 flex justify-between text-xs">
+                        <span className="text-primary-600">
+                          After Discount:
+                        </span>
+                        <span className="font-semibold text-primary-600">
+                          ₹
+                          {Math.max(
+                            total - parseFloat(discountAmount),
+                            0,
+                          ).toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}

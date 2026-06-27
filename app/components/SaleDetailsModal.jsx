@@ -52,6 +52,7 @@ const EMPTY_GROUP_FIELDS = {
   sale_date: "",
   payment_type: "cash",
   initial_payment: "",
+  discount_amount: "",
   invoice_file: null,
 };
 
@@ -129,7 +130,17 @@ export default function SaleDetailsModal({
         } = supabase.storage.from("sales-invoices").getPublicUrl(path);
         invoice_url = publicUrl;
       }
-      for (const saleId of saleIds) {
+      const discountAmount = parseFloat(editGroupFields.discount_amount) || 0;
+      // Apply discount to first item only
+      for (let idx = 0; idx < saleIds.length; idx++) {
+        const saleId = saleIds[idx];
+        const item = group.items.find((i) => i.id === saleId);
+        if (!item) continue;
+        const m = parseFloat(item.meters) || 0;
+        const ppm = parseFloat(item.price_per_meter) || 0;
+        const cpm = parseFloat(item.cost_price_per_meter) || 0;
+        const preDiscountTotal = Math.round(m * ppm * 100) / 100;
+        const itemDiscount = idx === 0 ? discountAmount : 0;
         await supabase
           .from("sales")
           .update({
@@ -142,6 +153,18 @@ export default function SaleDetailsModal({
             sale_date: editGroupFields.sale_date,
             payment_type: editGroupFields.payment_type,
             invoice_url,
+            discount_amount: itemDiscount,
+            total_amount: preDiscountTotal,
+            margin: Math.max(
+              Math.round((m * (ppm - cpm) - itemDiscount) * 100) / 100,
+              0,
+            ),
+            remaining_amount: Math.max(
+              preDiscountTotal -
+                itemDiscount -
+                (parseFloat(item.paid_amount) || 0),
+              0,
+            ),
           })
           .eq("id", saleId);
       }
@@ -150,10 +173,13 @@ export default function SaleDetailsModal({
       }
       if (editGroupFields.payment_type === "cash") {
         for (const item of group.items) {
+          const m = parseFloat(item.meters) || 0;
+          const ppm = parseFloat(item.price_per_meter) || 0;
+          const itemTotal = Math.round(m * ppm * 100) / 100;
           await supabase.from("sale_payments").insert([
             {
               sale_id: item.id,
-              amount: item.meters * item.price_per_meter,
+              amount: itemTotal,
               payment_date: editGroupFields.sale_date,
               payment_method: "cash",
             },
@@ -163,7 +189,10 @@ export default function SaleDetailsModal({
         let remaining = parseFloat(editGroupFields.initial_payment) || 0;
         for (const item of group.items) {
           if (remaining <= 0) break;
-          const pay = Math.min(remaining, item.meters * item.price_per_meter);
+          const m = parseFloat(item.meters) || 0;
+          const ppm = parseFloat(item.price_per_meter) || 0;
+          const itemTotal = Math.round(m * ppm * 100) / 100;
+          const pay = Math.min(remaining, itemTotal);
           if (pay > 0) {
             await supabase.from("sale_payments").insert([
               {
@@ -242,6 +271,7 @@ export default function SaleDetailsModal({
         group.payment_type === "partial"
           ? group.paid_amount?.toString() || ""
           : "",
+      discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
     setShowEditSaleInfo(true);
@@ -373,155 +403,166 @@ export default function SaleDetailsModal({
             </button>
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {group.items.map((item, idx) => (
-              <div
-                key={item.id}
-                className="border border-gray-200 rounded-lg p-4 hover:shadow-sm bg-white"
-              >
-                {editingItemId === item.id ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-gray-500 uppercase font-bold">
-                        Editing Item {idx + 1}
-                      </p>
-                      <div className="flex gap-1">
+            {group.items.map((item, idx) => {
+              const discAmt = item.discount_amount || 0;
+              return (
+                <div
+                  key={item.id}
+                  className="border border-gray-200 rounded-lg p-4 hover:shadow-sm bg-white"
+                >
+                  {editingItemId === item.id ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs text-gray-500 uppercase font-bold">
+                          Editing Item {idx + 1}
+                        </p>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setEditingItemId(null)}
+                            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-600"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEditItemSave(item.id)}
+                            disabled={savingEditItem}
+                            className="p-1.5 hover:bg-green-50 rounded-lg text-gray-400 hover:text-green-600"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <FabricSelect
+                        value={editItemForm}
+                        onChange={setEditItemForm}
+                        fabrics={fabrics}
+                        required
+                      />
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Meters *
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editItemForm.meters}
+                            onChange={(e) =>
+                              setEditItemForm({
+                                ...editItemForm,
+                                meters: e.target.value,
+                              })
+                            }
+                            className="input"
+                            required
+                            onWheel={(e) => e.target.blur()}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Price ₹/m *
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editItemForm.price_per_meter}
+                            onChange={(e) =>
+                              setEditItemForm({
+                                ...editItemForm,
+                                price_per_meter: e.target.value,
+                              })
+                            }
+                            className="input"
+                            required
+                            onWheel={(e) => e.target.blur()}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Cost ₹/m
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editItemForm.cost_price_per_meter}
+                            onChange={(e) =>
+                              setEditItemForm({
+                                ...editItemForm,
+                                cost_price_per_meter: e.target.value,
+                              })
+                            }
+                            className="input"
+                            onWheel={(e) => e.target.blur()}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
+                            Item {idx + 1}
+                          </p>
+                          <p className="font-semibold text-gray-900">
+                            {item.fabric_name || "N/A"}
+                          </p>
+                        </div>
                         <button
-                          onClick={() => setEditingItemId(null)}
-                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-600"
+                          onClick={() => {
+                            const n = item.fabric_name || "";
+                            setEditItemForm({
+                              fabric_id: item.fabric_id || "",
+                              fabric_name: n,
+                              meters: item.meters.toString(),
+                              price_per_meter: item.price_per_meter.toString(),
+                              cost_price_per_meter:
+                                item.cost_price_per_meter.toString(),
+                            });
+                            setEditingItemId(item.id);
+                          }}
+                          className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
                         >
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleEditItemSave(item.id)}
-                          disabled={savingEditItem}
-                          className="p-1.5 hover:bg-green-50 rounded-lg text-gray-400 hover:text-green-600"
-                        >
-                          <Save className="w-4 h-4" />
+                          <Pencil className="w-4 h-4" />
                         </button>
                       </div>
-                    </div>
-                    <FabricSelect
-                      value={editItemForm}
-                      onChange={setEditItemForm}
-                      fabrics={fabrics}
-                      required
-                    />
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Meters *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editItemForm.meters}
-                          onChange={(e) =>
-                            setEditItemForm({
-                              ...editItemForm,
-                              meters: e.target.value,
-                            })
-                          }
-                          className="input"
-                          required
-                          onWheel={(e) => e.target.blur()}
-                        />
+                      <div className="grid grid-cols-5 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Meters</p>
+                          <p className="font-semibold">{item.meters}m</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Price/M</p>
+                          <p className="font-semibold">
+                            ₹{item.price_per_meter.toLocaleString("en-IN")}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Total</p>
+                          <p className="font-semibold">
+                            ₹{item.total_amount.toLocaleString("en-IN")}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Disc.</p>
+                          <p className="font-semibold text-primary-600">
+                            {discAmt > 0
+                              ? `-₹${discAmt.toLocaleString("en-IN")}`
+                              : "—"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Margin</p>
+                          <p className="font-semibold text-accent-600">
+                            ₹{item.margin.toLocaleString("en-IN")}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Price ₹/m *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editItemForm.price_per_meter}
-                          onChange={(e) =>
-                            setEditItemForm({
-                              ...editItemForm,
-                              price_per_meter: e.target.value,
-                            })
-                          }
-                          className="input"
-                          required
-                          onWheel={(e) => e.target.blur()}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Cost ₹/m
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editItemForm.cost_price_per_meter}
-                          onChange={(e) =>
-                            setEditItemForm({
-                              ...editItemForm,
-                              cost_price_per_meter: e.target.value,
-                            })
-                          }
-                          className="input"
-                          onWheel={(e) => e.target.blur()}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
-                          Item {idx + 1}
-                        </p>
-                        <p className="font-semibold text-gray-900">
-                          {item.fabric_name || "N/A"}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const n = item.fabric_name || "";
-                          setEditItemForm({
-                            fabric_id: item.fabric_id || "",
-                            fabric_name: n,
-                            meters: item.meters.toString(),
-                            price_per_meter: item.price_per_meter.toString(),
-                            cost_price_per_meter:
-                              item.cost_price_per_meter.toString(),
-                          });
-                          setEditingItemId(item.id);
-                        }}
-                        className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3 text-sm">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Meters</p>
-                        <p className="font-semibold">{item.meters}m</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Price/M</p>
-                        <p className="font-semibold">
-                          ₹{item.price_per_meter.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Total</p>
-                        <p className="font-semibold">
-                          ₹{item.total_amount.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Margin</p>
-                        <p className="font-semibold text-accent-600">
-                          ₹{item.margin.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -698,6 +739,31 @@ export default function SaleDetailsModal({
                   )}
               </div>
             )}
+          </div>
+          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Discount (Applied on Total)
+            </span>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Discount Amount (₹)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={editGroupFields.discount_amount}
+                onChange={(e) =>
+                  setEditGroupFields({
+                    ...editGroupFields,
+                    discount_amount: e.target.value,
+                  })
+                }
+                className="input bg-white"
+                placeholder="e.g. 500"
+                onWheel={(e) => e.target.blur()}
+              />
+            </div>
           </div>
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">

@@ -58,42 +58,42 @@ function fmtShort(n) {
 const partnerColors = [
   {
     border: "border-l-blue-500",
-    bg: "bg-blue-50/50",
+    bg: "bg-blue-50",
     iconBg: "bg-blue-100",
     iconColor: "text-blue-600",
     chart: "#3b82f6",
   },
   {
     border: "border-l-purple-500",
-    bg: "bg-purple-50/50",
+    bg: "bg-purple-50",
     iconBg: "bg-purple-100",
     iconColor: "text-purple-600",
     chart: "#8b5cf6",
   },
   {
     border: "border-l-emerald-500",
-    bg: "bg-emerald-50/50",
+    bg: "bg-emerald-50",
     iconBg: "bg-emerald-100",
     iconColor: "text-emerald-600",
     chart: "#10b981",
   },
   {
     border: "border-l-orange-500",
-    bg: "bg-orange-50/50",
+    bg: "bg-orange-50",
     iconBg: "bg-orange-100",
     iconColor: "text-orange-600",
     chart: "#f59e0b",
   },
   {
     border: "border-l-rose-500",
-    bg: "bg-rose-50/50",
+    bg: "bg-rose-50",
     iconBg: "bg-rose-100",
     iconColor: "text-rose-600",
     chart: "#f43f5e",
   },
   {
     border: "border-l-cyan-500",
-    bg: "bg-cyan-50/50",
+    bg: "bg-cyan-50",
     iconBg: "bg-cyan-100",
     iconColor: "text-cyan-600",
     chart: "#06b6d4",
@@ -132,6 +132,7 @@ export default function PartnersPage() {
   const [confirmRemovePartner, setConfirmRemovePartner] = useState(null);
   const [filterMonth, setFilterMonth] = useState("all");
   const [filterPartner, setFilterPartner] = useState("all");
+  const [editingPartner, setEditingPartner] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -143,6 +144,8 @@ export default function PartnersPage() {
   }, []);
   useEffect(() => {
     fetchData();
+    setFilterMonth("all");
+    setFilterPartner("all");
   }, [year, partners]);
 
   async function fetchYears() {
@@ -166,7 +169,7 @@ export default function PartnersPage() {
         .from("partners")
         .select("*")
         .eq("is_active", true)
-        .order("created_at", { ascending: true });
+        .order("created_at");
       setPartners(data || []);
     } catch (err) {
       console.error("Error fetching partners:", err);
@@ -177,22 +180,19 @@ export default function PartnersPage() {
   async function fetchData() {
     setLoading(true);
     try {
-      const startDate = `${year}-01-01`;
-      const endDate = `${year}-12-31`;
-
       const [salesRes, withdrawalsRes, fabricsRes] = await Promise.all([
         supabase
           .from("sales")
           .select(
             "sale_date, total_amount, margin, meters, price_per_meter, cost_price_per_meter, fabric_id, fabric_name",
           )
-          .gte("sale_date", startDate)
-          .lte("sale_date", endDate),
+          .gte("sale_date", `${year}-01-01`)
+          .lte("sale_date", `${year}-12-31`),
         supabase
           .from("withdrawals")
           .select("id, withdrawal_date, amount, withdrawn_by, reason")
-          .gte("withdrawal_date", startDate)
-          .lte("withdrawal_date", endDate)
+          .gte("withdrawal_date", `${year}-01-01`)
+          .lte("withdrawal_date", `${year}-12-31`)
           .order("withdrawal_date", { ascending: false }),
         supabase.from("fabrics").select("id, name, purchase_price_per_meter"),
       ]);
@@ -231,7 +231,6 @@ export default function PartnersPage() {
       });
 
       setMonthlyData(monthly);
-
       const totalSales = monthly.reduce((s, m) => s + m.sales, 0);
       const grossProfit = monthly.reduce((s, m) => s + m.grossProfit, 0);
       setSummary({ totalSales, grossProfit });
@@ -252,7 +251,6 @@ export default function PartnersPage() {
           (s, w) => s + (w.amount || 0),
           0,
         );
-
         pSum[partner.id] = {
           share: shareAmount,
           withdrawn: withdrawnAmount,
@@ -283,7 +281,7 @@ export default function PartnersPage() {
     setSaving(true);
     try {
       if (editingWithdrawalId) {
-        const { error } = await supabase
+        await supabase
           .from("withdrawals")
           .update({
             amount: parseFloat(withdrawalAmount),
@@ -292,27 +290,24 @@ export default function PartnersPage() {
             reason: withdrawalReason,
           })
           .eq("id", editingWithdrawalId);
-        if (error) throw error;
         toast("Withdrawal updated");
       } else {
-        const { error } = await supabase.from("withdrawals").insert([
-          {
-            amount: parseFloat(withdrawalAmount),
-            withdrawal_date: withdrawalDate,
-            withdrawn_by: partner.name,
-            reason: withdrawalReason,
-          },
-        ]);
-        if (error) throw error;
-        toast(
-          `Withdrawal of ₹${parseFloat(withdrawalAmount).toLocaleString("en-IN")} recorded`,
-        );
+        await supabase
+          .from("withdrawals")
+          .insert([
+            {
+              amount: parseFloat(withdrawalAmount),
+              withdrawal_date: withdrawalDate,
+              withdrawn_by: partner.name,
+              reason: withdrawalReason,
+            },
+          ]);
+        toast(`Withdrawal of ${fmt(parseFloat(withdrawalAmount))} recorded`);
       }
       setShowWithdrawalForm(false);
       resetWithdrawalForm();
       fetchData();
     } catch (err) {
-      console.error("Error saving withdrawal:", err);
       toast("Failed to save withdrawal", "error");
     } finally {
       setSaving(false);
@@ -331,24 +326,13 @@ export default function PartnersPage() {
     setShowWithdrawalForm(true);
   }
 
-  function openAddWithdrawal() {
-    setEditingWithdrawalId(null);
-    resetWithdrawalForm();
-    setShowWithdrawalForm(true);
-  }
-
   async function handleDeleteWithdrawal(id) {
     try {
-      const { error } = await supabase
-        .from("withdrawals")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      await supabase.from("withdrawals").delete().eq("id", id);
       toast("Withdrawal deleted");
       setConfirmDeleteWithdrawal(null);
       fetchData();
     } catch (err) {
-      console.error("Error deleting withdrawal:", err);
       toast("Failed to delete withdrawal", "error");
       setConfirmDeleteWithdrawal(null);
     }
@@ -357,37 +341,61 @@ export default function PartnersPage() {
   async function handleAddPartner(e) {
     e.preventDefault();
     if (!newPartnerName.trim()) return;
+    const shareVal = parseFloat(newPartnerShare) || 50;
+    const totalShare = partners.reduce((s, p) => s + (p.share_percentage || 0), 0);
+    if (totalShare + shareVal > 100) {
+      toast(`Total share would exceed 100% (current: ${totalShare}%)`, "error");
+      return;
+    }
     try {
-      const { error } = await supabase.from("partners").insert([
-        {
-          name: newPartnerName.trim(),
-          share_percentage: parseFloat(newPartnerShare) || 50,
-        },
-      ]);
-      if (error) throw error;
+      await supabase
+        .from("partners")
+        .insert([{ name: newPartnerName.trim(), share_percentage: shareVal }]);
       toast(`Partner "${newPartnerName.trim()}" added`);
       setShowAddPartnerForm(false);
       setNewPartnerName("");
       setNewPartnerShare("50");
       await fetchPartners();
     } catch (err) {
-      console.error("Error adding partner:", err);
       toast("Failed to add partner", "error");
+    }
+  }
+
+  async function handleUpdatePartner(e) {
+    e.preventDefault();
+    if (!newPartnerName.trim() || !editingPartner) return;
+    const shareVal = parseFloat(newPartnerShare) || 50;
+    const totalShare = partners.filter(p => p.id !== editingPartner).reduce((s, p) => s + (p.share_percentage || 0), 0);
+    if (totalShare + shareVal > 100) {
+      toast(`Total share would exceed 100% (current: ${totalShare}%)`, "error");
+      return;
+    }
+    try {
+      await supabase
+        .from("partners")
+        .update({ name: newPartnerName.trim(), share_percentage: shareVal })
+        .eq("id", editingPartner);
+      toast("Partner updated");
+      setShowAddPartnerForm(false);
+      setNewPartnerName("");
+      setNewPartnerShare("50");
+      setEditingPartner(null);
+      await fetchPartners();
+    } catch (err) {
+      toast("Failed to update partner", "error");
     }
   }
 
   async function handleRemovePartner(partnerId) {
     try {
-      const { error } = await supabase
+      await supabase
         .from("partners")
         .update({ is_active: false })
         .eq("id", partnerId);
-      if (error) throw error;
       toast("Partner removed");
       setConfirmRemovePartner(null);
       await fetchPartners();
     } catch (err) {
-      console.error("Error removing partner:", err);
       toast("Failed to remove partner", "error");
       setConfirmRemovePartner(null);
     }
@@ -399,13 +407,6 @@ export default function PartnersPage() {
     setWithdrawalAmount("");
     setWithdrawalReason("");
     setWithdrawalDate(new Date().toISOString().split("T")[0]);
-  }
-
-  async function handleRecalculate() {
-    setLoading(true);
-    toast("Recalculating...");
-    await fetchData();
-    toast("Recalculated successfully");
   }
 
   const currentMonthData = monthlyData[new Date().getMonth()] || {
@@ -450,43 +451,41 @@ export default function PartnersPage() {
             Partner Profit Sharing
           </h1>
           <p className="text-gray-500 mt-0.5 text-sm">
-            {partners
-              .map((p) => `${p.name} (${p.share_percentage}%)`)
-              .join(" — ")}{" "}
+            {partners.length > 0
+              ? partners
+                  .map((p) => `${p.name} (${p.share_percentage}%)`)
+                  .join(", ")
+              : "No partners added yet"}{" "}
             — {year}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={openAddWithdrawal}
+            onClick={() => {
+              setEditingPartner(null);
+              setNewPartnerName("");
+              setNewPartnerShare("50");
+              setShowAddPartnerForm(true);
+            }}
+            className="btn btn-secondary"
+          >
+            <UserPlus className="w-4 h-4 mr-1.5" /> Partner
+          </button>
+          <button
+            onClick={() => {
+              setEditingWithdrawalId(null);
+              resetWithdrawalForm();
+              setShowWithdrawalForm(true);
+            }}
             className="btn btn-primary"
             disabled={!partners.length}
           >
-            <Plus className="w-4 h-4 mr-1.5" />
-            Record Withdrawal
+            <Plus className="w-4 h-4 mr-1.5" /> Withdrawal
           </button>
-          <button
-            onClick={() => setShowAddPartnerForm(true)}
-            className="btn btn-secondary"
-          >
-            <UserPlus className="w-4 h-4 mr-1.5" />
-            Add Partner
-          </button>
-          {partners.length > 0 && (
-            <button
-              onClick={() =>
-                setConfirmRemovePartner(partners[partners.length - 1].id)
-              }
-              className="btn btn-secondary text-red-600 hover:bg-red-50"
-              title="Remove last partner"
-            >
-              <UserMinus className="w-4 h-4" />
-            </button>
-          )}
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
-            className="input w-28"
+            className="input w-24"
           >
             {availableYears.map((y) => (
               <option key={y} value={y}>
@@ -495,7 +494,11 @@ export default function PartnersPage() {
             ))}
           </select>
           <button
-            onClick={handleRecalculate}
+            onClick={() => {
+              setLoading(true);
+              fetchData();
+              toast("Recalculated successfully");
+            }}
             className="btn btn-secondary"
             title="Recalculate"
           >
@@ -504,420 +507,397 @@ export default function PartnersPage() {
         </div>
       </div>
 
-      {/* Current Month Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <div className="card-hover p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-gray-500">
-              This Month Sales
-            </p>
-            <div className="bg-blue-500 p-1.5 rounded-lg">
-              <ShoppingBag className="w-3.5 h-3.5 text-white" />
-            </div>
-          </div>
-          <p className="text-xl font-bold text-blue-700">
-            {fmt(currentMonthData.sales)}
+      {partners.length === 0 ? (
+        <div className="text-center py-20">
+          <Users className="w-14 h-14 text-gray-200 mx-auto mb-4" />
+          <p className="text-gray-400 font-medium text-lg">
+            No partners added yet
+          </p>
+          <p className="text-gray-300 text-sm mt-1">
+            Click "Add Partner" to get started
           </p>
         </div>
-        <div className="card-hover p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-gray-500">Gross Profit</p>
-            <div className="bg-green-500 p-1.5 rounded-lg">
-              <TrendingUp className="w-3.5 h-3.5 text-white" />
+      ) : (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="card p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-gray-500">
+                  This Month Sales
+                </p>
+                <div className="bg-blue-500 p-1.5 rounded-lg">
+                  <ShoppingBag className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+              <p className="text-lg font-bold text-blue-700">
+                {fmtShort(currentMonthData.sales)}
+              </p>
+            </div>
+            <div className="card p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-gray-500">
+                  This Month Profit
+                </p>
+                <div className="bg-green-500 p-1.5 rounded-lg">
+                  <TrendingUp className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+              <p className="text-lg font-bold text-green-700">
+                {fmtShort(currentMonthData.grossProfit)}
+              </p>
+            </div>
+            <div className="card p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-gray-500">
+                  {year} Total Sales
+                </p>
+                <div className="bg-indigo-500 p-1.5 rounded-lg">
+                  <DollarSign className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+              <p className="text-lg font-bold text-indigo-700">
+                {fmtShort(summary.totalSales)}
+              </p>
+            </div>
+            <div className="card p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-gray-500">
+                  {year} Gross Profit
+                </p>
+                <div className="bg-emerald-500 p-1.5 rounded-lg">
+                  <TrendingUp className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+              <p className="text-lg font-bold text-emerald-700">
+                {fmtShort(summary.grossProfit)}
+              </p>
             </div>
           </div>
-          <p className="text-xl font-bold text-green-700">
-            {fmt(currentMonthData.grossProfit)}
-          </p>
-        </div>
-      </div>
 
-      {/* Year Summary */}
-      <div className="card p-5">
-        <h2 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          {year} Year Summary
-        </h2>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-xs text-gray-500">Total Sales</p>
-            <p className="text-lg font-bold text-gray-900">
-              {fmt(summary.totalSales)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">Gross Profit</p>
-            <p className="text-lg font-bold text-green-700">
-              {fmt(summary.grossProfit)}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Dynamic Partner Cards */}
-      <div
-        className={`grid grid-cols-1 ${partners.length > 1 ? "md:grid-cols-2" : ""} gap-4`}
-      >
-        {partners.map((partner, idx) => {
-          const ps = partnerSummaries[partner.id];
-          const pd = partnerDetails[partner.id];
-          const color = partnerColors[idx % partnerColors.length];
-          if (!ps) return null;
-          return (
-            <div
-              key={partner.id}
-              className={`card p-5 border-l-4 ${color.border}`}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className={`${color.iconBg} p-2 rounded-lg`}>
-                    <Users className={`w-5 h-5 ${color.iconColor}`} />
+          {/* Partner Cards */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {partners.map((partner, idx) => {
+              const ps = partnerSummaries[partner.id];
+              const pd = partnerDetails[partner.id];
+              const color = partnerColors[idx % partnerColors.length];
+              if (!ps) return null;
+              return (
+                <div
+                  key={partner.id}
+                  className={`card p-5 border-l-4 ${color.border} ${ps.balance < 0 ? 'ring-2 ring-red-200' : ''}`}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`${color.iconBg} p-2.5 rounded-xl`}>
+                        <Users className={`w-5 h-5 ${color.iconColor}`} />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">
+                          {partner.name}
+                        </h3>
+                        <p className="text-xs text-gray-400">
+                          {pd?.sharePct || partner.share_percentage}% share
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingPartner(partner.id);
+                          setNewPartnerName(partner.name);
+                          setNewPartnerShare(partner.share_percentage.toString());
+                          setShowAddPartnerForm(true);
+                        }}
+                        className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
+                        title={`Edit ${partner.name}`}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setConfirmRemovePartner(partner.id)}
+                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500"
+                        title={`Remove ${partner.name}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">
-                      {partner.name}
-                    </h3>
-                    <p className="text-xs text-gray-400">
-                      {partner.share_percentage}% Share
-                    </p>
+                  {ps.balance < 0 && (
+                    <div className="mb-3 px-2.5 py-1.5 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-xs text-red-700 font-medium">⚠️ Over-withdrawn</p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <p className="text-xs text-gray-400 mb-0.5">
+                        Profit Share
+                      </p>
+                      <p className="font-semibold text-green-700 text-sm">
+                        {fmt(ps.share)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 mb-0.5">Withdrawn</p>
+                      <p className="font-semibold text-red-600 text-sm">
+                        {fmt(ps.withdrawn)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 mb-0.5">
+                        Balance Due
+                      </p>
+                      <p
+                        className={`font-bold text-sm ${ps.balance >= 0 ? "text-green-700" : "text-red-600"}`}
+                      >
+                        {fmt(ps.balance)}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => setConfirmRemovePartner(partner.id)}
-                  className="p-1.5 hover:bg-red-50 rounded-lg text-gray-300 hover:text-red-500 transition-colors"
-                  title={`Remove ${partner.name}`}
+              );
+            })}
+          </div>
+
+          {/* Monthly Chart */}
+          <div className="card p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-900">Monthly Trend</h2>
+              <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+                {[
+                  ["profit", "Profit"],
+                  ["shares", "Partner Shares"],
+                ].map(([v, l]) => (
+                  <button
+                    key={v}
+                    onClick={() => setChartView(v)}
+                    className={`px-2.5 py-1.5 rounded-md font-medium transition-all ${chartView === v ? "bg-white shadow text-gray-900" : "text-gray-500"}`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {chartView === "profit" ? (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={monthlyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                    width={42}
+                  />
+                  <Tooltip formatter={(v) => fmt(v)} />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                  <Bar
+                    dataKey="grossProfit"
+                    name="Gross Profit"
+                    fill="#16a34a"
+                    radius={[3, 3, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart
+                  data={monthlyData.map((m) => {
+                    const row = { month: m.month };
+                    const totalShare = partners.reduce((s, p) => s + (p.share_percentage || 0), 0) || 100;
+                    partners.forEach((p) => {
+                      const sharePct = (p.share_percentage || 0) / totalShare;
+                      row[p.name] = m.grossProfit * sharePct;
+                    });
+                    return row;
+                  })}
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                    width={42}
+                  />
+                  <Tooltip formatter={(v) => fmt(v)} />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                  {partners.map((p, idx) => (
+                    <Bar
+                      key={p.id}
+                      dataKey={p.name}
+                      name={p.name}
+                      fill={partnerColors[idx % partnerColors.length].chart}
+                      radius={[3, 3, 0, 0]}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Withdrawal Records */}
+          <div className="card overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-gray-400" /> Withdrawal Records
+              </h2>
+              <div className="flex items-center gap-2">
+                <select
+                  value={filterPartner}
+                  onChange={(e) => setFilterPartner(e.target.value)}
+                  className="input text-xs py-1.5 w-28"
+                >
+                  <option value="all">All Partners</option>
+                  {partners.map((p) => (
+                    <option key={p.id} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={filterMonth}
+                  onChange={(e) => setFilterMonth(e.target.value)}
+                  className="input text-xs py-1.5 w-24"
+                >
+                  <option value="all">All Months</option>
+                  {MONTHS.map((m, i) => (
+                    <option key={i} value={String(i + 1).padStart(2, "0")}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    setEditingWithdrawalId(null);
+                    resetWithdrawalForm();
+                    setShowWithdrawalForm(true);
+                  }}
+                  className="btn btn-primary text-xs py-1.5"
+                  disabled={!partners.length}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add
                 </button>
               </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">
-                    Profit Share ({pd?.sharePct || partner.share_percentage}%)
-                  </span>
-                  <span className="font-semibold text-green-700">
-                    {fmt(ps.share)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Withdrawn</span>
-                  <span className="font-semibold text-red-600">
-                    - {fmt(ps.withdrawn)}
-                  </span>
-                </div>
-                <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
-                  <span className="font-medium text-gray-700">Balance Due</span>
-                  <span
-                    className={`font-bold text-base ${ps.balance >= 0 ? "text-green-700" : "text-red-600"}`}
-                  >
-                    {fmt(ps.balance)}
-                  </span>
-                </div>
-              </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Chart */}
-      <div className="card p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-900">Monthly Trend</h2>
-          <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
-            {[
-              ["profit", "Profit"],
-              ["shares", "Partner Shares"],
-            ].map(([v, l]) => (
-              <button
-                key={v}
-                onClick={() => setChartView(v)}
-                className={`px-2.5 py-1.5 rounded-md font-medium transition-all ${chartView === v ? "bg-white shadow text-gray-900" : "text-gray-500"}`}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-        </div>
-        {chartView === "profit" && (
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-              <YAxis
-                tick={{ fontSize: 10 }}
-                tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                width={42}
-              />
-              <Tooltip formatter={(v) => fmt(v)} />
-              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-              <Bar
-                dataKey="grossProfit"
-                name="Gross Profit"
-                fill="#16a34a"
-                radius={[3, 3, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-        {chartView === "shares" && partners.length > 0 && (
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart
-              data={monthlyData.map((m) => {
-                const row = { month: m.month };
-                partners.forEach((p) => {
-                  const ps = partnerSummaries[p.id];
-                  row[p.name] = ps ? ps.share / 12 : 0;
-                });
-                return row;
-              })}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-              <YAxis
-                tick={{ fontSize: 10 }}
-                tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                width={42}
-              />
-              <Tooltip formatter={(v) => fmt(v)} />
-              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-              {partners.map((p, idx) => (
-                <Bar
-                  key={p.id}
-                  dataKey={p.name}
-                  name={p.name}
-                  fill={partnerColors[idx % partnerColors.length].chart}
-                  radius={[3, 3, 0, 0]}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      {/* Withdrawal Records Table */}
-      <div className="card overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-            <Wallet className="w-4 h-4 text-gray-400" />
-            Withdrawal Records
-          </h2>
-          <div className="flex items-center gap-2">
-            <select
-              value={filterPartner}
-              onChange={(e) => setFilterPartner(e.target.value)}
-              className="input text-xs py-1.5 w-32"
-            >
-              <option value="all">All Partners</option>
-              {partners.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={filterMonth}
-              onChange={(e) => setFilterMonth(e.target.value)}
-              className="input text-xs py-1.5 w-28"
-            >
-              <option value="all">All Months</option>
-              {MONTHS.map((m, i) => (
-                <option key={i} value={String(i + 1).padStart(2, "0")}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={openAddWithdrawal}
-              className="btn btn-primary text-xs py-1.5"
-              disabled={!partners.length}
-            >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              Add
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full" style={{ minWidth: "600px" }}>
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Partner
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Reason
-                </th>
-                <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredWithdrawals.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-4 py-8 text-center text-sm text-gray-400"
-                  >
-                    No withdrawals recorded
-                  </td>
-                </tr>
-              ) : (
-                filteredWithdrawals.map((w) => (
-                  <tr
-                    key={w.id}
-                    className="hover:bg-gray-50 transition-colors group"
-                  >
-                    <td className="px-4 py-2.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1 text-sm text-gray-600">
-                        <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                        {new Date(w.withdrawal_date).toLocaleDateString(
-                          "en-IN",
-                          { day: "numeric", month: "short", year: "numeric" },
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className="text-sm font-medium text-gray-900">
-                        {getPartnerName(w)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <p className="text-sm text-gray-500 max-w-[200px] truncate">
-                        {w.reason || "—"}
-                      </p>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className="text-sm font-semibold text-red-600">
-                        ₹{w.amount.toLocaleString("en-IN")}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => openEditWithdrawal(w)}
-                          className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600 transition-colors"
-                          title="Edit"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteWithdrawal(w.id)}
-                          className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full" style={{ minWidth: "500px" }}>
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Partner
+                    </th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Reason
+                    </th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Amount
+                    </th>
+                    <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Partner Details - Withdrawals per partner */}
-      <div
-        className={`grid grid-cols-1 ${partners.length > 1 ? "md:grid-cols-2" : ""} gap-4`}
-      >
-        {partners.map((partner, idx) => {
-          const pd = partnerDetails[partner.id];
-          const color = partnerColors[idx % partnerColors.length];
-          if (!pd) return null;
-          return (
-            <div key={partner.id} className="card overflow-hidden">
-              <div className={`px-4 py-3 border-b border-gray-100 ${color.bg}`}>
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <Users className={`w-4 h-4 ${color.iconColor}`} />
-                  {partner.name} — Withdrawals
-                </h3>
-              </div>
-              <div className="p-4 space-y-4">
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    Withdrawals
-                  </h4>
-                  {pd.withdrawals.length === 0 ? (
-                    <p className="text-sm text-gray-400">No withdrawals</p>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredWithdrawals.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-4 py-12 text-center"
+                      >
+                        <Wallet className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+                        <p className="text-sm text-gray-400">
+                          {allWithdrawals.length === 0 ? "No withdrawals recorded" : "No withdrawals match filters"}
+                        </p>
+                      </td>
+                    </tr>
                   ) : (
-                    <div className="space-y-1.5">
-                      {pd.withdrawals.slice(0, 5).map((w) => (
-                        <div
-                          key={w.id}
-                          className="flex items-center justify-between text-sm group"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <span className="text-gray-600 truncate block">
-                              {w.reason || "Withdrawal"}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                              {new Date(w.withdrawal_date).toLocaleDateString(
-                                "en-IN",
-                                { day: "numeric", month: "short" },
-                              )}
-                            </span>
+                    filteredWithdrawals.map((w) => (
+                      <tr
+                        key={w.id}
+                        className="hover:bg-gray-50 transition-colors"
+                      >
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                            {new Date(w.withdrawal_date).toLocaleDateString(
+                              "en-IN",
+                              {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              },
+                            )}
                           </div>
-                          <div className="flex items-center gap-1 shrink-0 ml-2">
-                            <span className="text-red-600 font-medium">
-                              ₹{w.amount.toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              className="w-2 h-2 rounded-full"
+                              style={{
+                                backgroundColor: partners.find(p => 
+                                  (w.withdrawn_by || "").toLowerCase().includes(p.name.toLowerCase())
+                                )?.id ? partnerColors[partners.findIndex(p => 
+                                  (w.withdrawn_by || "").toLowerCase().includes(p.name.toLowerCase())
+                                ) % partnerColors.length]?.chart : '#999'
+                              }}
+                            />
+                            <span className="text-sm font-medium text-gray-900">
+                              {getPartnerName(w)}
                             </span>
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <p className="text-sm text-gray-500 max-w-[200px] truncate" title={w.reason || "-"}>
+                            {w.reason || "—"}
+                          </p>
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <span className="text-sm font-semibold text-red-600">
+                            {fmt(w.amount)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => openEditWithdrawal(w)}
-                              className="p-1 hover:bg-blue-50 rounded text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all"
+                              className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
                               title="Edit"
                             >
-                              <Pencil className="w-3 h-3" />
+                              <Pencil className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => setConfirmDeleteWithdrawal(w.id)}
-                              className="p-1 hover:bg-red-50 rounded text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                              className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
                               title="Delete"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                        </div>
-                      ))}
-                      {pd.withdrawals.length > 5 && (
-                        <p className="text-xs text-gray-400">
-                          +{pd.withdrawals.length - 5} more
-                        </p>
-                      )}
-                    </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
-                  {pd.withdrawals.length > 0 && (
-                    <p className="text-sm font-medium text-gray-700 mt-2">
-                      Total: ₹
-                      {pd.withdrawals
-                        .reduce((s, w) => s + (w.amount || 0), 0)
-                        .toLocaleString("en-IN")}
-                    </p>
-                  )}
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </>
+      )}
 
-      {/* Add Partner Modal */}
+      {/* Add/Edit Partner Modal */}
       <Modal
         open={showAddPartnerForm}
         onClose={() => {
           setShowAddPartnerForm(false);
           setNewPartnerName("");
           setNewPartnerShare("50");
+          setEditingPartner(null);
         }}
-        title="Add Partner"
+        title={editingPartner ? "Edit Partner" : "Add Partner"}
       >
-        <form onSubmit={handleAddPartner} className="space-y-4">
+        <form onSubmit={editingPartner ? handleUpdatePartner : handleAddPartner} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Partner Name *
@@ -948,7 +928,7 @@ export default function PartnersPage() {
             <p className="text-xs text-gray-400 mt-1">
               {partners.length === 0
                 ? "First partner — share will be 100% of profits."
-                : `Total share % should add up to 100.`}
+                : `Current total: ${partners.filter(p => p.id !== editingPartner).reduce((s, p) => s + (p.share_percentage || 0), 0)}% — should not exceed 100%`}
             </p>
           </div>
           <div className="flex gap-3 pt-2">
@@ -958,19 +938,20 @@ export default function PartnersPage() {
                 setShowAddPartnerForm(false);
                 setNewPartnerName("");
                 setNewPartnerShare("50");
+                setEditingPartner(null);
               }}
               className="btn btn-secondary flex-1"
             >
               Cancel
             </button>
             <button type="submit" className="btn btn-primary flex-1">
-              Add Partner
+              {editingPartner ? "Update Partner" : "Add Partner"}
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Add/Edit Withdrawal Modal */}
+      {/* Withdrawal Modal */}
       <Modal
         open={showWithdrawalForm}
         onClose={() => {
@@ -1006,7 +987,7 @@ export default function PartnersPage() {
               type="date"
               value={withdrawalDate}
               onChange={(e) => setWithdrawalDate(e.target.value)}
-              className="input w-full"
+              className="input"
             />
           </div>
           <div>
@@ -1020,7 +1001,7 @@ export default function PartnersPage() {
               value={withdrawalAmount}
               onChange={(e) => setWithdrawalAmount(e.target.value)}
               className="input"
-              placeholder="₹0.00"
+              placeholder="0.00"
               onWheel={(e) => e.target.blur()}
             />
           </div>
@@ -1052,35 +1033,11 @@ export default function PartnersPage() {
               disabled={saving}
               className="btn btn-primary flex-1"
             >
-              {saving ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : editingWithdrawalId ? (
-                "Update Withdrawal"
-              ) : (
-                "Record Withdrawal"
-              )}
+              {saving
+                ? "Saving..."
+                : editingWithdrawalId
+                  ? "Update Withdrawal"
+                  : "Record Withdrawal"}
             </button>
           </div>
         </form>
@@ -1095,20 +1052,10 @@ export default function PartnersPage() {
       )}
       {confirmRemovePartner && (
         <ConfirmModal
-          message="This will remove the partner from profit sharing."
+          message={`Remove ${partners.find(p => p.id === confirmRemovePartner)?.name || 'this partner'} from profit sharing? Their withdrawal history will be preserved.`}
           onConfirm={() => handleRemovePartner(confirmRemovePartner)}
           onCancel={() => setConfirmRemovePartner(null)}
         />
-      )}
-
-      {partners.length === 0 && (
-        <div className="text-center py-16">
-          <Users className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">No partners added yet</p>
-          <p className="text-gray-300 text-sm mt-1">
-            Click "Add Partner" to get started
-          </p>
-        </div>
       )}
     </div>
   );

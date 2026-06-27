@@ -59,6 +59,9 @@ const COLUMN_MAP = {
   total: "total",
   paid: "paid",
   remaining: "remaining",
+  discount: "discount_amount",
+  discount_amount: "discount_amount",
+  disc: "discount_amount",
 };
 
 const REQUIRED_COLS = ["fabric_name", "meters", "price_per_meter"];
@@ -255,8 +258,7 @@ export default function SalesImport({
             ? firstRow.customer_name
             : null;
 
-        // Build sale payloads
-        const salePayloads = [];
+        // Process each row: upsert (update existing or insert new)
         for (const row of group.rows) {
           const fabricName = row.fabric_name || "";
           const fabric = fabricMap[fabricName.toLowerCase()];
@@ -272,89 +274,97 @@ export default function SalesImport({
           let notesStr = `Fabric: ${fabricName}`;
           if (walkInName) notesStr += ` (Name: ${walkInName})`;
 
-          salePayloads.push({
-            customer_id: customerId,
-            fabric_id: fabric?.id || null,
-            meters,
-            price_per_meter: pricePerMeter,
-            cost_price_per_meter: costPrice,
-            sale_date: saleDate,
-            payment_type: paymentType,
-            sale_group_id: groupId,
-            customer_name: walkInName || "",
-            fabric_name: fabricName,
-            notes: notesStr,
-          });
-        }
-
-        // Insert sales
-        const { data: insertedSales, error: saleError } = await supabase
-          .from("sales")
-          .insert(salePayloads)
-          .select();
-
-        if (saleError) {
-          console.error("Error inserting sales:", saleError);
-          console.error(
-            "Problematic payload sample:",
-            JSON.stringify(salePayloads[0] || {}),
-          );
-          toast(
-            `Import error: ${saleError.message || JSON.stringify(saleError)}`,
-            "error",
-          );
-          failed += group.rows.length;
-          continue;
-        }
-
-        // Create payments based on the paid amount from CSV
-        // This ensures paid_amount, remaining_amount, and status are correctly set via DB trigger
-        const paymentInserts = [];
-        for (let i = 0; i < (insertedSales || []).length; i++) {
-          const s = insertedSales[i];
-          const row = group.rows[i];
+          const discountAmt = parseFloat(row.discount_amount) || 0;
           const paidAmount = parseFloat(row.paid) || 0;
-          if (paidAmount > 0) {
-            paymentInserts.push({
-              sale_id: s.id,
-              amount: paidAmount,
-              payment_date: saleDate,
-              payment_method: "cash",
+          const totalAmount = parseFloat(row.total) || 0;
+
+          // Try to find existing sale by customer + fabric_name + sale_date + meters
+          const { data: existingSales } = await supabase
+            .from("sales")
+            .select("id")
+            .match({
+              customer_id: customerId,
+              fabric_name: fabricName,
+              sale_date: saleDate,
+              meters: meters,
             });
-          }
-        }
-        if (paymentInserts.length > 0) {
-          const { error: paymentError } = await supabase
-            .from("sale_payments")
-            .insert(paymentInserts);
-          if (paymentError) {
-            console.error("Error inserting payments:", paymentError);
-          }
-        }
 
-        // Update payment_type for each sale based on actual paid vs total
-        for (let i = 0; i < (insertedSales || []).length; i++) {
-          const s = insertedSales[i];
-          const row = group.rows[i];
-          const paidAmount = parseFloat(row.paid) || 0;
-          const totalAmount = parseFloat(row.total) || s.total_amount || 0;
-          let actualPaymentType = row.payment_type?.toLowerCase() || "cash";
-          if (paidAmount >= totalAmount && totalAmount > 0) {
-            actualPaymentType = "cash";
-          } else if (paidAmount > 0 && paidAmount < totalAmount) {
-            actualPaymentType = "partial";
-          } else if (paidAmount <= 0) {
-            actualPaymentType = "credit";
-          }
-          if (actualPaymentType !== s.payment_type) {
-            await supabase
+          if (existingSales && existingSales.length > 0) {
+            // Update existing record
+            const existingId = existingSales[0].id;
+            const { error: updateErr } = await supabase
               .from("sales")
-              .update({ payment_type: actualPaymentType })
-              .eq("id", s.id);
+              .update({
+                cost_price_per_meter: costPrice,
+                price_per_meter: pricePerMeter,
+                payment_type: paymentType,
+                customer_name: walkInName || "",
+                notes: notesStr,
+                discount_amount: discountAmt,
+              })
+              .eq("id", existingId);
+            if (updateErr) throw updateErr;
+
+            // Delete old payments and recreate
+            await supabase
+              .from("sale_payments")
+              .delete()
+              .eq("sale_id", existingId);
+            if (paidAmount > 0) {
+              await supabase.from("sale_payments").insert([
+                {
+                  sale_id: existingId,
+                  amount: paidAmount,
+                  payment_date: saleDate,
+                  payment_method: "cash",
+                },
+              ]);
+            }
+
+            imported++;
+          } else {
+            // Insert new record
+            const { data: insertedSales, error: saleError } = await supabase
+              .from("sales")
+              .insert([
+                {
+                  customer_id: customerId,
+                  fabric_id: fabric?.id || null,
+                  meters,
+                  price_per_meter: pricePerMeter,
+                  cost_price_per_meter: costPrice,
+                  sale_date: saleDate,
+                  payment_type: paymentType,
+                  sale_group_id: groupId,
+                  customer_name: walkInName || "",
+                  fabric_name: fabricName,
+                  notes: notesStr,
+                  discount_amount: discountAmt,
+                },
+              ])
+              .select();
+
+            if (saleError) {
+              console.error("Error inserting sale:", saleError);
+              failed++;
+              continue;
+            }
+
+            // Create payments
+            if (paidAmount > 0 && insertedSales?.[0]) {
+              await supabase.from("sale_payments").insert([
+                {
+                  sale_id: insertedSales[0].id,
+                  amount: paidAmount,
+                  payment_date: saleDate,
+                  payment_method: "cash",
+                },
+              ]);
+            }
+
+            imported++;
           }
         }
-
-        imported += group.rows.length;
       }
 
       if (failed > 0) {
