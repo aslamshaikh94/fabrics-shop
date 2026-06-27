@@ -78,7 +78,8 @@ export default function Sales() {
         supabase
           .from("sales")
           .select("*, customer:customers(*)")
-          .order("sale_date", { ascending: false }),
+          .order("sale_date", { ascending: false })
+          .order("created_at", { ascending: false }),
         supabase.from("customers").select("*").order("name"),
         supabase.from("fabrics").select("*").order("name"),
       ]);
@@ -100,7 +101,8 @@ export default function Sales() {
       const { data, error } = await supabase
         .from("sales")
         .select("*, customer:customers(*)")
-        .order("sale_date", { ascending: false });
+        .order("sale_date", { ascending: false })
+        .order("created_at", { ascending: false });
       if (error) throw error;
       setSales(data || []);
       return data || [];
@@ -259,18 +261,38 @@ export default function Sales() {
           margin: 0,
           remaining_amount: 0,
           paid_amount: 0,
+          discount_amount: 0,
+          createdAt: sale.created_at || sale.sale_date,
           firstSaleId: sale.id,
         };
       acc[key].items.push(sale);
       acc[key].total_amount += sale.total_amount;
       acc[key].margin += sale.margin;
-      acc[key].remaining_amount += sale.remaining_amount;
       acc[key].paid_amount += sale.paid_amount;
+      // Sum all discounts from items
+      acc[key].discount_amount += sale.discount_amount || 0;
+      // Keep the latest created_at for the group
+      if (sale.created_at > acc[key].createdAt) {
+        acc[key].createdAt = sale.created_at;
+      }
       return acc;
     }, {});
-    return Object.values(groups).sort(
-      (a, b) => new Date(b.sale_date) - new Date(a.sale_date),
-    );
+    
+    // Calculate group-level remaining and adjust margin for discount
+    Object.values(groups).forEach(group => {
+      group.remaining_amount = Math.max(
+        group.total_amount - group.discount_amount - group.paid_amount,
+        0
+      );
+      // Adjust margin by subtracting discount
+      group.margin = Math.max(group.margin - group.discount_amount, 0);
+    });
+    
+    return Object.values(groups).sort((a, b) => {
+      const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
+      if (dateDiff !== 0) return dateDiff;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
   }, [filteredSales]);
 
   const handleSaleUpdated = useCallback(async () => {
@@ -280,6 +302,13 @@ export default function Sales() {
       const key = prev.id;
       const items = fresh.filter((s) => (s.sale_group_id || s.id) === key);
       if (items.length === 0) return prev;
+      
+      const totalAmount = items.reduce((s, i) => s + i.total_amount, 0);
+      const rawMargin = items.reduce((s, i) => s + i.margin, 0);
+      const paidAmount = items.reduce((s, i) => s + i.paid_amount, 0);
+      const discountAmount = items.reduce((s, i) => s + (i.discount_amount || 0), 0);
+      const adjustedMargin = Math.max(rawMargin - discountAmount, 0);
+      
       return {
         ...prev,
         customer_id: items[0].customer_id,
@@ -287,10 +316,11 @@ export default function Sales() {
         sale_date: items[0].sale_date,
         payment_type: items[0].payment_type,
         items,
-        total_amount: items.reduce((s, i) => s + i.total_amount, 0),
-        margin: items.reduce((s, i) => s + i.margin, 0),
-        remaining_amount: items.reduce((s, i) => s + i.remaining_amount, 0),
-        paid_amount: items.reduce((s, i) => s + i.paid_amount, 0),
+        total_amount: totalAmount,
+        margin: adjustedMargin,
+        paid_amount: paidAmount,
+        discount_amount: discountAmount,
+        remaining_amount: Math.max(totalAmount - discountAmount - paidAmount, 0),
       };
     });
   }, []);
@@ -374,6 +404,7 @@ export default function Sales() {
                   meters: s.meters,
                   price_per_meter: s.price_per_meter,
                   total: s.total_amount,
+                  discount: s.discount_amount || 0,
                   paid: s.paid_amount,
                   remaining: s.remaining_amount,
                   type: s.payment_type,
@@ -574,6 +605,7 @@ export default function Sales() {
                   "Total",
                   "Paid",
                   ...(showMargin ? ["Margin"] : []),
+                  "Disc.",
                   "Remaining",
                   "Type",
                   "Actions",
@@ -643,6 +675,15 @@ export default function Sales() {
                       </span>
                     </td>
                   )}
+                  <td className="px-4 py-3 text-right text-sm">
+                    {group.discount_amount > 0 ? (
+                      <span className="font-medium text-primary-600">
+                        -₹{group.discount_amount.toLocaleString("en-IN")}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span
                       className={

@@ -23,6 +23,7 @@ import {
   Handshake,
   Eye,
   EyeOff,
+  Database,
 } from "lucide-react";
 import { getSupabase } from "../lib/supabase";
 import { useAuth } from "./AuthGuard";
@@ -46,6 +47,7 @@ const ALL_NAV = [
   { id: "customers", label: "Customers", icon: Users },
   { id: "partners", label: "Partners", icon: Handshake, adminOnly: true },
   { id: "reports", label: "Reports", icon: BarChart2 },
+  { id: "backup", label: "Backup & Restore", icon: Database, adminOnly: true },
 ];
 
 const BOTTOM_NAV = [
@@ -113,6 +115,7 @@ export default function Shell({ children }) {
       ),
     },
     { label: "Insights", items: navItems.filter((n) => n.id === "reports") },
+    { label: "System", items: navItems.filter((n) => n.id === "backup") },
   ];
 
   return (
