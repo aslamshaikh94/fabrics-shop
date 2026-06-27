@@ -138,15 +138,18 @@ export default function SaleDetailsModal({
           ? editGroupFields.customer_name
           : null;
 
-      // Apply discount to first item only
+      // Apply discount ONLY to first item (stores group-level discount)
       for (let idx = 0; idx < saleIds.length; idx++) {
         const saleId = saleIds[idx];
-        const item = group.items.find((i) => i.id === saleId);
+        const item = group.items[idx];
         if (!item) continue;
+        
         const m = parseFloat(item.meters) || 0;
         const ppm = parseFloat(item.price_per_meter) || 0;
         const cpm = parseFloat(item.cost_price_per_meter) || 0;
         const preDiscountTotal = Math.round(m * ppm * 100) / 100;
+        
+        // Store discount only in first item, don't subtract from item remaining
         const itemDiscount = idx === 0 ? discountAmount : 0;
 
         let updatedNotes = item?.notes || "";
@@ -182,13 +185,11 @@ export default function SaleDetailsModal({
             discount_amount: itemDiscount,
             total_amount: preDiscountTotal,
             margin: Math.max(
-              Math.round((m * (ppm - cpm) - itemDiscount) * 100) / 100,
+              Math.round((m * (ppm - cpm)) * 100) / 100,
               0,
             ),
             remaining_amount: Math.max(
-              preDiscountTotal -
-                itemDiscount -
-                (parseFloat(item.paid_amount) || 0),
+              preDiscountTotal - (parseFloat(item.paid_amount) || 0),
               0,
             ),
             notes: updatedNotes,

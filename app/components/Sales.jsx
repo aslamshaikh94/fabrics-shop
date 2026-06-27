@@ -268,18 +268,26 @@ export default function Sales() {
       acc[key].items.push(sale);
       acc[key].total_amount += sale.total_amount;
       acc[key].margin += sale.margin;
-      acc[key].remaining_amount += sale.remaining_amount;
       acc[key].paid_amount += sale.paid_amount;
-      // Get discount from first item only (group-level discount)
-      if (acc[key].items.length === 1) {
-        acc[key].discount_amount = sale.discount_amount || 0;
-      }
+      // Sum all discounts from items
+      acc[key].discount_amount += sale.discount_amount || 0;
       // Keep the latest created_at for the group
       if (sale.created_at > acc[key].createdAt) {
         acc[key].createdAt = sale.created_at;
       }
       return acc;
     }, {});
+    
+    // Calculate group-level remaining and adjust margin for discount
+    Object.values(groups).forEach(group => {
+      group.remaining_amount = Math.max(
+        group.total_amount - group.discount_amount - group.paid_amount,
+        0
+      );
+      // Adjust margin by subtracting discount
+      group.margin = Math.max(group.margin - group.discount_amount, 0);
+    });
+    
     return Object.values(groups).sort((a, b) => {
       const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
       if (dateDiff !== 0) return dateDiff;
@@ -294,6 +302,13 @@ export default function Sales() {
       const key = prev.id;
       const items = fresh.filter((s) => (s.sale_group_id || s.id) === key);
       if (items.length === 0) return prev;
+      
+      const totalAmount = items.reduce((s, i) => s + i.total_amount, 0);
+      const rawMargin = items.reduce((s, i) => s + i.margin, 0);
+      const paidAmount = items.reduce((s, i) => s + i.paid_amount, 0);
+      const discountAmount = items.reduce((s, i) => s + (i.discount_amount || 0), 0);
+      const adjustedMargin = Math.max(rawMargin - discountAmount, 0);
+      
       return {
         ...prev,
         customer_id: items[0].customer_id,
@@ -301,11 +316,11 @@ export default function Sales() {
         sale_date: items[0].sale_date,
         payment_type: items[0].payment_type,
         items,
-        total_amount: items.reduce((s, i) => s + i.total_amount, 0),
-        margin: items.reduce((s, i) => s + i.margin, 0),
-        remaining_amount: items.reduce((s, i) => s + i.remaining_amount, 0),
-        paid_amount: items.reduce((s, i) => s + i.paid_amount, 0),
-        discount_amount: items[0]?.discount_amount || 0,
+        total_amount: totalAmount,
+        margin: adjustedMargin,
+        paid_amount: paidAmount,
+        discount_amount: discountAmount,
+        remaining_amount: Math.max(totalAmount - discountAmount - paidAmount, 0),
       };
     });
   }, []);
