@@ -77,19 +77,30 @@ export default function Sales() {
       const [salesRes, customersRes, fabricsRes] = await Promise.all([
         supabase
           .from("sales")
-          .select("*, customer:customers(*)")
+          .select("*")
           .order("sale_date", { ascending: false })
           .order("created_at", { ascending: false }),
         supabase.from("customers").select("*").order("name"),
         supabase.from("fabrics").select("*").order("name"),
       ]);
       if (salesRes.error) throw salesRes.error;
-      setSales(salesRes.data || []);
+      if (customersRes.error) throw customersRes.error;
+      if (fabricsRes.error) throw fabricsRes.error;
+      const customerMap = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c])
+      );
+      const salesWithCustomer = (salesRes.data || []).map((s) => ({
+        ...s,
+        customer: customerMap[s.customer_id] || null,
+      }));
+      setSales(salesWithCustomer);
       setCustomers(customersRes.data || []);
       setFabrics(fabricsRes.data || []);
-      return salesRes.data || [];
+      return salesWithCustomer;
     } catch (error) {
-      console.error("Error fetching sales data:", error);
+      const message = error?.message || JSON.stringify(error) || "Unknown error";
+      console.error("Error fetching sales data:", message, error);
+      toast(`Failed to load sales data: ${message}`, "error");
       return [];
     } finally {
       setLoading(false);
@@ -100,14 +111,21 @@ export default function Sales() {
     try {
       const { data, error } = await supabase
         .from("sales")
-        .select("*, customer:customers(*)")
+        .select("*")
         .order("sale_date", { ascending: false })
         .order("created_at", { ascending: false });
       if (error) throw error;
-      setSales(data || []);
-      return data || [];
+      const customerMap = Object.fromEntries(
+        customers.map((c) => [c.id, c])
+      );
+      const salesWithCustomer = (data || []).map((s) => ({
+        ...s,
+        customer: customerMap[s.customer_id] || null,
+      }));
+      setSales(salesWithCustomer);
+      return salesWithCustomer;
     } catch (error) {
-      console.error("Error fetching sales:", error);
+      console.error("Error fetching sales:", error?.message || error);
       return [];
     }
   }
