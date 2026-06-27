@@ -131,6 +131,13 @@ export default function SaleDetailsModal({
         invoice_url = publicUrl;
       }
       const discountAmount = parseFloat(editGroupFields.discount_amount) || 0;
+      const walkinName =
+        !editGroupFields.customer_id &&
+        editGroupFields.customer_name &&
+        editGroupFields.customer_name !== "Walk-in Customer"
+          ? editGroupFields.customer_name
+          : null;
+
       // Apply discount to first item only
       for (let idx = 0; idx < saleIds.length; idx++) {
         const saleId = saleIds[idx];
@@ -141,6 +148,25 @@ export default function SaleDetailsModal({
         const cpm = parseFloat(item.cost_price_per_meter) || 0;
         const preDiscountTotal = Math.round(m * ppm * 100) / 100;
         const itemDiscount = idx === 0 ? discountAmount : 0;
+
+        let updatedNotes = item?.notes || "";
+        if (walkinName) {
+          // Replace or append walk-in name to notes
+          if (updatedNotes.match(/\(Name:[^)]+\)/)) {
+            updatedNotes = updatedNotes.replace(
+              /\(Name:[^)]+\)/,
+              `(Name: ${walkinName})`,
+            );
+          } else {
+            updatedNotes = updatedNotes
+              ? `${updatedNotes} (Name: ${walkinName})`
+              : `(Name: ${walkinName})`;
+          }
+        } else if (!editGroupFields.customer_id) {
+          // Remove walk-in name from notes if it was cleared
+          updatedNotes = updatedNotes.replace(/\s*\(Name:[^)]+\)/g, "");
+        }
+
         await supabase
           .from("sales")
           .update({
@@ -165,6 +191,7 @@ export default function SaleDetailsModal({
                 (parseFloat(item.paid_amount) || 0),
               0,
             ),
+            notes: updatedNotes,
           })
           .eq("id", saleId);
       }

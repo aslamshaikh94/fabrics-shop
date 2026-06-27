@@ -496,7 +496,10 @@ export default function SaleForm({
       ],
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
-      initial_payment: "",
+      initial_payment:
+        sale.payment_type === "partial"
+          ? sale.paid_amount?.toString() || ""
+          : "",
       discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
