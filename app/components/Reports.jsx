@@ -114,27 +114,38 @@ export default function Reports() {
 
   async function fetchAlerts() {
     try {
-      const [custRes, supRes, stockRes] = await Promise.all([
-        supabase
-          .from("sales")
-          .select("customer:customers(id, name, phone), remaining_amount")
-          .gt("remaining_amount", 0),
-        supabase
-          .from("purchases")
-          .select("supplier:suppliers(name), remaining_amount")
-          .gt("remaining_amount", 0),
-        supabase
-          .from("fabrics")
-          .select("name, available_meters")
-          .lt("available_meters", 10),
-      ]);
+      const [custRes, supRes, stockRes, customersRes, suppliersRes] =
+        await Promise.all([
+          supabase
+            .from("sales")
+            .select("customer_id, remaining_amount")
+            .gt("remaining_amount", 0),
+          supabase
+            .from("purchases")
+            .select("supplier_id, remaining_amount")
+            .gt("remaining_amount", 0),
+          supabase
+            .from("fabrics")
+            .select("name, available_meters")
+            .lt("available_meters", 10),
+          supabase.from("customers").select("id, name, phone"),
+          supabase.from("suppliers").select("id, name"),
+        ]);
+
+      const customerMap = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c]),
+      );
+      const supplierMap = Object.fromEntries(
+        (suppliersRes.data || []).map((s) => [s.id, s]),
+      );
 
       // Group customers
       const custMap = {};
       (custRes.data || []).forEach((s) => {
-        const id = s.customer?.id || "walk-in";
-        const name = s.customer?.name || "Walk-in";
-        const phone = s.customer?.phone || "";
+        const customer = customerMap[s.customer_id];
+        const id = s.customer_id || "walk-in";
+        const name = customer?.name || "Walk-in";
+        const phone = customer?.phone || "";
         if (!custMap[id]) custMap[id] = { name, phone, pending: 0 };
         custMap[id].pending += s.remaining_amount || 0;
       });
@@ -145,7 +156,8 @@ export default function Reports() {
       // Group suppliers
       const supMap = {};
       (supRes.data || []).forEach((p) => {
-        const name = p.supplier?.name || "Unknown";
+        const supplier = supplierMap[p.supplier_id];
+        const name = supplier?.name || "Unknown";
         if (!supMap[name]) supMap[name] = { name, pending: 0 };
         supMap[name].pending += p.remaining_amount || 0;
       });
@@ -171,36 +183,43 @@ export default function Reports() {
       const prevStart = `${year - 1}-01-01`;
       const prevEnd = `${year - 1}-12-31`;
 
-      const [salesRes, purchasesRes, expensesRes, prevSalesRes, prevExpRes] =
-        await Promise.all([
-          supabase
-            .from("sales")
-            .select(
-              "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer:customers(name)",
-            )
-            .gte("sale_date", startDate)
-            .lte("sale_date", endDate),
-          supabase
-            .from("purchases")
-            .select("purchase_date, total_amount")
-            .gte("purchase_date", startDate)
-            .lte("purchase_date", endDate),
-          supabase
-            .from("expenses")
-            .select("amount")
-            .gte("expense_date", startDate)
-            .lte("expense_date", endDate),
-          supabase
-            .from("sales")
-            .select("total_amount, margin")
-            .gte("sale_date", prevStart)
-            .lte("sale_date", prevEnd),
-          supabase
-            .from("expenses")
-            .select("amount")
-            .gte("expense_date", prevStart)
-            .lte("expense_date", prevEnd),
-        ]);
+      const [
+        salesRes,
+        purchasesRes,
+        expensesRes,
+        prevSalesRes,
+        prevExpRes,
+        customersRes,
+      ] = await Promise.all([
+        supabase
+          .from("sales")
+          .select(
+            "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer_id",
+          )
+          .gte("sale_date", startDate)
+          .lte("sale_date", endDate),
+        supabase
+          .from("purchases")
+          .select("purchase_date, total_amount")
+          .gte("purchase_date", startDate)
+          .lte("purchase_date", endDate),
+        supabase
+          .from("expenses")
+          .select("amount")
+          .gte("expense_date", startDate)
+          .lte("expense_date", endDate),
+        supabase
+          .from("sales")
+          .select("total_amount, margin")
+          .gte("sale_date", prevStart)
+          .lte("sale_date", prevEnd),
+        supabase
+          .from("expenses")
+          .select("amount")
+          .gte("expense_date", prevStart)
+          .lte("expense_date", prevEnd),
+        supabase.from("customers").select("id, name"),
+      ]);
 
       const sales = salesRes.data || [];
       const purchases = purchasesRes.data || [];
@@ -209,6 +228,11 @@ export default function Reports() {
         0,
       );
       const totalMargin = sales.reduce((s, r) => s + (r.margin || 0), 0);
+
+      // Build customer lookup map
+      const customerMap = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c]),
+      );
 
       // Previous year summary for YoY
       const prevSales = prevSalesRes.data || [];
@@ -259,7 +283,8 @@ export default function Reports() {
       // Top 10 customers by revenue & pending
       const custMap = {};
       sales.forEach((s) => {
-        const name = s.customer?.name || "Walk-in";
+        const customer = customerMap[s.customer_id];
+        const name = customer?.name || "Walk-in";
         if (!custMap[name]) custMap[name] = { name, revenue: 0, pending: 0 };
         custMap[name].revenue += s.total_amount || 0;
         custMap[name].pending += s.remaining_amount || 0;

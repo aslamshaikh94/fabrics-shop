@@ -64,11 +64,19 @@ export default function Fabrics() {
   async function fetchAll() {
     try {
       const [fabricsRes, suppliersRes] = await Promise.all([
-        supabase.from("fabrics").select("*, supplier:suppliers(*)").order("created_at", { ascending: false }),
+        supabase
+          .from("fabrics")
+          .select("*")
+          .order("created_at", { ascending: false }),
         supabase.from("suppliers").select("*").order("name"),
       ]);
       if (fabricsRes.error) throw fabricsRes.error;
+      if (suppliersRes.error) throw suppliersRes.error;
       setSuppliers(suppliersRes.data || []);
+
+      const supplierMap = Object.fromEntries(
+        (suppliersRes.data || []).map((c) => [c.id, c]),
+      );
 
       const purchaseIds = (fabricsRes.data || [])
         .filter((f) => f.purchase_id)
@@ -81,17 +89,20 @@ export default function Fabrics() {
           .select("id, purchase_number")
           .in("id", purchaseIds);
         if (purchases) {
-          purchaseMap = Object.fromEntries(purchases.map((p) => [p.id, p.purchase_number]));
+          purchaseMap = Object.fromEntries(
+            purchases.map((p) => [p.id, p.purchase_number]),
+          );
         }
       }
 
       setFabrics(
         (fabricsRes.data || []).map((f) => ({
           ...f,
+          supplier: supplierMap[f.supplier_id] || null,
           purchase: f.purchase_id
             ? { purchase_number: purchaseMap[f.purchase_id] || null }
             : null,
-        }))
+        })),
       );
     } catch (err) {
       console.error("Error fetching fabrics data:", err);
@@ -106,7 +117,10 @@ export default function Fabrics() {
 
   async function fetchSuppliers() {
     try {
-      const { data } = await supabase.from("suppliers").select("*").order("name");
+      const { data } = await supabase
+        .from("suppliers")
+        .select("*")
+        .order("name");
       setSuppliers(data || []);
     } catch (err) {
       console.error("Error fetching suppliers:", err);
@@ -126,12 +140,24 @@ export default function Fabrics() {
       return;
     }
     purchaseLookupTimer.current = setTimeout(async () => {
-      const { data } = await supabase
+      const { data: purchase } = await supabase
         .from("purchases")
-        .select("id, purchase_number, total_amount, supplier:suppliers(name)")
+        .select("id, purchase_number, total_amount, supplier_id")
         .eq("purchase_number", val.trim())
         .single();
-      setExistingPurchaseInfo(data || null);
+      if (purchase) {
+        const { data: supplier } = await supabase
+          .from("suppliers")
+          .select("name")
+          .eq("id", purchase.supplier_id)
+          .single();
+        setExistingPurchaseInfo({
+          ...purchase,
+          supplier: supplier || null,
+        });
+      } else {
+        setExistingPurchaseInfo(null);
+      }
     }, 400);
   }, []);
 
@@ -646,7 +672,10 @@ export default function Fabrics() {
 
       {scanningRowIdx !== null && (
         <BarcodeScanner
-          onScan={(code) => { updateRow(scanningRowIdx, "barcode", code); setScanningRowIdx(null); }}
+          onScan={(code) => {
+            updateRow(scanningRowIdx, "barcode", code);
+            setScanningRowIdx(null);
+          }}
           onClose={() => setScanningRowIdx(null)}
         />
       )}

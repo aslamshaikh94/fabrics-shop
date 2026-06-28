@@ -136,12 +136,20 @@ export default function Purchases() {
       const [purchasesRes, suppliersRes] = await Promise.all([
         supabase
           .from("purchases")
-          .select("*, supplier:suppliers(*)")
+          .select("*")
           .order("purchase_date", { ascending: false }),
         supabase.from("suppliers").select("*").order("name"),
       ]);
       if (purchasesRes.error) throw purchasesRes.error;
-      setPurchases(purchasesRes.data || []);
+      if (suppliersRes.error) throw suppliersRes.error;
+      const supplierMap = Object.fromEntries(
+        (suppliersRes.data || []).map((c) => [c.id, c]),
+      );
+      const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
+        ...s,
+        supplier: supplierMap[s.supplier_id] || null,
+      }));
+      setPurchases(purchasesWithSupplier);
       setSuppliers(suppliersRes.data || []);
     } catch (error) {
       console.error("Error fetching purchases data:", error);
@@ -152,12 +160,24 @@ export default function Purchases() {
 
   async function fetchPurchases() {
     try {
-      const { data, error } = await supabase
-        .from("purchases")
-        .select("*, supplier:suppliers(*)")
-        .order("purchase_date", { ascending: false });
-      if (error) throw error;
-      setPurchases(data || []);
+      const [purchasesRes, suppliersRes] = await Promise.all([
+        supabase
+          .from("purchases")
+          .select("*")
+          .order("purchase_date", { ascending: false }),
+        supabase.from("suppliers").select("*").order("name"),
+      ]);
+      if (purchasesRes.error) throw purchasesRes.error;
+      if (suppliersRes.error) throw suppliersRes.error;
+      const supplierMap = Object.fromEntries(
+        (suppliersRes.data || []).map((c) => [c.id, c]),
+      );
+      const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
+        ...s,
+        supplier: supplierMap[s.supplier_id] || null,
+      }));
+      setPurchases(purchasesWithSupplier);
+      setSuppliers(suppliersRes.data || []);
     } catch (error) {
       console.error("Error fetching purchases:", error);
     }
