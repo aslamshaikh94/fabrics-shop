@@ -88,10 +88,11 @@ export default function Dashboard() {
         supabase
           .from("sales")
           .select(
-            "id, sale_date, total_amount, notes, fabric_name, customer_id, customer_name",
+            "id, sale_date, total_amount, notes, fabric_name, customer_id, customer_name, sale_group_id, created_at",
           )
           .order("sale_date", { ascending: false })
-          .limit(6),
+          .order("created_at", { ascending: false })
+          .limit(20),
         supabase.from("customers").select("id, name"),
       ]);
 
@@ -153,15 +154,44 @@ export default function Dashboard() {
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
       });
-      setRecentSales(
-        (recentRes.data || []).map((sale) => ({
-          ...sale,
-          customer_name:
-            customerNameMap[sale.customer_id] ||
-            sale.customer_name ||
-            "Walk-in",
-        })),
-      );
+      // Group recent sales by sale_group_id (same logic as Sales listing page)
+      const rawSales = recentRes.data || [];
+      const groups = {};
+      rawSales.forEach((sale) => {
+        const key = sale.sale_group_id || sale.id;
+        if (!groups[key]) {
+          groups[key] = {
+            id: key,
+            sale_date: sale.sale_date,
+            customer_id: sale.customer_id,
+            customer_name:
+              customerNameMap[sale.customer_id] ||
+              sale.customer_name ||
+              "Walk-in",
+            firstFabricName: sale.fabric_name,
+            total_amount: 0,
+            createdAt: sale.created_at || sale.sale_date,
+            items: [],
+          };
+        }
+        groups[key].items.push(sale);
+        groups[key].total_amount += sale.total_amount || 0;
+        // Use latest fabric name from items
+        if (sale.fabric_name) groups[key].firstFabricName = sale.fabric_name;
+        if (sale.created_at > groups[key].createdAt) {
+          groups[key].createdAt = sale.created_at;
+        }
+      });
+
+      const groupedRecentSales = Object.values(groups)
+        .sort((a, b) => {
+          const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
+          if (dateDiff !== 0) return dateDiff;
+          return new Date(b.createdAt) - new Date(a.createdAt);
+        })
+        .slice(0, 6);
+
+      setRecentSales(groupedRecentSales);
     } catch (err) {
       console.error("Error fetching stats:", err);
       setError("Failed to load dashboard data. Please refresh.");
@@ -432,25 +462,27 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {recentSales.map((sale) => (
+            {recentSales.map((group) => (
               <div
-                key={sale.id}
+                key={group.id}
                 className="px-4 py-3 flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
                   <p className="font-medium text-gray-900 text-sm truncate">
-                    {sale.customer_name}
+                    {group.customer_name}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
-                    {sale.fabric_name || "—"}
+                    {group.firstFabricName || "—"}
+                    {group.items.length > 1 &&
+                      ` (+${group.items.length - 1} more)`}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-semibold text-gray-900 text-sm">
-                    {fmtAmt(sale.total_amount, showAmount)}
+                    {fmtAmt(group.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
-                    {new Date(sale.sale_date).toLocaleDateString("en-IN", {
+                    {new Date(group.sale_date).toLocaleDateString("en-IN", {
                       day: "numeric",
                       month: "short",
                     })}
