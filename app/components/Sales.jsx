@@ -501,7 +501,10 @@ export default function Sales() {
         open={showForm}
         onClose={handleCloseSaleForm}
         editingId={editingId}
-        onSaved={() => fetchSales()}
+        onSaved={() => {
+          fetchSales();
+          setPage(1);
+        }}
         fabrics={fabrics}
         customers={customers}
       />
@@ -509,7 +512,10 @@ export default function Sales() {
       <SalesImport
         open={showImport}
         onClose={handleCloseImport}
-        onImported={() => fetchAll()}
+        onImported={() => {
+          fetchAll();
+          setPage(1);
+        }}
         fabrics={fabrics}
         customers={customers}
       />

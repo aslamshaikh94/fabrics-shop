@@ -66,6 +66,7 @@ export default function Dashboard() {
         thisMoSales,
         prevMoSales,
         recentRes,
+        allCustomersRes,
       ] = await Promise.all([
         supabase.from("sales").select("total_amount, remaining_amount"),
         supabase
@@ -87,11 +88,17 @@ export default function Dashboard() {
         supabase
           .from("sales")
           .select(
-            "id, sale_date, total_amount, notes, customer:customers(name)",
+            "id, sale_date, total_amount, notes, fabric_name, customer_id, customer_name",
           )
           .order("sale_date", { ascending: false })
           .limit(6),
+        supabase.from("customers").select("id, name"),
       ]);
+
+      // Build customer name lookup
+      const customerNameMap = Object.fromEntries(
+        (allCustomersRes.data || []).map((c) => [c.id, c.name]),
+      );
 
       const invValue =
         fabricsRes.data?.reduce(
@@ -146,7 +153,15 @@ export default function Dashboard() {
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
       });
-      setRecentSales(recentRes.data || []);
+      setRecentSales(
+        (recentRes.data || []).map((sale) => ({
+          ...sale,
+          customer_name:
+            customerNameMap[sale.customer_id] ||
+            sale.customer_name ||
+            "Walk-in",
+        })),
+      );
     } catch (err) {
       console.error("Error fetching stats:", err);
       setError("Failed to load dashboard data. Please refresh.");
@@ -424,7 +439,7 @@ export default function Dashboard() {
               >
                 <div className="min-w-0">
                   <p className="font-medium text-gray-900 text-sm truncate">
-                    {sale.customer?.name || "Walk-in"}
+                    {sale.customer_name}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
                     {sale.fabric_name || "—"}

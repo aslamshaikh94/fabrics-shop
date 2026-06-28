@@ -21,9 +21,9 @@ import {
   ShoppingBag,
   Receipt,
   Users,
-  CircleAlert as AlertCircle,
   Package,
   MessageCircle,
+  AlertTriangle,
 } from "lucide-react";
 
 const MONTHS = [
@@ -161,9 +161,9 @@ export default function Reports() {
         if (!supMap[name]) supMap[name] = { name, pending: 0 };
         supMap[name].pending += p.remaining_amount || 0;
       });
-      const pendingSuppliers = Object.values(supMap).sort(
-        (a, b) => b.pending - a.pending,
-      );
+      const pendingSuppliers = Object.values(supMap)
+        .sort((a, b) => b.pending - a.pending)
+        .slice(0, 10);
 
       setAlerts({
         pendingCustomers,
@@ -183,68 +183,77 @@ export default function Reports() {
       const prevStart = `${year - 1}-01-01`;
       const prevEnd = `${year - 1}-12-31`;
 
-      const [
-        salesRes,
-        purchasesRes,
-        expensesRes,
-        prevSalesRes,
-        prevExpRes,
-        customersRes,
-      ] = await Promise.all([
-        supabase
-          .from("sales")
-          .select(
-            "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer_id",
-          )
-          .gte("sale_date", startDate)
-          .lte("sale_date", endDate),
-        supabase
-          .from("purchases")
-          .select("purchase_date, total_amount")
-          .gte("purchase_date", startDate)
-          .lte("purchase_date", endDate),
-        supabase
-          .from("expenses")
-          .select("amount")
-          .gte("expense_date", startDate)
-          .lte("expense_date", endDate),
-        supabase
-          .from("sales")
-          .select("total_amount, margin")
-          .gte("sale_date", prevStart)
-          .lte("sale_date", prevEnd),
-        supabase
-          .from("expenses")
-          .select("amount")
-          .gte("expense_date", prevStart)
-          .lte("expense_date", prevEnd),
-        supabase.from("customers").select("id, name"),
-      ]);
+      // Run queries with individual error handling so one failure doesn't break everything
+      const safeQuery = async (promise, fallback = []) => {
+        try {
+          const res = await promise;
+          return res.data || fallback;
+        } catch (e) {
+          console.error("Query failed:", e);
+          return fallback;
+        }
+      };
 
-      const sales = salesRes.data || [];
-      const purchases = purchasesRes.data || [];
-      const totalExpenses = (expensesRes.data || []).reduce(
-        (s, r) => s + (r.amount || 0),
-        0,
-      );
+      const [sales, purchases, expenses, prevSales, prevExp, customers] =
+        await Promise.all([
+          safeQuery(
+            supabase
+              .from("sales")
+              .select(
+                "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer_id",
+              )
+              .gte("sale_date", startDate)
+              .lte("sale_date", endDate),
+            [],
+          ),
+          safeQuery(
+            supabase
+              .from("purchases")
+              .select("purchase_date, total_amount")
+              .gte("purchase_date", startDate)
+              .lte("purchase_date", endDate),
+            [],
+          ),
+          safeQuery(
+            supabase
+              .from("expenses")
+              .select("amount")
+              .gte("expense_date", startDate)
+              .lte("expense_date", endDate),
+            [],
+          ),
+          safeQuery(
+            supabase
+              .from("sales")
+              .select("total_amount, margin")
+              .gte("sale_date", prevStart)
+              .lte("sale_date", prevEnd),
+            [],
+          ),
+          safeQuery(
+            supabase
+              .from("expenses")
+              .select("amount")
+              .gte("expense_date", prevStart)
+              .lte("expense_date", prevEnd),
+            [],
+          ),
+          safeQuery(supabase.from("customers").select("id, name"), []),
+        ]);
+
+      const totalExpenses = expenses.reduce((s, r) => s + (r.amount || 0), 0);
       const totalMargin = sales.reduce((s, r) => s + (r.margin || 0), 0);
 
       // Build customer lookup map
-      const customerMap = Object.fromEntries(
-        (customersRes.data || []).map((c) => [c.id, c]),
-      );
+      const customerMap = Object.fromEntries(customers.map((c) => [c.id, c]));
 
       // Previous year summary for YoY
-      const prevSales = prevSalesRes.data || [];
-      const prevExp = (prevExpRes.data || []).reduce(
-        (s, r) => s + (r.amount || 0),
-        0,
-      );
       const prevMargin = prevSales.reduce((s, r) => s + (r.margin || 0), 0);
       setPrevSummary({
         totalSales: prevSales.reduce((s, r) => s + (r.total_amount || 0), 0),
         totalProfit: prevMargin,
-        netProfit: prevMargin - prevExp,
+        netProfit:
+          prevMargin - prevExp.reduce((s, r) => s + (r.amount || 0), 0),
       });
 
       // Monthly data with prev year overlay
@@ -289,11 +298,7 @@ export default function Reports() {
         custMap[name].revenue += s.total_amount || 0;
         custMap[name].pending += s.remaining_amount || 0;
       });
-      setTopCustomers(
-        Object.values(custMap)
-          .sort((a, b) => b.revenue - a.revenue)
-          .slice(0, 10),
-      );
+      setTopCustomers(Object.values(custMap));
 
       // Top 10 fabrics by revenue & meters
       const fabricMap = {};
@@ -303,11 +308,7 @@ export default function Reports() {
         fabricMap[name].revenue += s.total_amount || 0;
         fabricMap[name].meters += s.meters || 0;
       });
-      setTopFabrics(
-        Object.values(fabricMap)
-          .sort((a, b) => b.revenue - a.revenue)
-          .slice(0, 10),
-      );
+      setTopFabrics(Object.values(fabricMap));
     } catch (err) {
       console.error("Error fetching reports:", err);
     } finally {
@@ -607,51 +608,58 @@ export default function Reports() {
                 No data for {year}
               </p>
             ) : (
-              <div className="space-y-2.5">
-                {[...topCustomers]
+              (() => {
+                const sortedCustomers = [...topCustomers]
+                  .filter((c) => rankView !== "pending" || c.pending > 0)
                   .sort((a, b) =>
                     rankView === "pending"
                       ? b.pending - a.pending
                       : b.revenue - a.revenue,
                   )
-                  .map((c, i) => {
-                    const val = rankView === "pending" ? c.pending : c.revenue;
-                    const maxVal =
-                      rankView === "pending"
-                        ? Math.max(...topCustomers.map((x) => x.pending))
-                        : topCustomers[0].revenue;
-                    const pct =
-                      maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
-                    return (
-                      <div key={c.name}>
-                        <div className="flex items-center justify-between text-sm mb-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center font-bold">
-                              {i + 1}
-                            </span>
-                            <span className="font-medium text-gray-800 truncate">
-                              {c.name}
-                            </span>
-                            {rankView !== "pending" && c.pending > 0 && (
-                              <span className="shrink-0 text-xs text-warning-600 font-medium">
-                                ({fmt(c.pending, showAmount)} due)
+                  .slice(0, 10);
+                const maxVal =
+                  rankView === "pending"
+                    ? sortedCustomers[0]?.pending || 0
+                    : sortedCustomers[0]?.revenue || 0;
+                return (
+                  <div className="space-y-2.5">
+                    {sortedCustomers.map((c, i) => {
+                      const val =
+                        rankView === "pending" ? c.pending : c.revenue;
+                      const pct =
+                        maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
+                      return (
+                        <div key={c.name}>
+                          <div className="flex items-center justify-between text-sm mb-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center font-bold">
+                                {i + 1}
                               </span>
-                            )}
+                              <span className="font-medium text-gray-800 truncate">
+                                {c.name}
+                              </span>
+                              {rankView !== "pending" && c.pending > 0 && (
+                                <span className="shrink-0 text-xs text-warning-600 font-medium">
+                                  ({fmt(c.pending, showAmount)} due)
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-gray-600 shrink-0 ml-2">
+                              {fmtShort(val, showAmount)}
+                            </span>
                           </div>
-                          <span className="text-gray-600 shrink-0 ml-2">
-                            {fmtShort(val, showAmount)}
-                          </span>
+                          <div className="w-full bg-gray-100 rounded-full h-1.5">
+                            <div
+                              className="bg-blue-500 h-1.5 rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
                         </div>
-                        <div className="w-full bg-gray-100 rounded-full h-1.5">
-                          <div
-                            className="bg-blue-500 h-1.5 rounded-full"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
             )}
           </div>
 
@@ -663,53 +671,53 @@ export default function Reports() {
                 No data for {year}
               </p>
             ) : (
-              <div className="space-y-2.5">
-                {[...topFabrics]
+              (() => {
+                const sortedFabrics = [...topFabrics]
                   .sort((a, b) =>
                     rankView === "meters"
                       ? b.meters - a.meters
                       : b.revenue - a.revenue,
                   )
-                  .map((f, i) => {
-                    const val = rankView === "meters" ? f.meters : f.revenue;
-                    const sorted = [...topFabrics].sort((a, b) =>
-                      rankView === "meters"
-                        ? b.meters - a.meters
-                        : b.revenue - a.revenue,
-                    );
-                    const maxVal =
-                      rankView === "meters"
-                        ? sorted[0].meters
-                        : sorted[0].revenue;
-                    const pct =
-                      maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
-                    return (
-                      <div key={f.name}>
-                        <div className="flex items-center justify-between text-sm mb-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="shrink-0 w-5 h-5 rounded-full bg-accent-500 text-white text-xs flex items-center justify-center font-bold">
-                              {i + 1}
-                            </span>
-                            <span className="font-medium text-gray-800 truncate">
-                              {f.name}
+                  .slice(0, 10);
+                const maxVal =
+                  rankView === "meters"
+                    ? sortedFabrics[0]?.meters || 0
+                    : sortedFabrics[0]?.revenue || 0;
+                return (
+                  <div className="space-y-2.5">
+                    {sortedFabrics.map((f, i) => {
+                      const val = rankView === "meters" ? f.meters : f.revenue;
+                      const pct =
+                        maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
+                      return (
+                        <div key={f.name}>
+                          <div className="flex items-center justify-between text-sm mb-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="shrink-0 w-5 h-5 rounded-full bg-accent-500 text-white text-xs flex items-center justify-center font-bold">
+                                {i + 1}
+                              </span>
+                              <span className="font-medium text-gray-800 truncate">
+                                {f.name}
+                              </span>
+                            </div>
+                            <span className="text-gray-600 shrink-0 ml-2">
+                              {rankView === "meters"
+                                ? `${f.meters.toFixed(1)}m`
+                                : fmtShort(f.revenue, showAmount)}
                             </span>
                           </div>
-                          <span className="text-gray-600 shrink-0 ml-2">
-                            {rankView === "meters"
-                              ? `${f.meters.toFixed(1)}m`
-                              : fmtShort(f.revenue, showAmount)}
-                          </span>
+                          <div className="w-full bg-gray-100 rounded-full h-1.5">
+                            <div
+                              className="bg-accent-500 h-1.5 rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
                         </div>
-                        <div className="w-full bg-gray-100 rounded-full h-1.5">
-                          <div
-                            className="bg-accent-500 h-1.5 rounded-full"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
             )}
           </div>
         </div>
