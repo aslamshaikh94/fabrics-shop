@@ -87,7 +87,7 @@ export default function Sales() {
       if (customersRes.error) throw customersRes.error;
       if (fabricsRes.error) throw fabricsRes.error;
       const customerMap = Object.fromEntries(
-        (customersRes.data || []).map((c) => [c.id, c])
+        (customersRes.data || []).map((c) => [c.id, c]),
       );
       const salesWithCustomer = (salesRes.data || []).map((s) => ({
         ...s,
@@ -98,7 +98,8 @@ export default function Sales() {
       setFabrics(fabricsRes.data || []);
       return salesWithCustomer;
     } catch (error) {
-      const message = error?.message || JSON.stringify(error) || "Unknown error";
+      const message =
+        error?.message || JSON.stringify(error) || "Unknown error";
       console.error("Error fetching sales data:", message, error);
       toast(`Failed to load sales data: ${message}`, "error");
       return [];
@@ -109,20 +110,25 @@ export default function Sales() {
 
   async function fetchSales() {
     try {
-      const { data, error } = await supabase
-        .from("sales")
-        .select("*")
-        .order("sale_date", { ascending: false })
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      const [salesRes, customersRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("*")
+          .order("sale_date", { ascending: false })
+          .order("created_at", { ascending: false }),
+        supabase.from("customers").select("*").order("name"),
+      ]);
+      if (salesRes.error) throw salesRes.error;
+      if (customersRes.error) throw customersRes.error;
       const customerMap = Object.fromEntries(
-        customers.map((c) => [c.id, c])
+        (customersRes.data || []).map((c) => [c.id, c]),
       );
-      const salesWithCustomer = (data || []).map((s) => ({
+      const salesWithCustomer = (salesRes.data || []).map((s) => ({
         ...s,
         customer: customerMap[s.customer_id] || null,
       }));
       setSales(salesWithCustomer);
+      setCustomers(customersRes.data || []);
       return salesWithCustomer;
     } catch (error) {
       console.error("Error fetching sales:", error?.message || error);
@@ -295,17 +301,17 @@ export default function Sales() {
       }
       return acc;
     }, {});
-    
+
     // Calculate group-level remaining and adjust margin for discount
-    Object.values(groups).forEach(group => {
+    Object.values(groups).forEach((group) => {
       group.remaining_amount = Math.max(
         group.total_amount - group.discount_amount - group.paid_amount,
-        0
+        0,
       );
       // Adjust margin by subtracting discount
       group.margin = Math.max(group.margin - group.discount_amount, 0);
     });
-    
+
     return Object.values(groups).sort((a, b) => {
       const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
       if (dateDiff !== 0) return dateDiff;
@@ -320,13 +326,16 @@ export default function Sales() {
       const key = prev.id;
       const items = fresh.filter((s) => (s.sale_group_id || s.id) === key);
       if (items.length === 0) return prev;
-      
+
       const totalAmount = items.reduce((s, i) => s + i.total_amount, 0);
       const rawMargin = items.reduce((s, i) => s + i.margin, 0);
       const paidAmount = items.reduce((s, i) => s + i.paid_amount, 0);
-      const discountAmount = items.reduce((s, i) => s + (i.discount_amount || 0), 0);
+      const discountAmount = items.reduce(
+        (s, i) => s + (i.discount_amount || 0),
+        0,
+      );
       const adjustedMargin = Math.max(rawMargin - discountAmount, 0);
-      
+
       return {
         ...prev,
         customer_id: items[0].customer_id,
@@ -338,7 +347,10 @@ export default function Sales() {
         margin: adjustedMargin,
         paid_amount: paidAmount,
         discount_amount: discountAmount,
-        remaining_amount: Math.max(totalAmount - discountAmount - paidAmount, 0),
+        remaining_amount: Math.max(
+          totalAmount - discountAmount - paidAmount,
+          0,
+        ),
       };
     });
   }, []);
@@ -489,7 +501,10 @@ export default function Sales() {
         open={showForm}
         onClose={handleCloseSaleForm}
         editingId={editingId}
-        onSaved={() => fetchSales()}
+        onSaved={() => {
+          fetchSales();
+          setPage(1);
+        }}
         fabrics={fabrics}
         customers={customers}
       />
@@ -497,7 +512,10 @@ export default function Sales() {
       <SalesImport
         open={showImport}
         onClose={handleCloseImport}
-        onImported={() => fetchAll()}
+        onImported={() => {
+          fetchAll();
+          setPage(1);
+        }}
         fabrics={fabrics}
         customers={customers}
       />
