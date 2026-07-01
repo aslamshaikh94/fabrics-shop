@@ -118,12 +118,10 @@ export default function Reports() {
         await Promise.all([
           supabase
             .from("sales")
-            .select("customer_id, remaining_amount")
-            .gt("remaining_amount", 0),
+            .select("customer_id, total_amount, paid_amount"),
           supabase
             .from("purchases")
-            .select("supplier_id, remaining_amount")
-            .gt("remaining_amount", 0),
+            .select("supplier_id, total_amount, paid_amount"),
           supabase
             .from("fabrics")
             .select("name, available_meters")
@@ -139,27 +137,37 @@ export default function Reports() {
         (suppliersRes.data || []).map((s) => [s.id, s]),
       );
 
-      // Group customers
+      // Group customers - calculate pending in frontend
       const custMap = {};
       (custRes.data || []).forEach((s) => {
+        const pending = Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        );
+        if (pending <= 0) return;
         const customer = customerMap[s.customer_id];
         const id = s.customer_id || "walk-in";
         const name = customer?.name || "Walk-in";
         const phone = customer?.phone || "";
         if (!custMap[id]) custMap[id] = { name, phone, pending: 0 };
-        custMap[id].pending += s.remaining_amount || 0;
+        custMap[id].pending += pending;
       });
       const pendingCustomers = Object.values(custMap)
         .sort((a, b) => b.pending - a.pending)
         .slice(0, 10);
 
-      // Group suppliers
+      // Group suppliers - calculate pending in frontend
       const supMap = {};
       (supRes.data || []).forEach((p) => {
+        const pending = Math.max(
+          (p.total_amount || 0) - (p.paid_amount || 0),
+          0,
+        );
+        if (pending <= 0) return;
         const supplier = supplierMap[p.supplier_id];
         const name = supplier?.name || "Unknown";
         if (!supMap[name]) supMap[name] = { name, pending: 0 };
-        supMap[name].pending += p.remaining_amount || 0;
+        supMap[name].pending += pending;
       });
       const pendingSuppliers = Object.values(supMap)
         .sort((a, b) => b.pending - a.pending)
@@ -283,7 +291,8 @@ export default function Reports() {
           0,
         ),
         totalReceivables: sales.reduce(
-          (s, r) => s + (r.remaining_amount || 0),
+          (s, r) =>
+            s + Math.max((r.total_amount || 0) - (r.paid_amount || 0), 0),
           0,
         ),
         totalExpenses,
@@ -296,7 +305,10 @@ export default function Reports() {
         const name = customer?.name || "Walk-in";
         if (!custMap[name]) custMap[name] = { name, revenue: 0, pending: 0 };
         custMap[name].revenue += s.total_amount || 0;
-        custMap[name].pending += s.remaining_amount || 0;
+        custMap[name].pending += Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        );
       });
       setTopCustomers(Object.values(custMap));
 

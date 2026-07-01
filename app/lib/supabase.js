@@ -16,6 +16,17 @@ export function getSupabase() {
 export const supabase = getSupabase();
 
 /**
+ * Simple in-memory cache for Supabase queries
+ * Reduces redundant network calls for frequently accessed data
+ */
+const queryCache = new Map();
+const CACHE_TTL = 30_000; // 30 seconds
+
+function getCacheKey(table, params) {
+  return `${table}:${JSON.stringify(params)}`;
+}
+
+/**
  * Retry a Supabase operation with exponential backoff
  * Handles transient network errors gracefully
  */
@@ -58,5 +69,47 @@ export async function safeQuery(queryPromise) {
   } catch (err) {
     console.error("Supabase unexpected error:", err);
     return { data: null, error: err.message || "Unexpected error" };
+  }
+}
+
+/**
+ * Cached safe query — returns cached data if available and fresh
+ * @param {string} table - Table name
+ * @param {object} queryFn - Function that builds the query
+ * @param {number} ttlMs - Cache TTL in ms (default: 30s)
+ */
+export async function cachedQuery(table, queryFn, ttlMs = CACHE_TTL) {
+  const cacheKey = getCacheKey(table, queryFn?.params || {});
+
+  const cached = queryCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < ttlMs) {
+    return { data: cached.data, error: null, fromCache: true };
+  }
+
+  const result = await safeQuery(queryFn());
+
+  if (result.data && !result.error) {
+    queryCache.set(cacheKey, {
+      data: result.data,
+      timestamp: Date.now(),
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Clear the query cache (useful after mutations)
+ * @param {string} table - Optional: clear only cache for a specific table
+ */
+export function clearCache(table) {
+  if (table) {
+    for (const key of queryCache.keys()) {
+      if (key.startsWith(`${table}:`)) {
+        queryCache.delete(key);
+      }
+    }
+  } else {
+    queryCache.clear();
   }
 }

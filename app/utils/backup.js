@@ -388,7 +388,7 @@ export async function restoreBackup(backup, options = {}) {
     ];
 
     const totalSteps =
-      tables.length + (clearExisting ? deleteTables.length : 0) + 5; // +2 for FK updates + 3 for trigger fix steps (stock, balances, sales)
+      tables.length + (clearExisting ? deleteTables.length : 0) + 6; // +2 for FK updates + 4 for trigger fix steps (stock, balances, sales, purchases)
     let currentStep = 0;
 
     // ---- STEP 1: Clear existing data (if requested) ----
@@ -554,6 +554,9 @@ export async function restoreBackup(backup, options = {}) {
     //      → Restore the correct current_balance from backup
     //   3. trigger_calculate_sale_amounts recalculates total_amount/margin/remaining
     //      → These should be correct, but we restore from backup to be safe
+    //   4. trigger_update_purchase_paid recalculates paid_amount on purchases
+    //      → remaining_amount (GENERATED column) may not recompute correctly
+    //      → Recalculate remaining_amount = total_amount - paid_amount
 
     // Fix fabric available_meters (undo trigger double-deduction)
     const fabricsData = backup.data.fabrics || [];
@@ -666,6 +669,50 @@ export async function restoreBackup(backup, options = {}) {
         step: ++currentStep,
         total: totalSteps,
         action: "Fixing sales values (0 records)...",
+      });
+    }
+
+    // Fix purchase remaining_amount (GENERATED column may not recompute correctly)
+    // The trigger_update_purchase_paid recalculates paid_amount, but the
+    // remaining_amount GENERATED ALWAYS AS (total_amount - paid_amount) STORED
+    // column can get out of sync during restore. Recalculate it explicitly.
+    const purchasesData = backup.data.purchases || [];
+    if (purchasesData.length > 0) {
+      onProgress({
+        step: ++currentStep,
+        total: totalSteps,
+        action: `Fixing purchase remaining amounts (${purchasesData.length} records)...`,
+      });
+
+      const batchSize = 100;
+      for (let i = 0; i < purchasesData.length; i += batchSize) {
+        const batch = purchasesData.slice(i, i + batchSize);
+        for (const purchase of batch) {
+          const remaining = Math.max(
+            (purchase.total_amount || 0) - (purchase.paid_amount || 0),
+            0,
+          );
+          const { error: updateError } = await supabase
+            .from("purchases")
+            .update({
+              paid_amount: purchase.paid_amount,
+              status: purchase.status,
+            })
+            .eq("id", purchase.id);
+
+          if (updateError) {
+            console.warn(
+              `Failed to fix remaining for purchase ${purchase.id}:`,
+              updateError.message,
+            );
+          }
+        }
+      }
+    } else {
+      onProgress({
+        step: ++currentStep,
+        total: totalSteps,
+        action: "Fixing purchase remaining amounts (0 records)...",
       });
     }
 

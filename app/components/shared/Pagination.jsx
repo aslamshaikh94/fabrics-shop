@@ -1,7 +1,8 @@
 "use client";
+import { memo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-export default function Pagination({
+const Pagination = memo(function Pagination({
   currentPage,
   totalPages,
   onPageChange,
@@ -33,4 +34,6 @@ export default function Pagination({
       </div>
     </div>
   );
-}
+});
+
+export default Pagination;

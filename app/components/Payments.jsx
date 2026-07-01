@@ -86,19 +86,28 @@ export default function Payments() {
 
   async function fetchCustomerSummary() {
     try {
-      const { data } = await supabase
-        .from("sales")
-        .select(
-          "customer:customers(name), total_amount, paid_amount, remaining_amount",
-        );
-      if (!data) return;
+      const [salesRes, customersRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("customer_id, total_amount, paid_amount, remaining_amount"),
+        supabase.from("customers").select("id, name"),
+      ]);
+
+      const customerNames = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c.name]),
+      );
+
+      const data = salesRes.data || [];
       const map = {};
       data.forEach((s) => {
-        const name = s.customer?.name || "Walk-in";
+        const name = customerNames[s.customer_id] || "Walk-in";
         if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
         map[name].total += s.total_amount || 0;
         map[name].paid += s.paid_amount || 0;
-        map[name].pending += s.remaining_amount || 0;
+        map[name].pending += Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        );
       });
       setCustomerSummary(
         Object.values(map).sort((a, b) => b.pending - a.pending),
@@ -110,19 +119,28 @@ export default function Payments() {
 
   async function fetchSupplierSummary() {
     try {
-      const { data } = await supabase
-        .from("purchases")
-        .select(
-          "supplier:suppliers(name), total_amount, paid_amount, remaining_amount",
-        );
-      if (!data) return;
+      const [purchasesRes, suppliersRes] = await Promise.all([
+        supabase
+          .from("purchases")
+          .select("supplier_id, total_amount, paid_amount, remaining_amount"),
+        supabase.from("suppliers").select("id, name"),
+      ]);
+
+      const supplierNames = Object.fromEntries(
+        (suppliersRes.data || []).map((s) => [s.id, s.name]),
+      );
+
+      const data = purchasesRes.data || [];
       const map = {};
       data.forEach((p) => {
-        const name = p.supplier?.name || "Unknown";
+        const name = supplierNames[p.supplier_id] || "Unknown";
         if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
         map[name].total += p.total_amount || 0;
         map[name].paid += p.paid_amount || 0;
-        map[name].pending += p.remaining_amount || 0;
+        map[name].pending += Math.max(
+          (p.total_amount || 0) - (p.paid_amount || 0),
+          0,
+        );
       });
       setSupplierSummary(
         Object.values(map).sort((a, b) => b.pending - a.pending),
@@ -134,18 +152,89 @@ export default function Payments() {
 
   async function fetchPayments() {
     try {
-      const [purchaseRes, saleRes] = await Promise.all([
-        supabase
-          .from("purchase_payments")
-          .select("*, purchase:purchases(supplier_id, suppliers(name))")
-          .order("payment_date", { ascending: false }),
-        supabase
-          .from("sale_payments")
-          .select("*, sale:sales(customer_id, customers(name))")
-          .order("payment_date", { ascending: false }),
-      ]);
-      setPurchasePayments(purchaseRes.data || []);
-      setSalePayments(saleRes.data || []);
+      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes] =
+        await Promise.all([
+          supabase
+            .from("purchase_payments")
+            .select("*, purchase_id")
+            .order("payment_date", { ascending: false }),
+          supabase
+            .from("sale_payments")
+            .select("*, sale_id")
+            .order("payment_date", { ascending: false }),
+          supabase.from("purchases").select("id, supplier_id"),
+          supabase.from("customers").select("id, name"),
+          supabase.from("sales").select("id, customer_id, customer_name"),
+        ]);
+
+      const purchasePaymentsData = purchaseRes.data || [];
+      const salePaymentsData = saleRes.data || [];
+      const purchases = (suppliersRes.data || []).reduce((map, p) => {
+        map[p.id] = p.supplier_id;
+        return map;
+      }, {});
+      const sales = (salesRes.data || []).reduce((map, s) => {
+        map[s.id] = {
+          customer_id: s.customer_id,
+          customer_name: s.customer_name,
+        };
+        return map;
+      }, {});
+
+      // Build customer name lookup from the customers table
+      const customerNames = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c.name]),
+      );
+
+      // Get all unique supplier IDs
+      const supplierIds = [
+        ...new Set(
+          purchasePaymentsData
+            .map((p) => purchases[p.purchase_id])
+            .filter(Boolean),
+        ),
+      ];
+
+      // Fetch supplier names
+      const supplierNamesRes =
+        supplierIds.length > 0
+          ? await supabase
+              .from("suppliers")
+              .select("id, name")
+              .in("id", supplierIds)
+          : { data: [] };
+
+      const supplierNames = Object.fromEntries(
+        (supplierNamesRes.data || []).map((s) => [s.id, s.name]),
+      );
+
+      // Attach resolved names to payment records
+      const enrichedPurchasePayments = purchasePaymentsData.map((p) => ({
+        ...p,
+        purchase: {
+          suppliers: {
+            name: supplierNames[purchases[p.purchase_id]] || "Unknown",
+          },
+        },
+      }));
+      const enrichedSalePayments = salePaymentsData.map((s) => {
+        const saleInfo = sales[s.sale_id] || {};
+        // First try customer_name from the sale record itself (for walk-in sales with custom names)
+        const name = saleInfo.customer_name
+          ? saleInfo.customer_name
+          : saleInfo.customer_id
+            ? customerNames[saleInfo.customer_id] || "Walk-in"
+            : "Walk-in";
+        return {
+          ...s,
+          sale: {
+            customers: { name },
+          },
+        };
+      });
+
+      setPurchasePayments(enrichedPurchasePayments);
+      setSalePayments(enrichedSalePayments);
     } catch (error) {
       console.error("Error fetching payments:", error);
     } finally {

@@ -147,6 +147,10 @@ export default function Purchases() {
       );
       const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
         ...s,
+        remaining_amount: Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        ),
         supplier: supplierMap[s.supplier_id] || null,
       }));
       setPurchases(purchasesWithSupplier);
@@ -174,6 +178,10 @@ export default function Purchases() {
       );
       const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
         ...s,
+        remaining_amount: Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        ),
         supplier: supplierMap[s.supplier_id] || null,
       }));
       setPurchases(purchasesWithSupplier);

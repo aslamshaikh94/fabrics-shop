@@ -1,65 +1,67 @@
 "use client";
+import { memo } from "react";
 
-export function TableSkeleton({ rows = 6, cols = 6 }) {
+const SkeletonBar = memo(function SkeletonBar({
+  width = "100%",
+  height = "1rem",
+  className = "",
+}) {
   return (
-    <div className="card overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-            <tr>
-              {Array.from({ length: cols }).map((_, i) => (
-                <th key={i} className="px-4 py-3">
-                  <div className="h-3 w-20 animate-shimmer rounded" />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-            {Array.from({ length: rows }).map((_, i) => (
-              <tr key={i}>
-                {Array.from({ length: cols }).map((_, j) => (
-                  <td key={j} className="px-4 py-3">
-                    <div
-                      className={`h-4 animate-shimmer rounded ${j === 0 ? "w-28" : j === cols - 1 ? "w-24" : "w-16"}`}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div
+      className={`animate-pulse bg-gray-200 rounded ${className}`}
+      style={{ width, height }}
+    />
+  );
+});
+
+const LoadingSkeleton = memo(function LoadingSkeleton({
+  type = "table",
+  rows = 5,
+}) {
+  if (type === "card") {
+    return (
+      <div className="space-y-3 p-4">
+        <SkeletonBar width="60%" height="1.25rem" />
+        <SkeletonBar width="40%" height="2rem" />
+        <SkeletonBar width="80%" height="0.75rem" />
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-export function CardSkeleton({ count = 4 }) {
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="card p-4">
-          <div className="h-3 w-20 animate-shimmer rounded mb-3" />
-          <div className="h-7 w-24 animate-shimmer rounded mb-2" />
-          <div className="h-3 w-16 animate-shimmer rounded" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function ListSkeleton({ count = 4 }) {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="card p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-700 animate-shimmer" />
-          <div className="flex-1 space-y-2">
-            <div className="h-4 w-32 animate-shimmer rounded" />
-            <div className="h-3 w-20 animate-shimmer rounded" />
+  if (type === "stats") {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="card-hover p-4 space-y-3">
+            <SkeletonBar width="50%" height="0.75rem" />
+            <SkeletonBar width="70%" height="1.5rem" />
+            <SkeletonBar width="40%" height="0.625rem" />
           </div>
-          <div className="h-4 w-16 animate-shimmer rounded" />
+        ))}
+      </div>
+    );
+  }
+
+  // Default: table skeleton
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 p-3">
+          <SkeletonBar
+            width="2rem"
+            height="2rem"
+            className="rounded-full shrink-0"
+          />
+          <div className="flex-1 space-y-2">
+            <SkeletonBar width="40%" height="0.875rem" />
+            <SkeletonBar width="60%" height="0.75rem" />
+          </div>
+          <SkeletonBar width="5rem" height="0.875rem" />
         </div>
       ))}
     </div>
   );
-}
+});
+
+export { LoadingSkeleton, SkeletonBar };
+export default LoadingSkeleton;
