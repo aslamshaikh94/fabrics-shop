@@ -40,7 +40,9 @@ export default function BackupRestore() {
     try {
       const backup = await exportBackup();
       downloadBackup(backup);
-      toast(`Backup downloaded successfully (${estimateBackupSize(backup.stats)})`);
+      toast(
+        `Backup downloaded successfully (${estimateBackupSize(backup.stats)})`,
+      );
     } catch (error) {
       toast("Failed to create backup", "error");
       console.error(error);
@@ -113,9 +115,7 @@ export default function BackupRestore() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          Backup & Restore
-        </h1>
+        <h1 className="text-2xl font-bold text-gray-900">Backup & Restore</h1>
         <p className="text-gray-500 mt-1">
           Export and restore your business data
         </p>
@@ -267,7 +267,9 @@ export default function BackupRestore() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-gray-900">Backup Details</h3>
               <span className="text-xs text-gray-500">
-                {new Date(backupPreview.metadata.timestamp).toLocaleString("en-IN")}
+                {new Date(backupPreview.metadata.timestamp).toLocaleString(
+                  "en-IN",
+                )}
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
@@ -369,7 +371,7 @@ export default function BackupRestore() {
 
       {/* Confirm Restore Modal */}
       <Modal
-        open={showRestoreConfirm}
+        isOpen={showRestoreConfirm}
         onClose={() => setShowRestoreConfirm(false)}
         title="Confirm Restore"
       >

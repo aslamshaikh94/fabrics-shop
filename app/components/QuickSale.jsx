@@ -7,28 +7,40 @@ import {
   X,
   CircleCheck as CheckCircle,
   Zap,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
-import CustomerSelect from "./shared/CustomerSelect";
+
+function generateUUID() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function makeEmptyItem() {
+  return {
+    fabric_id: "",
+    fabric_name: "",
+    meters: "",
+    price_per_meter: "",
+    cost_price_per_meter: "",
+  };
+}
 
 export default function QuickSale() {
   const toast = useToast();
   const [fabrics, setFabrics] = useState([]);
-  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedFabric, setSelectedFabric] = useState(null);
-  const [meters, setMeters] = useState("");
-  const [price, setPrice] = useState("");
-  const [customer, setCustomer] = useState({
-    customer_id: "",
-    customer_name: "Walk-in Customer",
-  });
-  const [customerTab, setCustomerTab] = useState("walkin");
-  const [paymentType, setPaymentType] = useState("cash");
+  const [items, setItems] = useState([makeEmptyItem()]);
+  const [activeItemIdx, setActiveItemIdx] = useState(0);
+  const paymentType = "cash";
   const [discountAmount, setDiscountAmount] = useState("");
   const [done, setDone] = useState(false);
   const [lastSale, setLastSale] = useState(null);
@@ -38,12 +50,8 @@ export default function QuickSale() {
   }, []);
 
   async function fetchData() {
-    const [fabRes, custRes] = await Promise.all([
-      supabase.from("fabrics").select("*").order("name"),
-      supabase.from("customers").select("id, name").order("name"),
-    ]);
+    const fabRes = await supabase.from("fabrics").select("*").order("name");
     setFabrics(fabRes.data || []);
-    setCustomers(custRes.data || []);
     setLoading(false);
   }
 
@@ -51,17 +59,62 @@ export default function QuickSale() {
     setShowScanner(false);
     const fabric = fabrics.find((f) => f.barcode === code);
     if (fabric) {
-      selectFabric(fabric);
+      selectFabricForItem(activeItemIdx, fabric);
       toast(`Found: ${fabric.name}`);
     } else {
       toast("Fabric not found for this barcode", "error");
     }
   }
 
-  function selectFabric(fabric) {
-    setSelectedFabric(fabric);
-    setPrice((fabric.selling_price_per_meter || "").toString());
+  function selectFabricForItem(idx, fabric) {
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === idx
+          ? {
+              ...item,
+              fabric_id: fabric.id,
+              fabric_name: fabric.name,
+              cost_price_per_meter: fabric.purchase_price_per_meter.toString(),
+              price_per_meter: (
+                fabric.selling_price_per_meter || ""
+              ).toString(),
+            }
+          : item,
+      ),
+    );
     setSearch("");
+  }
+
+  function updateItem(idx, fields) {
+    setItems((prev) =>
+      prev.map((item, i) => (i === idx ? { ...item, ...fields } : item)),
+    );
+  }
+
+  function removeItem(idx) {
+    if (items.length <= 1) {
+      // Reset the only item instead of removing
+      setItems([makeEmptyItem()]);
+      return;
+    }
+    setItems((prev) => prev.filter((_, i) => i !== idx));
+    if (activeItemIdx >= idx && activeItemIdx > 0) {
+      setActiveItemIdx((prev) => prev - 1);
+    }
+  }
+
+  function addItem() {
+    const currentItem = items[items.length - 1];
+    if (
+      !currentItem.fabric_name ||
+      !currentItem.meters ||
+      !currentItem.price_per_meter
+    ) {
+      toast("Please fill in the current item first", "error");
+      return;
+    }
+    setItems((prev) => [...prev, makeEmptyItem()]);
+    setActiveItemIdx(items.length);
   }
 
   const filteredFabrics =
@@ -71,15 +124,18 @@ export default function QuickSale() {
         )
       : [];
 
-  const total = (parseFloat(meters) || 0) * (parseFloat(price) || 0);
+  const subtotal = items.reduce(
+    (sum, item) =>
+      sum +
+      (parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0),
+    0,
+  );
+  const discountValue = parseFloat(discountAmount) || 0;
+  const netTotal = Math.max(subtotal - discountValue, 0);
 
   function reset() {
-    setSelectedFabric(null);
-    setMeters("");
-    setPrice("");
-    setCustomer({ customer_id: "", customer_name: "Walk-in Customer" });
-    setCustomerTab("walkin");
-    setPaymentType("cash");
+    setItems([makeEmptyItem()]);
+    setActiveItemIdx(0);
     setDiscountAmount("");
     setSearch("");
     setDone(false);
@@ -87,57 +143,83 @@ export default function QuickSale() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!selectedFabric || !meters || !price) return;
-    if (parseFloat(meters) <= 0 || parseFloat(price) < 0) {
-      toast("Please enter valid meters and price", "error");
+
+    // Filter out empty rows — only save items that have at least fabric name and meters
+    const validItems = items.filter(
+      (item) => item.fabric_name && item.meters && item.price_per_meter,
+    );
+    if (validItems.length === 0) {
+      toast(
+        "Please add at least one item with fabric, meters, and price",
+        "error",
+      );
       return;
     }
-    if (parseFloat(meters) > selectedFabric.available_meters) {
-      toast(`Only ${selectedFabric.available_meters}m available`, "error");
-      return;
-    }
+
     setSaving(true);
     try {
-      const m = parseFloat(meters);
-      const p = parseFloat(price);
-      const disc = parseFloat(discountAmount) || 0;
-      const walkInName =
-        !customer.customer_id && customer.customer_name !== "Walk-in Customer"
-          ? customer.customer_name
-          : "";
-      const { data: saleData, error } = await supabase
+      const saleGroupId = generateUUID();
+
+      const salePayloads = validItems.map((item) => ({
+        customer_id: null,
+        fabric_id: item.fabric_id || null,
+        meters: parseFloat(item.meters) || 0,
+        price_per_meter: parseFloat(item.price_per_meter) || 0,
+        cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+        sale_date: new Date().toISOString().split("T")[0],
+        payment_type: paymentType,
+        fabric_name: item.fabric_name,
+        notes: `Fabric: ${item.fabric_name}`,
+        sale_group_id: saleGroupId,
+        discount_amount: 0, // discount applied at group level via first item
+      }));
+
+      // Apply discount to first item only
+      if (discountValue > 0 && salePayloads.length > 0) {
+        salePayloads[0].discount_amount = discountValue;
+      }
+
+      const { data: saleRows, error } = await supabase
         .from("sales")
-        .insert([
-          {
-            customer_id: customer.customer_id || null,
-            customer_name: walkInName,
-            fabric_id: selectedFabric.id,
-            meters: m,
-            price_per_meter: p,
-            cost_price_per_meter: selectedFabric.purchase_price_per_meter,
-            sale_date: new Date().toISOString().split("T")[0],
-            payment_type: paymentType,
-            status: paymentType === "cash" ? "completed" : "partial",
-            fabric_name: selectedFabric.name,
-            notes: `Fabric: ${selectedFabric.name}`,
-            discount_amount: disc,
-          },
-        ])
-        .select()
-        .single();
+        .insert(salePayloads)
+        .select();
+
       if (error) throw error;
 
-      const netTotal = Math.max(m * p - disc, 0);
+      // Create sale_payments for cash sales — account for discount
+      if (saleRows && saleRows.length > 0) {
+        if (paymentType === "cash") {
+          const paymentInserts = saleRows.map((row, idx) => {
+            const fullAmount = row.meters * row.price_per_meter;
+            // Subtract discount from the first item's payment
+            const amount =
+              idx === 0 ? Math.max(fullAmount - discountValue, 0) : fullAmount;
+            return {
+              sale_id: row.id,
+              amount,
+              payment_date: new Date().toISOString().split("T")[0],
+              payment_method: "cash",
+            };
+          });
+          const { error: payErr } = await supabase
+            .from("sale_payments")
+            .insert(paymentInserts);
+          if (payErr) throw payErr;
+        }
+      }
+
+      const totalMeters = validItems.reduce(
+        (s, item) => s + (parseFloat(item.meters) || 0),
+        0,
+      );
+      const fabricNames = validItems.map((i) => i.fabric_name).join(", ");
+
       setLastSale({
-        fabric: selectedFabric.name,
-        meters: m,
+        fabrics: fabricNames,
+        meters: totalMeters,
         total: netTotal,
         paymentType,
-        customerName: customer.customer_id
-          ? customers.find((c) => c.id === customer.customer_id)?.name
-          : customer.customer_name !== "Walk-in Customer"
-            ? customer.customer_name
-            : null,
+        itemCount: items.length,
       });
       setDone(true);
       toast("Sale recorded!");
@@ -164,7 +246,7 @@ export default function QuickSale() {
             <Zap className="w-6 h-6 text-yellow-500" /> Quick Sale
           </h1>
           <p className="text-gray-500 mt-0.5 text-sm">
-            Fast cash sale — scan or search fabric
+            Fast walk-in sale — add multiple fabric items
           </p>
         </div>
       </div>
@@ -175,16 +257,16 @@ export default function QuickSale() {
           <CheckCircle className="w-16 h-16 text-accent-500 mx-auto" />
           <div>
             <h2 className="text-xl font-bold text-gray-900">Sale Recorded!</h2>
-            {lastSale.customerName && (
-              <p className="text-sm text-gray-500 mt-1">
-                {lastSale.customerName}
-              </p>
-            )}
             <p className="text-gray-500 mt-1">
-              {lastSale.fabric} — {lastSale.meters}m
+              {lastSale.fabrics} — {lastSale.meters.toFixed(2)}m
+              {lastSale.itemCount > 1 && ` (${lastSale.itemCount} items)`}
             </p>
             <p className="text-3xl font-bold text-accent-600 mt-2">
-              ₹{lastSale.total.toLocaleString("en-IN")}
+              ₹
+              {lastSale.total.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </p>
             <span
               className={`badge mt-2 ${lastSale.paymentType === "cash" ? "bg-accent-100 text-accent-800" : "bg-warning-100 text-warning-800"}`}
@@ -202,31 +284,72 @@ export default function QuickSale() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Step 1: Select Fabric */}
+          {/* Added Items Summary */}
+          {items.length > 1 && (
+            <div className="card p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                Items ({items.length})
+              </p>
+              {items.slice(0, -1).map((item, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-2.5"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {item.fabric_name}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {item.meters}m @ ₹{item.price_per_meter}/m
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(idx)}
+                    className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 shrink-0 ml-2"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Current Item Form */}
           <div className="card p-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-              Step 1 — Select Fabric
+              {items.length > 1 ? `Item ${items.length}` : "Select Fabric"}
             </p>
-            {selectedFabric ? (
-              <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl p-3">
+
+            {/* Fabric Search / Selected */}
+            {items[activeItemIdx]?.fabric_name &&
+            items[activeItemIdx]?.fabric_id ? (
+              <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl p-3 mb-3">
                 <div>
                   <p className="font-semibold text-primary-900">
-                    {selectedFabric.name}
+                    {items[activeItemIdx].fabric_name}
                   </p>
                   <p className="text-xs text-primary-600">
-                    {selectedFabric.available_meters}m available
+                    ₹{items[activeItemIdx].cost_price_per_meter}/m cost
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedFabric(null)}
+                  onClick={() =>
+                    updateItem(activeItemIdx, {
+                      fabric_id: "",
+                      fabric_name: "",
+                      cost_price_per_meter: "",
+                      price_per_meter: "",
+                    })
+                  }
                   className="p-1.5 hover:bg-primary-100 rounded-lg text-primary-400"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2 mb-3">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -253,7 +376,7 @@ export default function QuickSale() {
                       <button
                         key={f.id}
                         type="button"
-                        onClick={() => selectFabric(f)}
+                        onClick={() => selectFabricForItem(activeItemIdx, f)}
                         className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-center justify-between"
                       >
                         <div>
@@ -277,136 +400,131 @@ export default function QuickSale() {
                 )}
               </div>
             )}
+
+            {/* Meters & Price */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Meters *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={items[activeItemIdx]?.meters || ""}
+                  onChange={(e) =>
+                    updateItem(activeItemIdx, { meters: e.target.value })
+                  }
+                  className="input"
+                  placeholder="0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Price/m *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={items[activeItemIdx]?.price_per_meter || ""}
+                  onChange={(e) =>
+                    updateItem(activeItemIdx, {
+                      price_per_meter: e.target.value,
+                    })
+                  }
+                  className="input"
+                  placeholder="₹0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+            </div>
+
+            {/* Cost price (only if not linked to inventory) */}
+            {!items[activeItemIdx]?.fabric_id && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Cost Price/m (for margin calculation)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={items[activeItemIdx]?.cost_price_per_meter || ""}
+                  onChange={(e) =>
+                    updateItem(activeItemIdx, {
+                      cost_price_per_meter: e.target.value,
+                    })
+                  }
+                  className="input"
+                  placeholder="₹0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+            )}
+
+            {/* Add Item button */}
+            <button
+              type="button"
+              onClick={addItem}
+              className="btn btn-secondary w-full mt-3 flex items-center justify-center gap-2 text-sm"
+            >
+              <Plus className="w-4 h-4" /> Add Another Item
+            </button>
           </div>
 
-          {/* Step 2: Meters & Price */}
-          {selectedFabric && (
-            <div className="card p-4">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                Step 2 — Meters & Price
+          {/* Totals */}
+          {subtotal > 0 && (
+            <div className="card p-4 space-y-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                Totals
               </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Meters *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={meters}
-                    onChange={(e) => setMeters(e.target.value)}
-                    className="input"
-                    placeholder="0"
-                    autoFocus
-                    onWheel={(e) => e.target.blur()}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Price/m *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="input"
-                    placeholder="₹0"
-                    onWheel={(e) => e.target.blur()}
-                  />
-                </div>
+              <div className="bg-accent-50 rounded-xl p-3 flex justify-between items-center">
+                <span className="text-sm text-gray-600">Subtotal</span>
+                <span className="text-lg font-bold text-accent-600">
+                  ₹
+                  {subtotal.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
-              {total > 0 && (
-                <>
-                  <div className="mt-3 bg-accent-50 rounded-xl p-3 flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Total Amount</span>
-                    <span className="text-xl font-bold text-accent-600">
-                      ₹{total.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="mt-2">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Discount Amount (₹)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={discountAmount}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === "" || parseFloat(val) >= 0) {
-                          setDiscountAmount(val);
-                        }
-                      }}
-                      className="input"
-                      placeholder="e.g. 500"
-                      onWheel={(e) => e.target.blur()}
-                    />
-                    {discountAmount && parseFloat(discountAmount) > 0 && (
-                      <div className="mt-1 flex justify-between text-xs">
-                        <span className="text-primary-600">
-                          After Discount:
-                        </span>
-                        <span className="font-semibold text-primary-600">
-                          ₹
-                          {Math.max(
-                            total - parseFloat(discountAmount),
-                            0,
-                          ).toLocaleString("en-IN")}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Discount Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={discountAmount}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "" || parseFloat(val) >= 0) {
+                      setDiscountAmount(val);
+                    }
+                  }}
+                  className="input"
+                  placeholder="e.g. 500"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+              {discountValue > 0 && (
+                <div className="flex justify-between text-sm border-t border-gray-200 pt-2">
+                  <span className="text-primary-600 font-medium">
+                    After Discount:
+                  </span>
+                  <span className="font-bold text-primary-600">
+                    ₹
+                    {netTotal.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
               )}
             </div>
           )}
 
-          {/* Step 3: Customer & Payment */}
-          {selectedFabric && meters && price && (
-            <div className="card p-4">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                Step 3 — Customer & Payment
-              </p>
-              <div className="space-y-3">
-                <CustomerSelect
-                  value={customer}
-                  onChange={(val) => {
-                    setCustomer(val);
-                    if (val.customer_id) setCustomerTab("existing");
-                  }}
-                  customers={customers}
-                  customerTab={customerTab}
-                />
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Payment
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      ["cash", "Cash"],
-                      ["partial", "Partial"],
-                      ["credit", "Credit"],
-                    ].map(([v, l]) => (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() => setPaymentType(v)}
-                        className={`py-2 rounded-xl text-sm font-medium border transition-all ${paymentType === v ? "bg-primary-600 text-white border-primary-600" : "bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300"}`}
-                      >
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {selectedFabric && meters && price && (
+          {subtotal > 0 && (
             <button
               type="submit"
               disabled={saving}
@@ -437,7 +555,7 @@ export default function QuickSale() {
                   Saving...
                 </>
               ) : (
-                `Record Sale — ₹${total.toLocaleString("en-IN")}`
+                `Record Sale — ₹${netTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               )}
             </button>
           )}

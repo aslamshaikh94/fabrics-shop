@@ -4,7 +4,6 @@ import { supabase } from "../lib/supabase";
 import {
   Plus,
   CreditCard,
-  Search,
   Calendar,
   Eye,
   Trash2,
@@ -12,6 +11,7 @@ import {
   TrendingUp,
   Download,
   FileUp,
+  X,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validatePayment, hasErrors } from "../utils/validators";
@@ -23,6 +23,8 @@ import SaleDetailsModal from "./SaleDetailsModal";
 import SalesImport from "./SalesImport";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName } from "../utils/formatters";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
 const PAYMENT_BADGES = {
@@ -56,6 +58,7 @@ export default function Sales() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmDeletePayment, setConfirmDeletePayment] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
   const [showImport, setShowImport] = useState(false);
@@ -214,6 +217,23 @@ export default function Sales() {
     }
   }
 
+  async function handleDeletePayment(paymentId) {
+    try {
+      const { error } = await supabase
+        .from("sale_payments")
+        .delete()
+        .eq("id", paymentId);
+      if (error) throw error;
+      toast("Payment deleted");
+      fetchPayments(selectedSale.items.map((i) => i.id));
+      fetchSales();
+    } catch (err) {
+      toast("Failed to delete payment", "error");
+    } finally {
+      setConfirmDeletePayment(null);
+    }
+  }
+
   async function handleDelete(deleteInfo) {
     try {
       if (deleteInfo.isGroup) {
@@ -302,14 +322,23 @@ export default function Sales() {
       return acc;
     }, {});
 
-    // Calculate group-level remaining and adjust margin for discount
+    // Calculate group-level remaining and derive type from actual payment status
     Object.values(groups).forEach((group) => {
       group.remaining_amount = Math.max(
         group.total_amount - group.discount_amount - group.paid_amount,
         0,
       );
-      // Adjust margin by subtracting discount
-      group.margin = Math.max(group.margin - group.discount_amount, 0);
+      // Derive payment type from actual payment status
+      const netTotal = group.total_amount - group.discount_amount;
+      if (group.paid_amount <= 0) {
+        group.payment_type = "credit";
+      } else if (group.paid_amount >= netTotal) {
+        group.payment_type = "cash";
+      } else {
+        group.payment_type = "partial";
+      }
+      // Margin is already discount-adjusted by the DB trigger per item
+      // No need to subtract discount again
     });
 
     return Object.values(groups).sort((a, b) => {
@@ -328,13 +357,13 @@ export default function Sales() {
       if (items.length === 0) return prev;
 
       const totalAmount = items.reduce((s, i) => s + i.total_amount, 0);
-      const rawMargin = items.reduce((s, i) => s + i.margin, 0);
       const paidAmount = items.reduce((s, i) => s + i.paid_amount, 0);
       const discountAmount = items.reduce(
         (s, i) => s + (i.discount_amount || 0),
         0,
       );
-      const adjustedMargin = Math.max(rawMargin - discountAmount, 0);
+      // Margin is already discount-adjusted by the DB trigger per item
+      const adjustedMargin = items.reduce((s, i) => s + i.margin, 0);
 
       return {
         ...prev,
@@ -454,16 +483,11 @@ export default function Sales() {
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by customer or fabric..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search by customer or fabric..."
+        />
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
@@ -568,20 +592,32 @@ export default function Sales() {
                 <span className="text-sm">
                   Total:{" "}
                   <span className="font-semibold">
-                    ₹{selectedSale.total_amount.toLocaleString("en-IN")}
+                    ₹
+                    {selectedSale.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </span>
                 <span className="text-sm">
                   Margin:{" "}
                   <span className="font-semibold text-accent-600">
-                    ₹{selectedSale.margin.toLocaleString("en-IN")}
+                    ₹
+                    {selectedSale.margin.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </span>
               </div>
               <p className="text-sm mt-2">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
-                  ₹{selectedSale.remaining_amount.toLocaleString("en-IN")}
+                  ₹
+                  {selectedSale.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </p>
             </div>
@@ -591,25 +627,38 @@ export default function Sales() {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="font-semibold text-gray-900">
-                        ₹{p.amount.toLocaleString("en-IN")}
+                        ₹
+                        {p.amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </p>
                       <p className="text-sm text-gray-500">
-                        {new Date(p.payment_date).toLocaleDateString("en-IN", {
+                        {new Date(p.payment_date).toLocaleDateString("en-GB", {
                           day: "numeric",
                           month: "short",
-                          year: "numeric",
+                          year: "2-digit",
                         })}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <span className="badge bg-gray-200 text-gray-700">
-                        {p.payment_method.toUpperCase()}
-                      </span>
-                      {p.reference_number && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {p.reference_number}
-                        </p>
-                      )}
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <span className="badge bg-gray-200 text-gray-700">
+                          {p.payment_method.toUpperCase()}
+                        </span>
+                        {p.reference_number && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {p.reference_number}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setConfirmDeletePayment(p.id)}
+                        className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
+                        title="Delete payment"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -637,7 +686,7 @@ export default function Sales() {
                   "Customer",
                   "Date",
                   "Items",
-                  "Total Meters",
+                  "Mtrs",
                   "Total",
                   "Paid",
                   ...(showMargin ? ["Margin"] : []),
@@ -655,12 +704,14 @@ export default function Sales() {
                         "Margin",
                         "Remaining",
                         "Items",
-                        "Total Meters",
+                        "Mtrs",
                       ].includes(h)
                         ? "text-right"
-                        : h === "Type" || h === "Actions"
+                        : h === "Type"
                           ? "text-center"
-                          : "text-left"
+                          : h === "Actions"
+                            ? "text-right"
+                            : "text-left"
                     }`}
                   >
                     {h}
@@ -675,46 +726,75 @@ export default function Sales() {
                   className="hover:bg-gray-50 transition-colors"
                 >
                   <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">
-                      {formatCustomerName(group)}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-1 text-gray-600 text-sm">
-                      <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {formatDate(group.sale_date)}
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900">
+                        {formatCustomerName(group)}
+                      </p>
+                      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded bg-gray-200 text-gray-500 text-[10px] font-bold shrink-0">
+                        {group.items
+                          .map((i) => i.fabric_name?.trim().charAt(0) || "")
+                          .filter(Boolean)
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 4)}
+                      </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700">
-                      {group.items.length}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className="text-gray-600 text-sm">
+                      {formatDate(group.sale_date)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => setSelectedGroupForDetails(group)}
+                      className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700 hover:bg-primary-200 hover:text-primary-800 transition-colors cursor-pointer"
+                      title="View items"
+                    >
+                      {group.items.length}
+                    </button>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600 text-sm">
                     {group.items
                       .reduce((s, i) => s + (parseFloat(i.meters) || 0), 0)
-                      .toFixed(2)}
+                      .toFixed(1)}
                     m
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-sm">
-                    ₹{group.total_amount.toLocaleString("en-IN")}
+                    ₹
+                    {group.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span className="font-medium">
-                      ₹{group.paid_amount.toLocaleString("en-IN")}
+                      ₹
+                      {group.paid_amount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </span>
                   </td>
                   {showMargin && (
                     <td className="px-4 py-3 text-right text-sm">
                       <span className="text-accent-600 font-medium">
-                        ₹{group.margin.toLocaleString("en-IN")}
+                        ₹
+                        {group.margin.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     </td>
                   )}
                   <td className="px-4 py-3 text-right text-sm">
                     {group.discount_amount > 0 ? (
                       <span className="font-medium text-primary-600">
-                        -₹{group.discount_amount.toLocaleString("en-IN")}
+                        -₹
+                        {group.discount_amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     ) : (
                       <span className="text-gray-300">—</span>
@@ -728,14 +808,18 @@ export default function Sales() {
                           : "text-gray-500"
                       }
                     >
-                      ₹{group.remaining_amount.toLocaleString("en-IN")}
+                      ₹
+                      {group.remaining_amount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <PaymentBadge type={group.payment_type} />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1">
+                    <div className="flex items-center justify-end gap-1">
                       <button
                         onClick={() => setSelectedGroupForDetails(group)}
                         className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
@@ -805,6 +889,14 @@ export default function Sales() {
         onViewPayments={handleViewPayments}
       />
 
+      {confirmDeletePayment && (
+        <ConfirmModal
+          message="This will permanently delete this payment. The sale's paid amount and remaining balance will be recalculated."
+          onConfirm={() => handleDeletePayment(confirmDeletePayment)}
+          onCancel={() => setConfirmDeletePayment(null)}
+        />
+      )}
+
       {confirmDelete && (
         <ConfirmModal
           message={
@@ -818,13 +910,12 @@ export default function Sales() {
       )}
 
       {groupedArray.length === 0 && (
-        <div className="text-center py-16">
-          <TrendingUp className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">No sales found</p>
-          <p className="text-gray-300 text-sm mt-1">
-            Try adjusting your filters
-          </p>
-        </div>
+        <EmptyState
+          icon={TrendingUp}
+          title="No sales found"
+          searchTerm={searchTerm}
+          description="Try adjusting your filters"
+        />
       )}
     </div>
   );

@@ -5,7 +5,6 @@ import {
   Plus,
   Trash2,
   X,
-  Search,
   Calendar,
   Pencil,
   Paperclip,
@@ -25,6 +24,8 @@ import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import ImageViewer from "./shared/ImageViewer";
 import ExpensesImport from "./ExpensesImport";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
 
@@ -294,29 +295,33 @@ export default function Expenses() {
         <div className="card p-5">
           <p className="text-sm text-gray-500">Total Expenses (All Time)</p>
           <p className="text-2xl font-bold text-red-600 mt-1">
-            ₹{totalAll.toLocaleString("en-IN")}
+            ₹
+            {totalAll.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Filtered Total</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">
-            ₹{totalFiltered.toLocaleString("en-IN")}
+            ₹
+            {totalFiltered.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search expenses..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search expenses..."
+          className="min-w-[180px]"
+        />
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
@@ -629,13 +634,17 @@ export default function Expenses() {
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
                       {new Date(expense.expense_date).toLocaleDateString(
-                        "en-IN",
-                        { day: "numeric", month: "short", year: "numeric" },
+                        "en-GB",
+                        { day: "numeric", month: "short", year: "2-digit" },
                       )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-red-600 text-sm">
-                    ₹{expense.amount.toLocaleString("en-IN")}
+                    ₹
+                    {expense.amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {expense.payment_proof_url ? (
@@ -693,19 +702,20 @@ export default function Expenses() {
       )}
 
       {filtered.length === 0 && (
-        <div className="text-center py-16">
-          <Receipt className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm || filterCategory !== "all" || filterMonth
-              ? "No expenses match your filters"
-              : "No expenses recorded yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm || filterCategory !== "all" || filterMonth
+        <EmptyState
+          icon={Receipt}
+          title="No expenses recorded yet"
+          searchTerm={
+            searchTerm || filterCategory !== "all" || filterMonth
+              ? "filtered"
+              : ""
+          }
+          description={
+            searchTerm || filterCategory !== "all" || filterMonth
               ? "Try adjusting your filters"
-              : "Click Add Expense to get started"}
-          </p>
-        </div>
+              : "Click Add Expense to get started"
+          }
+        />
       )}
 
       <ImageViewer

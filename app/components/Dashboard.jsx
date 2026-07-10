@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
   TrendingUp,
@@ -7,9 +7,6 @@ import {
   Package,
   DollarSign,
   Users,
-  TriangleAlert as AlertTriangle,
-  CircleAlert as AlertCircle,
-  ShoppingBag,
   CreditCard,
   Receipt,
 } from "lucide-react";
@@ -23,7 +20,10 @@ function pctChange(curr, prev) {
 
 function fmtAmt(n, show) {
   if (!show) return "₹•••";
-  return `₹${Number(n || 0).toLocaleString("en-IN")}`;
+  return `₹${Number(n || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export default function Dashboard() {
@@ -47,11 +47,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  async function fetchStats() {
+  const fetchStats = useCallback(async () => {
     try {
       const now = new Date();
       const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -135,7 +131,8 @@ export default function Dashboard() {
         pendingSalePayments: totalRemaining,
         pendingPurchasePayments:
           purchasesRes.data?.reduce(
-            (s, r) => s + (r.remaining_amount || 0),
+            (s, r) =>
+              s + Math.max((r.total_amount || 0) - (r.paid_amount || 0), 0),
             0,
           ) || 0,
         paidPurchasePayments:
@@ -198,7 +195,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   if (loading) {
     return (
@@ -482,9 +483,10 @@ export default function Dashboard() {
                     {fmtAmt(group.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
-                    {new Date(group.sale_date).toLocaleDateString("en-IN", {
+                    {new Date(group.sale_date).toLocaleDateString("en-GB", {
                       day: "numeric",
                       month: "short",
+                      year: "2-digit",
                     })}
                   </p>
                 </div>

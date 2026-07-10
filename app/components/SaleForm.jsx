@@ -277,6 +277,43 @@ export default function SaleForm({
     try {
       const discountAmount = parseFloat(formData.discount_amount) || 0;
       const initialPayment = parseFloat(formData.initial_payment) || 0;
+      const netTotal = Math.max(subtotal - discountAmount, 0);
+
+      // Auto-derive payment_type from initial payment
+      const paymentType =
+        initialPayment <= 0
+          ? "credit"
+          : initialPayment >= netTotal
+            ? "cash"
+            : "partial";
+
+      // Auto-create customer for walk-in with a name
+      let customerId = formData.customer_id;
+      if (
+        !customerId &&
+        formData.customer_name &&
+        formData.customer_name !== "Walk-in Customer"
+      ) {
+        // Check if customer with this name already exists
+        const { data: existingCustomer } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("name", formData.customer_name.trim())
+          .maybeSingle();
+
+        if (existingCustomer) {
+          customerId = existingCustomer.id;
+        } else {
+          // Create new customer
+          const { data: newCustomer, error: createError } = await supabase
+            .from("customers")
+            .insert([{ name: formData.customer_name.trim() }])
+            .select("id")
+            .single();
+          if (createError) throw createError;
+          customerId = newCustomer.id;
+        }
+      }
 
       let invoice_url = "";
       if (formData.invoice_file) {
@@ -293,17 +330,14 @@ export default function SaleForm({
       }
 
       // Check credit limit for credit/partial
-      const netTotal = Math.max(subtotal - discountAmount, 0);
-      if (formData.customer_id && formData.payment_type !== "cash") {
-        const customer = allCustomers.find(
-          (c) => c.id === formData.customer_id,
-        );
+      if (customerId && paymentType !== "cash") {
+        const customer = allCustomers.find((c) => c.id === customerId);
         if (customer?.credit_limit > 0) {
           const newRemaining = netTotal - initialPayment;
           const currentDue = customerDues?.[customer.id] || 0;
           if (currentDue + newRemaining > customer.credit_limit) {
             toast(
-              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN")}, current dues: ₹${currentDue.toLocaleString("en-IN")}, new would add: ₹${newRemaining.toLocaleString("en-IN")}`,
+              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, current dues: ₹${currentDue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, new would add: ₹${newRemaining.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
               "error",
             );
             setSaving(false);
@@ -322,14 +356,14 @@ export default function SaleForm({
         if (deletePayErr) throw deletePayErr;
 
         const salePayload = {
-          customer_id: formData.customer_id || null,
+          customer_id: customerId || null,
           fabric_id: item.fabric_id || null,
           meters: parseFloat(item.meters) || 0,
           price_per_meter: parseFloat(item.price_per_meter) || 0,
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
-          payment_type: formData.payment_type,
-          customer_name: !formData.customer_id
+          payment_type: paymentType,
+          customer_name: !customerId
             ? formData.customer_name !== "Walk-in Customer"
               ? formData.customer_name
               : ""
@@ -344,7 +378,7 @@ export default function SaleForm({
           .eq("id", editingId);
         if (updateError) throw updateError;
 
-        if (formData.payment_type === "cash") {
+        if (paymentType === "cash") {
           const { error: payErr } = await supabase
             .from("sale_payments")
             .insert([
@@ -372,7 +406,7 @@ export default function SaleForm({
       } else {
         const saleGroupId = generateUUID();
         const walkInNameInfo =
-          !formData.customer_id &&
+          !customerId &&
           formData.customer_name &&
           formData.customer_name !== "Walk-in Customer"
             ? ` (Name: ${formData.customer_name})`
@@ -380,14 +414,14 @@ export default function SaleForm({
         // Apply discount to first item only (group-level discount)
         const salePayloads = itemsToSave.map((item, idx) => {
           return {
-            customer_id: formData.customer_id || null,
+            customer_id: customerId || null,
             fabric_id: item.fabric_id || null,
             meters: parseFloat(item.meters) || 0,
             price_per_meter: parseFloat(item.price_per_meter) || 0,
             cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
             sale_date: formData.sale_date,
-            payment_type: formData.payment_type,
-            customer_name: !formData.customer_id
+            payment_type: paymentType,
+            customer_name: !customerId
               ? formData.customer_name !== "Walk-in Customer"
                 ? formData.customer_name
                 : ""
@@ -421,14 +455,22 @@ export default function SaleForm({
         }
 
         if (saleRows && saleRows.length > 0) {
-          // Payment logic without splitting by discount
-          if (formData.payment_type === "cash") {
-            const paymentInserts = saleRows.map((row) => ({
-              sale_id: row.id,
-              amount: row.meters * row.price_per_meter,
-              payment_date: formData.sale_date,
-              payment_method: "cash",
-            }));
+          // Payment logic — account for discount by reducing first item's payment
+          if (paymentType === "cash") {
+            const paymentInserts = saleRows.map((row, idx) => {
+              const fullAmount = row.meters * row.price_per_meter;
+              // Subtract discount from the first item's payment
+              const amount =
+                idx === 0
+                  ? Math.max(fullAmount - discountAmount, 0)
+                  : fullAmount;
+              return {
+                sale_id: row.id,
+                amount,
+                payment_date: formData.sale_date,
+                payment_method: "cash",
+              };
+            });
             const { error: payErr } = await supabase
               .from("sale_payments")
               .insert(paymentInserts);
@@ -436,10 +478,15 @@ export default function SaleForm({
           } else if (initialPayment > 0) {
             let remaining = Math.min(initialPayment, netTotal);
             const paymentInserts = [];
-            for (const row of saleRows) {
+            for (const [idx, row] of saleRows.entries()) {
               if (remaining <= 0) break;
-              const rowTotal = row.meters * row.price_per_meter;
-              const pay = Math.min(remaining, rowTotal);
+              const fullAmount = row.meters * row.price_per_meter;
+              // Subtract discount from first item's amount for payment distribution
+              const rowAmount =
+                idx === 0
+                  ? Math.max(fullAmount - discountAmount, 0)
+                  : fullAmount;
+              const pay = Math.min(remaining, rowAmount);
               if (pay > 0) {
                 paymentInserts.push({
                   sale_id: row.id,
@@ -507,10 +554,7 @@ export default function SaleForm({
       ],
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
-      initial_payment:
-        sale.payment_type === "partial"
-          ? sale.paid_amount?.toString() || ""
-          : "",
+      initial_payment: sale.paid_amount > 0 ? sale.paid_amount.toString() : "",
       discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
@@ -1008,53 +1052,27 @@ export default function SaleForm({
             </span>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Payment Type *
+                Initial Payment
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  ["cash", "Full Cash"],
-                  ["partial", "Partial"],
-                  ["credit", "Full Credit"],
-                ].map(([v, l]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        payment_type: v,
-                        initial_payment:
-                          v === "partial" ? formData.initial_payment : "",
-                      })
-                    }
-                    className={`py-2 rounded-xl text-sm font-medium border transition-all ${formData.payment_type === v ? "bg-primary-600 text-white border-primary-600" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.initial_payment}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    initial_payment: e.target.value,
+                  })
+                }
+                className="input bg-white"
+                placeholder="Enter amount received (leave 0 for credit)"
+                onWheel={(e) => e.target.blur()}
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Leave empty or 0 for credit sale. For partial payment, enter the
+                amount received.
+              </p>
             </div>
-            {formData.payment_type === "partial" && (
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Initial Payment
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.initial_payment}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      initial_payment: e.target.value,
-                    })
-                  }
-                  className="input bg-white"
-                  placeholder="Amount received now"
-                  onWheel={(e) => e.target.blur()}
-                />
-              </div>
-            )}
           </div>
 
           {/* Discount Section (Flat Amount) */}

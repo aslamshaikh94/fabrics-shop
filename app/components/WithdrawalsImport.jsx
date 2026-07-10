@@ -330,7 +330,11 @@ export default function WithdrawalsImport({ open, onClose, onImported }) {
                       >
                         <td className="px-3 py-2 text-gray-500">{idx + 1}</td>
                         <td className="px-3 py-2 text-right font-medium">
-                          ₹{parseFloat(row.amount || 0).toLocaleString("en-IN")}
+                          ₹
+                          {parseFloat(row.amount || 0).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </td>
                         <td className="px-3 py-2">
                           {row.withdrawal_date || "Today"}

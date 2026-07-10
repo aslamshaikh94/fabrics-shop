@@ -138,17 +138,30 @@ export default function SaleDetailsModal({
           ? editGroupFields.customer_name
           : null;
 
+      // Auto-derive payment_type from initial_payment
+      const initialPay = parseFloat(editGroupFields.initial_payment) || 0;
+      const totalNet =
+        group.items.reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0) -
+        discountAmount;
+      const derivedPaymentType =
+        initialPay <= 0
+          ? "credit"
+          : initialPay >= totalNet
+            ? "cash"
+            : "partial";
+      editGroupFields.payment_type = derivedPaymentType;
+
       // Apply discount ONLY to first item (stores group-level discount)
       for (let idx = 0; idx < saleIds.length; idx++) {
         const saleId = saleIds[idx];
         const item = group.items[idx];
         if (!item) continue;
-        
+
         const m = parseFloat(item.meters) || 0;
         const ppm = parseFloat(item.price_per_meter) || 0;
         const cpm = parseFloat(item.cost_price_per_meter) || 0;
         const preDiscountTotal = Math.round(m * ppm * 100) / 100;
-        
+
         // Store discount only in first item, don't subtract from item remaining
         const itemDiscount = idx === 0 ? discountAmount : 0;
 
@@ -184,10 +197,7 @@ export default function SaleDetailsModal({
             invoice_url,
             discount_amount: itemDiscount,
             total_amount: preDiscountTotal,
-            margin: Math.max(
-              Math.round((m * (ppm - cpm)) * 100) / 100,
-              0,
-            ),
+            margin: Math.max(Math.round(m * (ppm - cpm) * 100) / 100, 0),
             remaining_amount: Math.max(
               preDiscountTotal - (parseFloat(item.paid_amount) || 0),
               0,
@@ -199,28 +209,34 @@ export default function SaleDetailsModal({
       for (const item of group.items) {
         await supabase.from("sale_payments").delete().eq("sale_id", item.id);
       }
-      if (editGroupFields.payment_type === "cash") {
-        for (const item of group.items) {
+      if (derivedPaymentType === "cash") {
+        for (const [idx, item] of group.items.entries()) {
           const m = parseFloat(item.meters) || 0;
           const ppm = parseFloat(item.price_per_meter) || 0;
           const itemTotal = Math.round(m * ppm * 100) / 100;
+          // Subtract discount from first item's payment
+          const amount =
+            idx === 0 ? Math.max(itemTotal - discountAmount, 0) : itemTotal;
           await supabase.from("sale_payments").insert([
             {
               sale_id: item.id,
-              amount: itemTotal,
+              amount,
               payment_date: editGroupFields.sale_date,
               payment_method: "cash",
             },
           ]);
         }
-      } else if (editGroupFields.payment_type === "partial") {
-        let remaining = parseFloat(editGroupFields.initial_payment) || 0;
-        for (const item of group.items) {
+      } else if (initialPay > 0) {
+        let remaining = initialPay;
+        for (const [idx, item] of group.items.entries()) {
           if (remaining <= 0) break;
           const m = parseFloat(item.meters) || 0;
           const ppm = parseFloat(item.price_per_meter) || 0;
           const itemTotal = Math.round(m * ppm * 100) / 100;
-          const pay = Math.min(remaining, itemTotal);
+          // Subtract discount from first item's amount
+          const rowAmount =
+            idx === 0 ? Math.max(itemTotal - discountAmount, 0) : itemTotal;
+          const pay = Math.min(remaining, rowAmount);
           if (pay > 0) {
             await supabase.from("sale_payments").insert([
               {
@@ -296,9 +312,7 @@ export default function SaleDetailsModal({
       sale_date: group.sale_date,
       payment_type: group.payment_type,
       initial_payment:
-        group.payment_type === "partial"
-          ? group.paid_amount?.toString() || ""
-          : "",
+        group.paid_amount > 0 ? group.paid_amount.toString() : "",
       discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
@@ -315,10 +329,10 @@ export default function SaleDetailsModal({
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {formatCustomerName(group)} •{" "}
-              {new Date(group.sale_date).toLocaleDateString("en-IN", {
+              {new Date(group.sale_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
-                year: "numeric",
+                year: "2-digit",
               })}
             </p>
           </div>
@@ -367,7 +381,11 @@ export default function SaleDetailsModal({
               <span>
                 Total:{" "}
                 <span className="font-semibold">
-                  ₹{group.total_amount.toLocaleString("en-IN")}
+                  ₹
+                  {group.total_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </span>
               <span>
@@ -375,7 +393,11 @@ export default function SaleDetailsModal({
                 <span
                   className={`font-semibold ${group.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
                 >
-                  ₹{group.remaining_amount.toLocaleString("en-IN")}
+                  ₹
+                  {group.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </span>
             </div>
@@ -386,10 +408,10 @@ export default function SaleDetailsModal({
             </p>
             <p className="text-sm text-gray-900">
               <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5 text-gray-400" />
-              {new Date(group.sale_date).toLocaleDateString("en-IN", {
+              {new Date(group.sale_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
-                year: "numeric",
+                year: "2-digit",
               })}
             </p>
             {group.items[0]?.invoice_url ? (
@@ -562,27 +584,39 @@ export default function SaleDetailsModal({
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Price/M</p>
                           <p className="font-semibold">
-                            ₹{item.price_per_meter.toLocaleString("en-IN")}
+                            ₹
+                            {item.price_per_meter.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Total</p>
                           <p className="font-semibold">
-                            ₹{item.total_amount.toLocaleString("en-IN")}
+                            ₹
+                            {item.total_amount.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Disc.</p>
                           <p className="font-semibold text-primary-600">
                             {discAmt > 0
-                              ? `-₹${discAmt.toLocaleString("en-IN")}`
+                              ? `-₹${discAmt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                               : "—"}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Margin</p>
                           <p className="font-semibold text-accent-600">
-                            ₹{item.margin.toLocaleString("en-IN")}
+                            ₹
+                            {item.margin.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
                           </p>
                         </div>
                       </div>
@@ -612,7 +646,11 @@ export default function SaleDetailsModal({
                 Total Amount
               </p>
               <p className="text-xl font-bold">
-                ₹{group.total_amount.toLocaleString("en-IN")}
+                ₹
+                {group.total_amount.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
             <div>
@@ -620,7 +658,11 @@ export default function SaleDetailsModal({
                 Total Margin
               </p>
               <p className="text-xl font-bold text-accent-600">
-                ₹{group.margin.toLocaleString("en-IN")}
+                ₹
+                {group.margin.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
             <div>
@@ -630,7 +672,11 @@ export default function SaleDetailsModal({
               <p
                 className={`text-xl font-bold ${group.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
               >
-                ₹{group.remaining_amount.toLocaleString("en-IN")}
+                ₹
+                {group.remaining_amount.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
           </div>
@@ -666,107 +712,86 @@ export default function SaleDetailsModal({
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Payment
             </span>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Payment Type
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  ["cash", "Full Cash"],
-                  ["partial", "Partial"],
-                  ["credit", "Full Credit"],
-                ].map(([v, l]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() =>
-                      setEditGroupFields({
-                        ...editGroupFields,
-                        payment_type: v,
-                        initial_payment:
-                          v === "partial"
-                            ? editGroupFields.initial_payment
-                            : "",
-                      })
-                    }
-                    className={`py-2 rounded-xl text-sm font-medium border transition-all ${editGroupFields.payment_type === v ? "bg-primary-600 text-white border-primary-600" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
-                  >
-                    {l}
-                  </button>
-                ))}
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800 space-y-1">
+              <div className="flex justify-between">
+                <span>Total Sale Amount</span>
+                <span className="font-semibold">
+                  ₹
+                  {group.total_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between text-green-700">
+                <span>Already Paid (recorded)</span>
+                <span className="font-semibold">
+                  ₹
+                  {group.paid_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-blue-200 pt-1 text-warning-700">
+                <span>Outstanding</span>
+                <span className="font-semibold">
+                  ₹
+                  {group.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
             </div>
-            {editGroupFields.payment_type === "partial" && (
-              <div className="space-y-2">
-                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800 space-y-1">
-                  <div className="flex justify-between">
-                    <span>Total Sale Amount</span>
-                    <span className="font-semibold">
-                      ₹{group.total_amount.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-green-700">
-                    <span>Already Paid (recorded)</span>
-                    <span className="font-semibold">
-                      ₹{group.paid_amount.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t border-blue-200 pt-1 text-warning-700">
-                    <span>Outstanding</span>
-                    <span className="font-semibold">
-                      ₹{group.remaining_amount.toLocaleString("en-IN")}
-                    </span>
-                  </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Total Payment Amount
+                <span className="ml-1 text-gray-400 font-normal">
+                  (will reset & reapply payments)
+                </span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={editGroupFields.initial_payment}
+                onChange={(e) =>
+                  setEditGroupFields({
+                    ...editGroupFields,
+                    initial_payment: e.target.value,
+                  })
+                }
+                className="input bg-white"
+                placeholder="Enter amount received (0 for credit)"
+                max={group.total_amount}
+                onWheel={(e) => e.target.blur()}
+              />
+            </div>
+            {parseFloat(editGroupFields.initial_payment) >= 0 &&
+              editGroupFields.initial_payment !== "" && (
+                <div className="flex justify-between text-xs px-1">
+                  <span className="text-gray-500">New remaining balance</span>
+                  <span
+                    className={`font-semibold ${
+                      group.total_amount -
+                        (parseFloat(editGroupFields.initial_payment) || 0) >
+                      0
+                        ? "text-warning-600"
+                        : "text-accent-600"
+                    }`}
+                  >
+                    ₹
+                    {Math.max(
+                      0,
+                      group.total_amount -
+                        (parseFloat(editGroupFields.initial_payment) || 0),
+                    ).toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Amount Already Paid
-                    <span className="ml-1 text-gray-400 font-normal">
-                      (will reset & reapply payments)
-                    </span>
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editGroupFields.initial_payment}
-                    onChange={(e) =>
-                      setEditGroupFields({
-                        ...editGroupFields,
-                        initial_payment: e.target.value,
-                      })
-                    }
-                    className="input bg-white"
-                    placeholder="0"
-                    max={group.total_amount}
-                    onWheel={(e) => e.target.blur()}
-                  />
-                </div>
-                {parseFloat(editGroupFields.initial_payment) >= 0 &&
-                  editGroupFields.initial_payment !== "" && (
-                    <div className="flex justify-between text-xs px-1">
-                      <span className="text-gray-500">
-                        New remaining balance
-                      </span>
-                      <span
-                        className={`font-semibold ${
-                          group.total_amount -
-                            (parseFloat(editGroupFields.initial_payment) || 0) >
-                          0
-                            ? "text-warning-600"
-                            : "text-accent-600"
-                        }`}
-                      >
-                        ₹
-                        {Math.max(
-                          0,
-                          group.total_amount -
-                            (parseFloat(editGroupFields.initial_payment) || 0),
-                        ).toLocaleString("en-IN")}
-                      </span>
-                    </div>
-                  )}
-              </div>
-            )}
+              )}
           </div>
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -884,10 +909,10 @@ export default function SaleDetailsModal({
             </span>{" "}
             on{" "}
             <span className="font-semibold">
-              {new Date(group.sale_date).toLocaleDateString("en-IN", {
+              {new Date(group.sale_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
-                year: "numeric",
+                year: "2-digit",
               })}
             </span>
           </p>

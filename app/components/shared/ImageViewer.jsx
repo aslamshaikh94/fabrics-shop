@@ -1,45 +1,66 @@
 "use client";
-import { X } from "lucide-react";
+import { memo, useState, useCallback } from "react";
+import { X, ZoomIn, ZoomOut, RotateCw } from "lucide-react";
 
-export default function ImageViewer({ url, onClose, title = "View" }) {
-  if (!url) return null;
+const ImageViewer = memo(function ImageViewer({ src, alt = "Image", onClose }) {
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+
+  const handleZoomIn = useCallback(
+    () => setZoom((z) => Math.min(z + 0.25, 3)),
+    [],
+  );
+  const handleZoomOut = useCallback(
+    () => setZoom((z) => Math.max(z - 0.25, 0.5)),
+    [],
+  );
+  const handleRotate = useCallback(() => setRotation((r) => r + 90), []);
+
+  if (!src) return null;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-            {title}
-          </h3>
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-900 max-h-[calc(90vh-60px)] overflow-y-auto">
-          {url.match(/\.(pdf)$/i) ? (
-            <iframe
-              src={url}
-              className="w-full h-[70vh] rounded-lg"
-              title={title}
-            />
-          ) : (
-            <img
-              src={url}
-              alt={title}
-              className="max-w-full max-h-[70vh] object-contain rounded-lg"
-            />
-          )}
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+      <div className="absolute top-4 right-4 flex items-center gap-2">
+        <button
+          onClick={handleZoomOut}
+          className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
+          title="Zoom out"
+        >
+          <ZoomOut className="w-5 h-5" />
+        </button>
+        <span className="text-white text-sm font-medium min-w-[3rem] text-center">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          onClick={handleZoomIn}
+          className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
+          title="Zoom in"
+        >
+          <ZoomIn className="w-5 h-5" />
+        </button>
+        <button
+          onClick={handleRotate}
+          className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
+          title="Rotate"
+        >
+          <RotateCw className="w-5 h-5" />
+        </button>
+        <button
+          onClick={onClose}
+          className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
+          title="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
+      <img
+        src={src}
+        alt={alt}
+        className="max-w-[90vw] max-h-[90vh] object-contain transition-transform duration-200"
+        style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+      />
     </div>
   );
-}
+});
+
+export default ImageViewer;

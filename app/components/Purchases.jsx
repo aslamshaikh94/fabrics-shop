@@ -5,18 +5,17 @@ import {
   Plus,
   CreditCard,
   X,
-  Search,
   Calendar,
   Eye,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
   Pencil,
   Paperclip,
   FileText,
   Download,
   FileUp,
   ShoppingBag,
+  ScanLine,
+  Package,
 } from "lucide-react";
 import DateRangeFilter from "./DateRangeFilter";
 import PurchasesImport from "./PurchasesImport";
@@ -32,6 +31,10 @@ import { useToast } from "./Toast";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import ImageViewer from "./shared/ImageViewer";
+import BarcodeScanner from "./BarcodeScanner";
+import FabricRowForm from "./purchases/FabricRowForm";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
 
@@ -57,6 +60,17 @@ const PAYMENT_METHODS = [
   { value: "check", label: "Check" },
   { value: "other", label: "Other" },
 ];
+
+function makeEmptyFabricRow() {
+  return {
+    fabric_id: "",
+    fabric_name: "",
+    total_meters: "",
+    purchase_price_per_meter: "",
+    quantity: "",
+    barcode: "",
+  };
+}
 
 function FormField({
   field,
@@ -99,6 +113,7 @@ export default function Purchases() {
   const toast = useToast();
   const [purchases, setPurchases] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [fabrics, setFabrics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -122,6 +137,14 @@ export default function Purchases() {
   const [formData, setFormData] = useState({ ...INITIAL_FORM });
   const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
 
+  // State for Add Fabrics to Purchase modal
+  const [showAddFabrics, setShowAddFabrics] = useState(false);
+  const [fabricRows, setFabricRows] = useState([makeEmptyFabricRow()]);
+  const [fabricSearch, setFabricSearch] = useState("");
+  const [activeFabricIdx, setActiveFabricIdx] = useState(null);
+  const [savingFabrics, setSavingFabrics] = useState(false);
+  const [scanningRowIdx, setScanningRowIdx] = useState(null);
+
   useEffect(() => {
     fetchAll();
     const prefill = localStorage.getItem("prefill_purchase_number");
@@ -133,24 +156,31 @@ export default function Purchases() {
 
   async function fetchAll() {
     try {
-      const [purchasesRes, suppliersRes] = await Promise.all([
+      const [purchasesRes, suppliersRes, fabricsRes] = await Promise.all([
         supabase
           .from("purchases")
           .select("*")
           .order("purchase_date", { ascending: false }),
         supabase.from("suppliers").select("*").order("name"),
+        supabase.from("fabrics").select("*").order("name"),
       ]);
       if (purchasesRes.error) throw purchasesRes.error;
       if (suppliersRes.error) throw suppliersRes.error;
+      if (fabricsRes.error) throw fabricsRes.error;
       const supplierMap = Object.fromEntries(
         (suppliersRes.data || []).map((c) => [c.id, c]),
       );
       const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
         ...s,
+        remaining_amount: Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        ),
         supplier: supplierMap[s.supplier_id] || null,
       }));
       setPurchases(purchasesWithSupplier);
       setSuppliers(suppliersRes.data || []);
+      setFabrics(fabricsRes.data || []);
     } catch (error) {
       console.error("Error fetching purchases data:", error);
     } finally {
@@ -174,6 +204,10 @@ export default function Purchases() {
       );
       const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
         ...s,
+        remaining_amount: Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        ),
         supplier: supplierMap[s.supplier_id] || null,
       }));
       setPurchases(purchasesWithSupplier);
@@ -256,7 +290,6 @@ export default function Purchases() {
           ])
           .select();
         if (error) throw error;
-        // Merge new purchase into local state immediately so it shows up right away
         if (newPurchase?.[0]) {
           setPurchases((prev) => [newPurchase[0], ...prev]);
         }
@@ -361,6 +394,163 @@ export default function Purchases() {
   function handleAddPayment(purchase) {
     setSelectedPurchase(purchase);
     setShowPaymentModal(true);
+  }
+
+  function handleOpenAddFabrics(purchase) {
+    setSelectedPurchase(purchase);
+    setFabricRows([makeEmptyFabricRow()]);
+    setFabricSearch("");
+    setActiveFabricIdx(null);
+    setShowAddFabrics(true);
+    // Fetch fabrics list for auto-suggest
+    supabase
+      .from("fabrics")
+      .select("*")
+      .order("name")
+      .then((res) => {
+        setFabrics(res.data || []);
+      });
+  }
+
+  function handleCloseAddFabrics() {
+    setShowAddFabrics(false);
+    setFabricRows([makeEmptyFabricRow()]);
+    setFabricSearch("");
+    setActiveFabricIdx(null);
+    setScanningRowIdx(null);
+  }
+
+  function updateFabricRow(idx, fields) {
+    setFabricRows((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, ...fields } : r)),
+    );
+  }
+
+  function selectFabricFromSuggest(idx, fabric) {
+    updateFabricRow(idx, {
+      fabric_id: fabric.id,
+      fabric_name: fabric.name,
+      purchase_price_per_meter: fabric.purchase_price_per_meter.toString(),
+      barcode: fabric.barcode || "",
+    });
+    setActiveFabricIdx(null);
+    setFabricSearch("");
+    toast(
+      `Selected: ${fabric.name} (${fabric.available_meters}m available in stock)`,
+    );
+  }
+
+  function addFabricRow() {
+    const lastRow = fabricRows[fabricRows.length - 1];
+    if (!lastRow.fabric_name || !lastRow.total_meters) {
+      toast("Please fill in fabric name and meters first", "error");
+      return;
+    }
+    setFabricRows((prev) => [...prev, makeEmptyFabricRow()]);
+  }
+
+  function removeFabricRow(idx) {
+    if (fabricRows.length <= 1) {
+      setFabricRows([makeEmptyFabricRow()]);
+      return;
+    }
+    setFabricRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleAddFabricsSubmit(e) {
+    e.preventDefault();
+
+    // Validate rows
+    const validRows = fabricRows.filter((r) => r.fabric_name && r.total_meters);
+    if (validRows.length === 0) {
+      toast("Please add at least one fabric item", "error");
+      return;
+    }
+
+    setSavingFabrics(true);
+    try {
+      const purchaseId = selectedPurchase.id;
+      for (const row of validRows) {
+        const meters = parseFloat(row.total_meters) || 0;
+        const buyPrice = parseFloat(row.purchase_price_per_meter) || 0;
+
+        if (row.fabric_id) {
+          // Existing fabric — restock: increase total_meters and available_meters
+          const { data: existingFabric } = await supabase
+            .from("fabrics")
+            .select("total_meters, available_meters")
+            .eq("id", row.fabric_id)
+            .single();
+
+          if (existingFabric) {
+            const { error: updateErr } = await supabase
+              .from("fabrics")
+              .update({
+                total_meters: (existingFabric.total_meters || 0) + meters,
+                available_meters:
+                  (existingFabric.available_meters || 0) + meters,
+                purchase_price_per_meter:
+                  buyPrice > 0
+                    ? buyPrice
+                    : existingFabric.purchase_price_per_meter,
+                quantity: row.quantity || undefined,
+                barcode: row.barcode || undefined,
+                purchase_id: purchaseId,
+              })
+              .eq("id", row.fabric_id);
+            if (updateErr) throw updateErr;
+          }
+        } else {
+          // New fabric — create record
+          const { error } = await supabase.from("fabrics").insert([
+            {
+              name: row.fabric_name,
+              total_meters: meters,
+              available_meters: meters,
+              purchase_price_per_meter: buyPrice,
+              quantity: row.quantity || "",
+              barcode: row.barcode || "",
+              purchase_id: purchaseId,
+            },
+          ]);
+          if (error) throw error;
+        }
+      }
+
+      // Update purchase total_amount
+      const { data: allLinkedFabrics } = await supabase
+        .from("fabrics")
+        .select("total_meters, purchase_price_per_meter")
+        .eq("purchase_id", purchaseId);
+
+      const updatedTotal = (allLinkedFabrics || []).reduce(
+        (sum, f) =>
+          sum +
+          (parseFloat(f.total_meters) || 0) *
+            (parseFloat(f.purchase_price_per_meter) || 0),
+        0,
+      );
+
+      const { error: updatePurchaseError } = await supabase
+        .from("purchases")
+        .update({ total_amount: updatedTotal })
+        .eq("id", purchaseId);
+      if (updatePurchaseError) throw updatePurchaseError;
+
+      const hasRestock = validRows.some((r) => r.fabric_id);
+      toast(
+        `${validRows.length} fabric${validRows.length > 1 ? "s" : ""} added to purchase${hasRestock ? " (restocked existing)" : ""}`,
+      );
+
+      handleCloseAddFabrics();
+      fetchPurchases();
+      fetchPurchaseFabrics(purchaseId);
+    } catch (err) {
+      console.error("Error adding fabrics:", err);
+      toast(err?.message || "Failed to add fabrics", "error");
+    } finally {
+      setSavingFabrics(false);
+    }
   }
 
   async function handleDelete(id) {
@@ -475,16 +665,11 @@ export default function Purchases() {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by supplier or fabric..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search by supplier or fabric..."
+        />
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
@@ -680,7 +865,11 @@ export default function Purchases() {
               <p className="text-sm text-gray-600">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
-                  ₹{selectedPurchase.remaining_amount.toLocaleString("en-IN")}
+                  ₹
+                  {selectedPurchase.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </p>
             </div>
@@ -794,16 +983,151 @@ export default function Purchases() {
         )}
       </Modal>
 
+      {/* Add Fabrics to Purchase Modal */}
+      <Modal
+        open={showAddFabrics}
+        onClose={handleCloseAddFabrics}
+        title={`Add Fabrics — ${selectedPurchase?.supplier?.name || "Purchase"}`}
+        size="lg"
+      >
+        <form onSubmit={handleAddFabricsSubmit} className="space-y-4">
+          {/* Added items summary */}
+          {fabricRows.length > 1 && (
+            <div className="space-y-2 mb-3 pb-3 border-b border-gray-200">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                Added Fabrics ({fabricRows.length - 1})
+              </p>
+              {fabricRows.slice(0, -1).map((row, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-2.5"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {row.fabric_name}
+                      {row.fabric_id && (
+                        <span className="ml-1.5 text-[10px] text-accent-600 bg-accent-100 px-1.5 py-0.5 rounded-full">
+                          restock
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {row.total_meters}m @ ₹{row.purchase_price_per_meter}/m
+                      {row.quantity ? ` • ${row.quantity}` : ""}
+                      {row.barcode ? ` • ${row.barcode}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeFabricRow(idx)}
+                    className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 shrink-0 ml-2"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <FabricRowForm
+            idx={fabricRows.length - 1}
+            row={fabricRows[fabricRows.length - 1]}
+            fabricSearch={fabricSearch}
+            setFabricSearch={setFabricSearch}
+            activeFabricIdx={activeFabricIdx}
+            setActiveFabricIdx={setActiveFabricIdx}
+            fabrics={fabrics}
+            updateFabricRow={updateFabricRow}
+            selectFabricFromSuggest={selectFabricFromSuggest}
+            addFabricRow={addFabricRow}
+            setScanningRowIdx={setScanningRowIdx}
+            isLastRow={true}
+          />
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleCloseAddFabrics}
+              className="btn btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={savingFabrics}
+              className="btn btn-primary flex-1"
+            >
+              {savingFabrics ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                "Add Fabrics"
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Barcode Scanner for Add Fabrics modal */}
+      {scanningRowIdx !== null && (
+        <BarcodeScanner
+          onScan={(code) => {
+            // Check if a fabric with this barcode already exists
+            const existingFabric = fabrics.find((f) => f.barcode === code);
+            if (existingFabric) {
+              // Auto-fill name, barcode, and show available inventory
+              updateFabricRow(scanningRowIdx, {
+                fabric_id: existingFabric.id,
+                fabric_name: existingFabric.name,
+                barcode: code,
+                purchase_price_per_meter:
+                  existingFabric.purchase_price_per_meter.toString(),
+              });
+              toast(
+                `Found: ${existingFabric.name} (${existingFabric.available_meters}m available)`,
+              );
+            } else {
+              // Just fill the barcode
+              updateFabricRow(scanningRowIdx, { barcode: code });
+              toast("Barcode scanned — new fabric will be created");
+            }
+            setScanningRowIdx(null);
+          }}
+          onClose={() => setScanningRowIdx(null)}
+        />
+      )}
+
       {/* Purchase Details Modal */}
       <Modal
-        open={!!selectedPurchase && !showPaymentModal}
+        open={!!selectedPurchase && !showPaymentModal && !showAddFabrics}
         onClose={() => {
           setSelectedPurchase(null);
           setPurchaseFabrics([]);
           setPayments([]);
         }}
         title="Purchase Details"
-        maxWidth="max-w-2xl"
+        size="lg"
       >
         {selectedPurchase && (
           <>
@@ -823,13 +1147,21 @@ export default function Purchases() {
                 <span className="text-sm">
                   Total:{" "}
                   <span className="font-semibold">
-                    ₹{selectedPurchase.total_amount.toLocaleString("en-IN")}
+                    ₹
+                    {selectedPurchase.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </span>
                 <span className="text-sm">
                   Remaining:{" "}
                   <span className="font-semibold text-warning-600">
-                    ₹{selectedPurchase.remaining_amount.toLocaleString("en-IN")}
+                    ₹
+                    {selectedPurchase.remaining_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </span>
               </div>
@@ -860,13 +1192,25 @@ export default function Purchases() {
                         ₹
                         {(
                           fabric.total_meters * fabric.purchase_price_per_meter
-                        ).toLocaleString("en-IN")}
+                        ).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </p>
                     </div>
                   ))}
                 </div>
               </div>
             )}
+
+            {/* Add Fabrics button */}
+            <button
+              onClick={() => handleOpenAddFabrics(selectedPurchase)}
+              className="btn btn-primary w-full mb-4"
+            >
+              <Package className="w-5 h-5 mr-2" />
+              Add Fabrics to Purchase
+            </button>
 
             {payments.length > 0 && (
               <div className="mb-4">
@@ -879,15 +1223,19 @@ export default function Purchases() {
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-semibold text-gray-900">
-                            ₹{payment.amount.toLocaleString("en-IN")}
+                            ₹
+                            {payment.amount.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
                           </p>
                           <p className="text-sm text-gray-500">
                             {new Date(payment.payment_date).toLocaleDateString(
-                              "en-IN",
+                              "en-GB",
                               {
                                 day: "numeric",
                                 month: "short",
-                                year: "numeric",
+                                year: "2-digit",
                               },
                             )}
                           </p>
@@ -912,6 +1260,8 @@ export default function Purchases() {
             {payments.length === 0 && purchaseFabrics.length === 0 && (
               <div className="text-center py-8 text-sm text-gray-400">
                 No fabrics or payments recorded for this purchase.
+                <br />
+                Click "Add Fabrics to Purchase" above to add fabric items.
               </div>
             )}
 
@@ -985,21 +1335,29 @@ export default function Purchases() {
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
                       {new Date(purchase.purchase_date).toLocaleDateString(
-                        "en-IN",
+                        "en-GB",
                         {
                           day: "numeric",
                           month: "short",
-                          year: "numeric",
+                          year: "2-digit",
                         },
                       )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
-                    ₹{purchase.total_amount.toLocaleString("en-IN")}
+                    ₹
+                    {purchase.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span className="font-medium text-gray-900">
-                      ₹{purchase.paid_amount.toLocaleString("en-IN")}
+                      ₹
+                      {purchase.paid_amount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
@@ -1010,7 +1368,11 @@ export default function Purchases() {
                           : "text-gray-500"
                       }
                     >
-                      ₹{purchase.remaining_amount.toLocaleString("en-IN")}
+                      ₹
+                      {purchase.remaining_amount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -1047,7 +1409,7 @@ export default function Purchases() {
                       <button
                         onClick={() => handleViewPayments(purchase)}
                         className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="View payments"
+                        title="View details"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
