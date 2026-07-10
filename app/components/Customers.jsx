@@ -5,21 +5,23 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Search,
   Phone,
   MapPin,
   BookOpen,
   MessageCircle,
-  ChevronLeft,
-  ChevronRight,
   Users,
   Download,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
 import Modal from "./shared/Modal";
 import { useToast } from "./Toast";
 import { exportCSV } from "../utils/export";
+import Pagination from "./shared/Pagination";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 9;
 
@@ -115,7 +117,7 @@ export default function Customers() {
 
   function handleWhatsApp(customer) {
     const due = customer.current_balance || 0;
-    const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString("en-IN")}. Please clear at your earliest convenience. Thank you!`;
+    const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Please clear at your earliest convenience. Thank you!`;
     const phone = customer.phone?.replace(/\D/g, "");
     const url = phone
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`
@@ -207,16 +209,11 @@ export default function Customers() {
         </div>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search customers..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input pl-10"
-        />
-      </div>
+      <SearchInput
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Search customers..."
+      />
 
       <Modal
         open={showForm}
@@ -360,7 +357,7 @@ export default function Customers() {
                 }`}
               >
                 {customer.current_balance > 0
-                  ? `Due: ₹${Number(customer.current_balance).toLocaleString("en-IN")}`
+                  ? `Due: ₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : "Cleared ✓"}
               </p>
             </div>
@@ -368,29 +365,13 @@ export default function Customers() {
         ))}
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filteredCustomers.length} customers — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filteredCustomers.length}
+        label="customers"
+      />
 
       {ledgerCustomer && (
         <CustomerLedger
@@ -408,19 +389,16 @@ export default function Customers() {
       )}
 
       {filteredCustomers.length === 0 && (
-        <div className="text-center py-16">
-          <Users className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm
-              ? "No customers found matching your search"
-              : "No customers added yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm
+        <EmptyState
+          icon={Users}
+          title="No customers added yet"
+          searchTerm={searchTerm}
+          description={
+            searchTerm
               ? "Try a different search term"
-              : "Click Add Customer to get started"}
-          </p>
-        </div>
+              : "Click Add Customer to get started"
+          }
+        />
       )}
     </div>
   );

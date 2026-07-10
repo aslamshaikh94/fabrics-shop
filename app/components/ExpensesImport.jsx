@@ -377,7 +377,11 @@ export default function ExpensesImport({ open, onClose, onImported }) {
                           </span>
                         </td>
                         <td className="px-3 py-2 text-right font-medium text-red-600">
-                          ₹{parseFloat(row.amount || 0).toLocaleString("en-IN")}
+                          ₹
+                          {parseFloat(row.amount || 0).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </td>
                         <td className="px-3 py-2">
                           {row.expense_date || "Today"}

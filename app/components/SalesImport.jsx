@@ -250,6 +250,31 @@ export default function SalesImport({
           }
         }
 
+        // Auto-create customer if not found and has a name
+        if (
+          !customerId &&
+          firstRow.customer_name &&
+          firstRow.customer_name.toLowerCase() !== "walk-in"
+        ) {
+          const { data: existingCustomer } = await supabase
+            .from("customers")
+            .select("id")
+            .eq("name", firstRow.customer_name.trim())
+            .maybeSingle();
+          if (existingCustomer) {
+            customerId = existingCustomer.id;
+          } else {
+            const { data: newCustomer, error: createError } = await supabase
+              .from("customers")
+              .insert([{ name: firstRow.customer_name.trim() }])
+              .select("id")
+              .single();
+            if (!createError && newCustomer) {
+              customerId = newCustomer.id;
+            }
+          }
+        }
+
         // Create walk-in name info
         const walkInName =
           !customerId &&
@@ -295,6 +320,7 @@ export default function SalesImport({
             const { error: updateErr } = await supabase
               .from("sales")
               .update({
+                fabric_id: fabric?.id || null,
                 cost_price_per_meter: costPrice,
                 price_per_meter: pricePerMeter,
                 payment_type: paymentType,

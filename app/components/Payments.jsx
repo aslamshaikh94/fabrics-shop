@@ -412,11 +412,19 @@ export default function Payments() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
-                        ₹{s.total.toLocaleString("en-IN")}
+                        ₹
+                        {s.total.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
                         <span className="font-semibold text-accent-600">
-                          ₹{s.paid.toLocaleString("en-IN")}
+                          ₹
+                          {s.paid.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
@@ -427,7 +435,11 @@ export default function Payments() {
                               : "text-gray-400"
                           }
                         >
-                          ₹{s.pending.toLocaleString("en-IN")}
+                          ₹
+                          {s.pending.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -467,19 +479,28 @@ export default function Payments() {
                       ₹
                       {supplierSummary
                         .reduce((s, r) => s + r.total, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
                       ₹
                       {supplierSummary
                         .reduce((s, r) => s + r.paid, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
                       ₹
                       {supplierSummary
                         .reduce((s, r) => s + r.pending, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                   </tr>
                 </tfoot>
@@ -543,10 +564,18 @@ export default function Payments() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
-                      ₹{c.total.toLocaleString("en-IN")}
+                      ₹
+                      {c.total.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-accent-600">
-                      ₹{c.paid.toLocaleString("en-IN")}
+                      ₹
+                      {c.paid.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm">
                       <span
@@ -556,7 +585,11 @@ export default function Payments() {
                             : "text-gray-400"
                         }
                       >
-                        ₹{c.pending.toLocaleString("en-IN")}
+                        ₹
+                        {c.pending.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     </td>
                   </tr>
@@ -572,19 +605,28 @@ export default function Payments() {
                       ₹
                       {customerSummary
                         .reduce((s, r) => s + r.total, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
                       ₹
                       {customerSummary
                         .reduce((s, r) => s + r.paid, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
                       ₹
                       {customerSummary
                         .reduce((s, r) => s + r.pending, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                   </tr>
                 </tfoot>
@@ -607,7 +649,11 @@ export default function Payments() {
                 <div>
                   <p className="text-sm text-gray-500">Payments Made</p>
                   <p className="text-2xl font-bold text-red-600 mt-1">
-                    ₹{totalPaid.toLocaleString("en-IN")}
+                    ₹
+                    {totalPaid.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
                 <div className="bg-red-100 p-3 rounded-lg">
@@ -620,7 +666,11 @@ export default function Payments() {
                 <div>
                   <p className="text-sm text-gray-500">Payments Received</p>
                   <p className="text-2xl font-bold text-accent-600 mt-1">
-                    ₹{totalReceived.toLocaleString("en-IN")}
+                    ₹
+                    {totalReceived.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
                 <div className="bg-accent-100 p-3 rounded-lg">
@@ -635,7 +685,11 @@ export default function Payments() {
                   <p
                     className={`text-2xl font-bold mt-1 ${netFlow >= 0 ? "text-accent-600" : "text-red-600"}`}
                   >
-                    ₹{netFlow.toLocaleString("en-IN")}
+                    ₹
+                    {netFlow.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
                 <div
@@ -728,11 +782,11 @@ export default function Payments() {
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5" />
                             {new Date(payment.date).toLocaleDateString(
-                              "en-IN",
+                              "en-GB",
                               {
                                 day: "numeric",
                                 month: "short",
-                                year: "numeric",
+                                year: "2-digit",
                               },
                             )}
                           </span>
@@ -752,7 +806,10 @@ export default function Payments() {
                         className={`text-lg font-bold ${payment.type === "received" ? "text-accent-600" : "text-red-600"}`}
                       >
                         {payment.type === "received" ? "+" : "-"}₹
-                        {payment.amount.toLocaleString("en-IN")}
+                        {payment.amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </p>
                     </div>
                   </div>

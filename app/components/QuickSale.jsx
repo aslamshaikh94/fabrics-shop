@@ -144,30 +144,23 @@ export default function QuickSale() {
   async function handleSubmit(e) {
     e.preventDefault();
 
-    // Validate all items have required fields
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (!item.fabric_name || !item.meters || !item.price_per_meter) {
-        toast(
-          `Item ${i + 1}: Please fill in fabric, meters, and price`,
-          "error",
-        );
-        return;
-      }
-      if (
-        parseFloat(item.meters) <= 0 ||
-        parseFloat(item.price_per_meter) < 0
-      ) {
-        toast(`Item ${i + 1}: Invalid meters or price`, "error");
-        return;
-      }
+    // Filter out empty rows — only save items that have at least fabric name and meters
+    const validItems = items.filter(
+      (item) => item.fabric_name && item.meters && item.price_per_meter,
+    );
+    if (validItems.length === 0) {
+      toast(
+        "Please add at least one item with fabric, meters, and price",
+        "error",
+      );
+      return;
     }
 
     setSaving(true);
     try {
       const saleGroupId = generateUUID();
 
-      const salePayloads = items.map((item) => ({
+      const salePayloads = validItems.map((item) => ({
         customer_id: null,
         fabric_id: item.fabric_id || null,
         meters: parseFloat(item.meters) || 0,
@@ -193,15 +186,21 @@ export default function QuickSale() {
 
       if (error) throw error;
 
-      // Create sale_payments for cash sales
+      // Create sale_payments for cash sales — account for discount
       if (saleRows && saleRows.length > 0) {
         if (paymentType === "cash") {
-          const paymentInserts = saleRows.map((row) => ({
-            sale_id: row.id,
-            amount: row.meters * row.price_per_meter,
-            payment_date: new Date().toISOString().split("T")[0],
-            payment_method: "cash",
-          }));
+          const paymentInserts = saleRows.map((row, idx) => {
+            const fullAmount = row.meters * row.price_per_meter;
+            // Subtract discount from the first item's payment
+            const amount =
+              idx === 0 ? Math.max(fullAmount - discountValue, 0) : fullAmount;
+            return {
+              sale_id: row.id,
+              amount,
+              payment_date: new Date().toISOString().split("T")[0],
+              payment_method: "cash",
+            };
+          });
           const { error: payErr } = await supabase
             .from("sale_payments")
             .insert(paymentInserts);
@@ -209,11 +208,11 @@ export default function QuickSale() {
         }
       }
 
-      const totalMeters = items.reduce(
+      const totalMeters = validItems.reduce(
         (s, item) => s + (parseFloat(item.meters) || 0),
         0,
       );
-      const fabricNames = items.map((i) => i.fabric_name).join(", ");
+      const fabricNames = validItems.map((i) => i.fabric_name).join(", ");
 
       setLastSale({
         fabrics: fabricNames,
@@ -263,7 +262,11 @@ export default function QuickSale() {
               {lastSale.itemCount > 1 && ` (${lastSale.itemCount} items)`}
             </p>
             <p className="text-3xl font-bold text-accent-600 mt-2">
-              ₹{lastSale.total.toLocaleString("en-IN")}
+              ₹
+              {lastSale.total.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </p>
             <span
               className={`badge mt-2 ${lastSale.paymentType === "cash" ? "bg-accent-100 text-accent-800" : "bg-warning-100 text-warning-800"}`}
@@ -407,7 +410,6 @@ export default function QuickSale() {
                 <input
                   type="number"
                   step="0.01"
-                  required
                   value={items[activeItemIdx]?.meters || ""}
                   onChange={(e) =>
                     updateItem(activeItemIdx, { meters: e.target.value })
@@ -424,7 +426,6 @@ export default function QuickSale() {
                 <input
                   type="number"
                   step="0.01"
-                  required
                   value={items[activeItemIdx]?.price_per_meter || ""}
                   onChange={(e) =>
                     updateItem(activeItemIdx, {
@@ -479,7 +480,11 @@ export default function QuickSale() {
               <div className="bg-accent-50 rounded-xl p-3 flex justify-between items-center">
                 <span className="text-sm text-gray-600">Subtotal</span>
                 <span className="text-lg font-bold text-accent-600">
-                  ₹{subtotal.toLocaleString("en-IN")}
+                  ₹
+                  {subtotal.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </div>
               <div>
@@ -508,7 +513,11 @@ export default function QuickSale() {
                     After Discount:
                   </span>
                   <span className="font-bold text-primary-600">
-                    ₹{netTotal.toLocaleString("en-IN")}
+                    ₹
+                    {netTotal.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </div>
               )}
@@ -546,7 +555,7 @@ export default function QuickSale() {
                   Saving...
                 </>
               ) : (
-                `Record Sale — ₹${netTotal.toLocaleString("en-IN")}`
+                `Record Sale — ₹${netTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               )}
             </button>
           )}

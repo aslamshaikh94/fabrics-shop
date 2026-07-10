@@ -42,14 +42,17 @@ const MONTHS = [
 ];
 function fmt(n, show = true) {
   if (!show) return "₹•••";
-  return `₹${Number(n || 0).toLocaleString("en-IN")}`;
+  return `₹${Number(n || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 function fmtShort(n, show = true) {
   if (!show) return "₹•••";
   n = Number(n || 0);
   if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
   if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
-  return `₹${n}`;
+  return `₹${n.toFixed(2)}`;
 }
 function pctChange(curr, prev) {
   if (!prev) return null;
@@ -847,7 +850,7 @@ export default function Reports() {
                       {f.name}
                     </p>
                     <span className="font-semibold text-red-600 text-sm">
-                      {f.available_meters}m left
+                      {f.available_meters?.toFixed(2)}m left
                     </span>
                   </div>
                 ))}

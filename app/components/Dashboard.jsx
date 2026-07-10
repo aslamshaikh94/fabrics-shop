@@ -20,7 +20,10 @@ function pctChange(curr, prev) {
 
 function fmtAmt(n, show) {
   if (!show) return "₹•••";
-  return `₹${Number(n || 0).toLocaleString("en-IN")}`;
+  return `₹${Number(n || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export default function Dashboard() {
@@ -480,9 +483,10 @@ export default function Dashboard() {
                     {fmtAmt(group.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
-                    {new Date(group.sale_date).toLocaleDateString("en-IN", {
+                    {new Date(group.sale_date).toLocaleDateString("en-GB", {
                       day: "numeric",
                       month: "short",
+                      year: "2-digit",
                     })}
                   </p>
                 </div>

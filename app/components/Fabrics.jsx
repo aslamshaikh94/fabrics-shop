@@ -6,12 +6,9 @@ import {
   Pencil,
   Trash2,
   X,
-  Search,
   Package,
   TriangleAlert as AlertTriangle,
   ScanLine,
-  ChevronLeft,
-  ChevronRight,
   Download,
   FileUp,
 } from "lucide-react";
@@ -24,6 +21,8 @@ import { formatDate } from "../utils/formatters";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import FabricsImport from "./FabricsImport";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
 
@@ -389,7 +388,10 @@ export default function Fabrics() {
               <p className="font-medium text-warning-800">Low Stock Alert</p>
               <p className="text-sm text-warning-700 mt-1">
                 {lowStock
-                  .map((f) => `${f.name} (${f.available_meters}m)`)
+                  .map(
+                    (f) =>
+                      `${f.name} (${(f.available_meters || 0).toFixed(2)}m)`,
+                  )
                   .join(", ")}
               </p>
             </div>
@@ -398,16 +400,11 @@ export default function Fabrics() {
       )}
 
       <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search fabrics..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search fabrics..."
+        />
         <select
           value={filterSupplier}
           onChange={(e) => setFilterSupplier(e.target.value)}
@@ -486,7 +483,10 @@ export default function Fabrics() {
                   </p>
                   <p className="text-xs text-green-600 mt-0.5">
                     Supplier: {existingPurchaseInfo.supplier?.name} — ₹
-                    {existingPurchaseInfo.total_amount.toLocaleString("en-IN")}
+                    {existingPurchaseInfo.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
               )}
@@ -691,7 +691,7 @@ export default function Fabrics() {
                 Barcode
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Quantity
+                Qty
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Supplier
@@ -761,7 +761,7 @@ export default function Fabrics() {
                         : "text-gray-900"
                     }`}
                   >
-                    {fabric.available_meters}m
+                    {(fabric.available_meters || 0).toFixed(2)}m
                     {fabric.available_meters < 10 && (
                       <span className="ml-1">⚠️</span>
                     )}
@@ -769,20 +769,24 @@ export default function Fabrics() {
                 </td>
                 <td className="px-4 py-3 text-center">
                   <p className="text-sm text-gray-900">
-                    {fabric.total_meters}m
+                    {(fabric.total_meters || 0).toFixed(2)}m
                   </p>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <p className="text-sm text-gray-900">
-                    ₹{fabric.purchase_price_per_meter}
+                    ₹{(fabric.purchase_price_per_meter || 0).toFixed(2)}
                   </p>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <p className="text-sm font-medium text-gray-900">
                     ₹
                     {(
-                      fabric.total_meters * fabric.purchase_price_per_meter
-                    ).toLocaleString("en-IN")}
+                      (fabric.total_meters || 0) *
+                      (fabric.purchase_price_per_meter || 0)
+                    ).toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </td>
                 <td className="px-4 py-3 text-right">
@@ -845,19 +849,16 @@ export default function Fabrics() {
       )}
 
       {filtered.length === 0 && (
-        <div className="text-center py-16">
-          <Package className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm
-              ? "No fabrics found matching your search"
-              : "No fabrics added yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm
+        <EmptyState
+          icon={Package}
+          title="No fabrics added yet"
+          searchTerm={searchTerm}
+          description={
+            searchTerm
               ? "Try a different search term"
-              : "Click Add Fabric to get started"}
-          </p>
-        </div>
+              : "Click Add Fabric to get started"
+          }
+        />
       )}
     </div>
   );
