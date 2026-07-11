@@ -10,8 +10,10 @@ import {
   Save,
   XCircle,
   History,
+  Trash2,
 } from "lucide-react";
 import Modal from "./shared/Modal";
+import ConfirmModal from "./ConfirmModal";
 import FabricSelect from "./shared/FabricSelect";
 import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
@@ -77,6 +79,7 @@ export default function SaleDetailsModal({
   });
   const [savingGroupFields, setSavingGroupFields] = useState(false);
   const [customerTab, setCustomerTab] = useState("existing");
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
 
   if (!open || !group) return null;
 
@@ -258,6 +261,20 @@ export default function SaleDetailsModal({
       toast("Failed to update sale info", "error");
     } finally {
       setSavingGroupFields(false);
+    }
+  }
+
+  async function handleDeleteItem(itemId) {
+    try {
+      await supabase.from("sale_payments").delete().eq("sale_id", itemId);
+      const { error } = await supabase.from("sales").delete().eq("id", itemId);
+      if (error) throw error;
+      toast("Item deleted");
+      setConfirmDeleteItem(null);
+      onSaleUpdated();
+    } catch (err) {
+      toast("Failed to delete item", "error");
+      setConfirmDeleteItem(null);
     }
   }
 
@@ -558,23 +575,35 @@ export default function SaleDetailsModal({
                             {item.fabric_name || "N/A"}
                           </p>
                         </div>
-                        <button
-                          onClick={() => {
-                            const n = item.fabric_name || "";
-                            setEditItemForm({
-                              fabric_id: item.fabric_id || "",
-                              fabric_name: n,
-                              meters: item.meters.toString(),
-                              price_per_meter: item.price_per_meter.toString(),
-                              cost_price_per_meter:
-                                item.cost_price_per_meter.toString(),
-                            });
-                            setEditingItemId(item.id);
-                          }}
-                          className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => {
+                              const n = item.fabric_name || "";
+                              setEditItemForm({
+                                fabric_id: item.fabric_id || "",
+                                fabric_name: n,
+                                meters: item.meters.toString(),
+                                price_per_meter:
+                                  item.price_per_meter.toString(),
+                                cost_price_per_meter:
+                                  item.cost_price_per_meter.toString(),
+                              });
+                              setEditingItemId(item.id);
+                            }}
+                            className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          {group.items.length > 1 && (
+                            <button
+                              onClick={() => setConfirmDeleteItem(item.id)}
+                              className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
+                              title="Delete item"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="grid grid-cols-5 gap-3 text-sm">
                         <div>
@@ -996,6 +1025,13 @@ export default function SaleDetailsModal({
           </div>
         </form>
       </Modal>
+      {confirmDeleteItem && (
+        <ConfirmModal
+          message="This will permanently delete this item and its payments."
+          onConfirm={() => handleDeleteItem(confirmDeleteItem)}
+          onCancel={() => setConfirmDeleteItem(null)}
+        />
+      )}
     </>
   );
 }
