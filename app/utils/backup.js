@@ -119,6 +119,8 @@ const TABLE_COLUMNS = {
     "created_at",
     "paid_by",
     "payment_proof_url",
+    "cleared",
+    "cleared_at",
   ],
   withdrawals: [
     "id",
@@ -211,7 +213,7 @@ export async function exportBackup() {
 
     const backup = {
       metadata: {
-        version: "1.1",
+        version: "1.2",
         timestamp: new Date().toISOString(),
         date: timestamp,
         appName: "Fabrics Shop",

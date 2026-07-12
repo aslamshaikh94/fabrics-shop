@@ -363,7 +363,14 @@ export default function Reports() {
       bg: summary.netProfit >= 0 ? "bg-emerald-50" : "bg-red-50",
       iconBg: summary.netProfit >= 0 ? "bg-emerald-500" : "bg-red-500",
       text: summary.netProfit >= 0 ? "text-emerald-700" : "text-red-600",
-      subtitle: `Expenses: ${fmt(summary.totalExpenses, showAmount)}`,
+    },
+    {
+      title: "Total Expenses",
+      value: summary.totalExpenses,
+      icon: Receipt,
+      bg: "bg-red-50",
+      iconBg: "bg-red-500",
+      text: "text-red-600",
     },
     {
       title: "Total Purchases",
