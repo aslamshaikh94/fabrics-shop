@@ -788,17 +788,34 @@ export default function Sales() {
                     </td>
                   )}
                   <td className="px-4 py-3 text-right text-sm">
-                    {group.discount_amount > 0 ? (
-                      <span className="font-medium text-primary-600">
-                        -₹
-                        {group.discount_amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
+                    {(() => {
+                      const netAfterDiscount =
+                        group.total_amount - group.discount_amount;
+                      const extraPaid = group.paid_amount - netAfterDiscount;
+                      if (extraPaid > 0) {
+                        return (
+                          <span className="font-medium text-accent-600">
+                            +₹
+                            {extraPaid.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        );
+                      }
+                      if (group.discount_amount > 0) {
+                        return (
+                          <span className="font-medium text-primary-600">
+                            -₹
+                            {group.discount_amount.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        );
+                      }
+                      return <span className="text-gray-300">—</span>;
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-right text-sm">
                     <span

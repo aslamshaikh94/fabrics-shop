@@ -31,6 +31,8 @@ export default function Dashboard() {
   const [stats, setStats] = useState({
     thisMonthSales: 0,
     thisMonthProfit: 0,
+    thisMonthCollected: 0,
+    thisMonthToCollect: 0,
     pendingPurchasePayments: 0,
     paidPurchasePayments: 0,
     pendingSalePayments: 0,
@@ -61,10 +63,14 @@ export default function Dashboard() {
         customersRes,
         thisMoSales,
         prevMoSales,
+        thisMoCollect,
+        prevMoCollect,
         recentRes,
         allCustomersRes,
       ] = await Promise.all([
-        supabase.from("sales").select("total_amount, remaining_amount"),
+        supabase
+          .from("sales")
+          .select("total_amount, remaining_amount, paid_amount"),
         supabase
           .from("purchases")
           .select("total_amount, paid_amount, remaining_amount"),
@@ -79,6 +85,15 @@ export default function Dashboard() {
         supabase
           .from("sales")
           .select("total_amount, margin")
+          .gte("sale_date", `${prevMonth}-01`)
+          .lt("sale_date", `${thisMonth}-01`),
+        supabase
+          .from("sales")
+          .select("paid_amount, remaining_amount")
+          .gte("sale_date", `${thisMonth}-01`),
+        supabase
+          .from("sales")
+          .select("paid_amount, remaining_amount")
           .gte("sale_date", `${prevMonth}-01`)
           .lt("sale_date", `${thisMonth}-01`),
         supabase
@@ -120,14 +135,32 @@ export default function Dashboard() {
         thisMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
       const prevProfit =
         prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
+      const currCollected =
+        thisMoCollect.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+      const prevCollected =
+        prevMoCollect.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+      const currToCollect =
+        thisMoCollect.data?.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ) || 0;
+      const prevToCollect =
+        prevMoCollect.data?.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ) || 0;
       const totalSalesAmount =
         salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
       const totalRemaining =
         salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0;
+      const totalPaidAmount =
+        salesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
 
       setStats({
         thisMonthSales: currSales,
         thisMonthProfit: currProfit,
+        thisMonthCollected: currCollected,
+        thisMonthToCollect: currToCollect,
         pendingSalePayments: totalRemaining,
         pendingPurchasePayments:
           purchasesRes.data?.reduce(
@@ -145,11 +178,13 @@ export default function Dashboard() {
         totalPurchases:
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
           0,
-        collectedAmount: totalSalesAmount - totalRemaining,
+        collectedAmount: totalPaidAmount,
       });
       setChanges({
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
+        collected: pctChange(currCollected, prevCollected),
+        toCollect: pctChange(currToCollect, prevToCollect),
       });
       // Group recent sales by sale_group_id (same logic as Sales listing page)
       const rawSales = recentRes.data || [];
@@ -249,20 +284,22 @@ export default function Dashboard() {
             valueBg: "text-green-700",
           },
           {
-            title: "To Collect",
-            value: stats.pendingSalePayments,
-            icon: CreditCard,
-            iconBg: "bg-purple-500",
-            valueBg: "text-purple-600",
-            subtitle: "From customers",
-          },
-          {
-            title: "Collected Amount",
-            value: stats.collectedAmount,
+            title: `${monthName} Collected`,
+            value: stats.thisMonthCollected,
+            change: changes.collected,
             icon: Receipt,
             iconBg: "bg-green-500",
             valueBg: "text-green-600",
-            subtitle: "Total collected from sales",
+            subtitle: "Cash received this month",
+          },
+          {
+            title: `${monthName} To Collect`,
+            value: stats.thisMonthToCollect,
+            change: changes.toCollect,
+            icon: CreditCard,
+            iconBg: "bg-purple-500",
+            valueBg: "text-purple-600",
+            subtitle: "Pending from customers",
           },
         ].map((card) => {
           const Icon = card.icon;
@@ -299,38 +336,9 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Inventory Value breakdown */}
-      <div className="card-hover p-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Current Stock Value (at Cost)
-          </p>
-          <div className="bg-primary-100 p-1.5 rounded-lg">
-            <Package className="w-4 h-4 text-primary-600" />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
-          <div>
-            <p className="text-xs text-gray-400">Base Cost</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">
-              {fmtAmt(stats.inventoryValue, showAmount)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">IGST (5%)</p>
-            <p className="text-lg font-bold text-gray-500 mt-0.5">
-              + {fmtAmt(stats.inventoryValue * 0.05, showAmount)}
-            </p>
-          </div>
-          <div className="col-span-2 sm:col-span-1 pt-3 sm:pt-0 border-t sm:border-0 border-gray-100">
-            <p className="text-xs text-primary-600 font-medium">
-              Total Value with GST
-            </p>
-            <p className="text-2xl font-black text-primary-700 mt-0.5">
-              {fmtAmt(stats.inventoryValue * 1.05, showAmount)}
-            </p>
-          </div>
-        </div>
+      {/* All-time totals */}
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        Lifetime Summary
       </div>
 
       {/* Supplier payment breakdown */}

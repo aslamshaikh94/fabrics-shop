@@ -13,6 +13,8 @@ import {
   Receipt,
   Download,
   FileUp,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
 import { exportCSV } from "../utils/export";
@@ -69,6 +71,7 @@ export default function Expenses() {
   const [proofError, setProofError] = useState("");
   const [viewProofUrl, setViewProofUrl] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [togglingClear, setTogglingClear] = useState(null);
   const handleCloseImport = () => setShowImport(false);
   const handleImported = () => {
     setShowImport(false);
@@ -192,6 +195,26 @@ export default function Expenses() {
     setShowForm(true);
   }
 
+  async function handleToggleClear(expense) {
+    setTogglingClear(expense.id);
+    try {
+      const updates = expense.cleared
+        ? { cleared: false, cleared_at: null }
+        : { cleared: true, cleared_at: new Date().toISOString() };
+      const { error } = await supabase
+        .from("expenses")
+        .update(updates)
+        .eq("id", expense.id);
+      if (error) throw error;
+      toast(expense.cleared ? "Marked as unpaid" : "Marked as reimbursed ✓");
+      fetchExpenses();
+    } catch (err) {
+      toast("Failed to update", "error");
+    } finally {
+      setTogglingClear(null);
+    }
+  }
+
   async function handleDelete(id) {
     try {
       const { error } = await supabase.from("expenses").delete().eq("id", id);
@@ -222,6 +245,9 @@ export default function Expenses() {
 
   const totalFiltered = filtered.reduce((s, e) => s + (e.amount || 0), 0);
   const totalAll = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalUncleared = expenses
+    .filter((e) => !e.cleared)
+    .reduce((s, e) => s + (e.amount || 0), 0);
 
   const categoryColors = {
     Rent: "bg-blue-100 text-blue-800",
@@ -291,12 +317,22 @@ export default function Expenses() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <p className="text-sm text-gray-500">Total Expenses (All Time)</p>
           <p className="text-2xl font-bold text-red-600 mt-1">
             ₹
             {totalAll.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm text-gray-500">Pending Reimbursement</p>
+          <p className="text-2xl font-bold text-orange-600 mt-1">
+            ₹
+            {totalUncleared.toLocaleString("en-IN", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -581,7 +617,7 @@ export default function Expenses() {
       {/* Expenses List */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full" style={{ minWidth: "580px" }}>
+          <table className="w-full" style={{ minWidth: "620px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -600,6 +636,9 @@ export default function Expenses() {
                   Proof
                 </th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Reimbursed
+                </th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Action
                 </th>
               </tr>
@@ -608,7 +647,7 @@ export default function Expenses() {
               {paginated.map((expense) => (
                 <tr
                   key={expense.id}
-                  className="hover:bg-gray-50 transition-colors"
+                  className={`hover:bg-gray-50 transition-colors ${expense.cleared ? "opacity-60" : ""}`}
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">{expense.title}</p>
@@ -661,6 +700,43 @@ export default function Expenses() {
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={() => handleToggleClear(expense)}
+                        disabled={togglingClear === expense.id}
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
+                          expense.cleared
+                            ? "bg-green-100 text-green-700 hover:bg-green-200"
+                            : "bg-gray-100 text-gray-500 hover:bg-orange-100 hover:text-orange-600"
+                        }`}
+                        title={
+                          expense.cleared
+                            ? "Mark as unpaid"
+                            : "Mark as reimbursed"
+                        }
+                      >
+                        {expense.cleared ? (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        ) : (
+                          <Circle className="w-3.5 h-3.5" />
+                        )}
+                        {expense.cleared ? "Paid" : "Clear"}
+                      </button>
+                      {expense.cleared && expense.cleared_at && (
+                        <span className="text-[10px] text-gray-400">
+                          {new Date(expense.cleared_at).toLocaleDateString(
+                            "en-GB",
+                            {
+                              day: "numeric",
+                              month: "short",
+                              year: "2-digit",
+                            },
+                          )}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
