@@ -26,11 +26,28 @@ function fmtAmt(n, show) {
   })}`;
 }
 
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 export default function Dashboard() {
   const { showAmount } = useShowAmount();
   const [stats, setStats] = useState({
     thisMonthSales: 0,
     thisMonthProfit: 0,
+    thisMonthCollected: 0,
+    thisMonthToCollect: 0,
     pendingPurchasePayments: 0,
     paidPurchasePayments: 0,
     pendingSalePayments: 0,
@@ -46,6 +63,18 @@ export default function Dashboard() {
   const [recentSales, setRecentSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState("month");
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [periodStats, setPeriodStats] = useState({
+    sales: 0,
+    profit: 0,
+    collected: 0,
+    toCollect: 0,
+  });
+  const [availableYears, setAvailableYears] = useState([
+    new Date().getFullYear(),
+  ]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -61,10 +90,15 @@ export default function Dashboard() {
         customersRes,
         thisMoSales,
         prevMoSales,
+        thisMoCollect,
+        prevMoCollect,
         recentRes,
         allCustomersRes,
+        yearsRes,
       ] = await Promise.all([
-        supabase.from("sales").select("total_amount, remaining_amount"),
+        supabase
+          .from("sales")
+          .select("total_amount, remaining_amount, paid_amount"),
         supabase
           .from("purchases")
           .select("total_amount, paid_amount, remaining_amount"),
@@ -83,6 +117,15 @@ export default function Dashboard() {
           .lt("sale_date", `${thisMonth}-01`),
         supabase
           .from("sales")
+          .select("paid_amount, remaining_amount")
+          .gte("sale_date", `${thisMonth}-01`),
+        supabase
+          .from("sales")
+          .select("paid_amount, remaining_amount")
+          .gte("sale_date", `${prevMonth}-01`)
+          .lt("sale_date", `${thisMonth}-01`),
+        supabase
+          .from("sales")
           .select(
             "id, sale_date, total_amount, notes, fabric_name, customer_id, customer_name, sale_group_id, created_at",
           )
@@ -90,7 +133,17 @@ export default function Dashboard() {
           .order("created_at", { ascending: false })
           .limit(20),
         supabase.from("customers").select("id, name"),
+        supabase.from("sales").select("sale_date").order("sale_date").limit(1),
       ]);
+
+      // Build available years
+      if (yearsRes.data?.length) {
+        const firstYear = new Date(yearsRes.data[0].sale_date).getFullYear();
+        const currentYear = new Date().getFullYear();
+        const years = [];
+        for (let y = firstYear; y <= currentYear; y++) years.push(y);
+        setAvailableYears(years.reverse());
+      }
 
       // Build customer name lookup
       const customerNameMap = Object.fromEntries(
@@ -105,7 +158,6 @@ export default function Dashboard() {
       const totalMeters =
         fabricsRes.data?.reduce((s, f) => s + (f.available_meters || 0), 0) ||
         0;
-      // Extract numeric value from quantity text (e.g. "10 Rolls" -> 10)
       const totalQuantity =
         fabricsRes.data?.reduce((s, f) => {
           const num = parseFloat((f.quantity || "").replace(/[^0-9.]/g, ""));
@@ -120,14 +172,32 @@ export default function Dashboard() {
         thisMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
       const prevProfit =
         prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
+      const currCollected =
+        thisMoCollect.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+      const prevCollected =
+        prevMoCollect.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+      const currToCollect =
+        thisMoCollect.data?.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ) || 0;
+      const prevToCollect =
+        prevMoCollect.data?.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ) || 0;
       const totalSalesAmount =
         salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
       const totalRemaining =
         salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0;
+      const totalPaidAmount =
+        salesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
 
       setStats({
         thisMonthSales: currSales,
         thisMonthProfit: currProfit,
+        thisMonthCollected: currCollected,
+        thisMonthToCollect: currToCollect,
         pendingSalePayments: totalRemaining,
         pendingPurchasePayments:
           purchasesRes.data?.reduce(
@@ -145,13 +215,24 @@ export default function Dashboard() {
         totalPurchases:
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
           0,
-        collectedAmount: totalSalesAmount - totalRemaining,
+        collectedAmount: totalPaidAmount,
       });
       setChanges({
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
+        collected: pctChange(currCollected, prevCollected),
+        toCollect: pctChange(currToCollect, prevToCollect),
       });
-      // Group recent sales by sale_group_id (same logic as Sales listing page)
+
+      // Set initial period stats to current month
+      setPeriodStats({
+        sales: currSales,
+        profit: currProfit,
+        collected: currCollected,
+        toCollect: currToCollect,
+      });
+
+      // Group recent sales
       const rawSales = recentRes.data || [];
       const groups = {};
       rawSales.forEach((sale) => {
@@ -173,7 +254,6 @@ export default function Dashboard() {
         }
         groups[key].items.push(sale);
         groups[key].total_amount += sale.total_amount || 0;
-        // Use latest fabric name from items
         if (sale.fabric_name) groups[key].firstFabricName = sale.fabric_name;
         if (sale.created_at > groups[key].createdAt) {
           groups[key].createdAt = sale.created_at;
@@ -201,6 +281,60 @@ export default function Dashboard() {
     fetchStats();
   }, [fetchStats]);
 
+  // Fetch period stats when selection changes
+  useEffect(() => {
+    if (loading) return;
+    fetchPeriodStats();
+  }, [selectedPeriod, selectedYear, selectedMonth]);
+
+  async function fetchPeriodStats() {
+    try {
+      let startDate, endDate;
+      const now = new Date();
+
+      if (selectedPeriod === "month") {
+        const monthStr = String(selectedMonth + 1).padStart(2, "0");
+        startDate = `${selectedYear}-${monthStr}-01`;
+        // Calculate last day of the month
+        const lastDay = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+        endDate = `${selectedYear}-${monthStr}-${lastDay}`;
+      } else if (selectedPeriod === "year") {
+        startDate = `${selectedYear}-01-01`;
+        endDate = `${selectedYear}-12-31`;
+      } else {
+        // all time
+        startDate = "2000-01-01";
+        endDate = "2099-12-31";
+      }
+
+      const [salesRes, collectRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("total_amount, margin")
+          .gte("sale_date", startDate)
+          .lte("sale_date", endDate),
+        supabase
+          .from("sales")
+          .select("paid_amount, remaining_amount")
+          .gte("sale_date", startDate)
+          .lte("sale_date", endDate),
+      ]);
+
+      setPeriodStats({
+        sales:
+          salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0,
+        profit: salesRes.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0,
+        collected:
+          collectRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
+        toCollect:
+          collectRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) ||
+          0,
+      });
+    } catch (err) {
+      console.error("Error fetching period stats:", err);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -219,6 +353,13 @@ export default function Dashboard() {
 
   const now = new Date();
   const monthName = now.toLocaleString("en-IN", { month: "long" });
+
+  const periodLabel =
+    selectedPeriod === "month"
+      ? `${MONTHS[selectedMonth]} ${selectedYear}`
+      : selectedPeriod === "year"
+        ? `${selectedYear}`
+        : "All Time";
 
   return (
     <div className="space-y-5">
@@ -249,20 +390,22 @@ export default function Dashboard() {
             valueBg: "text-green-700",
           },
           {
-            title: "To Collect",
-            value: stats.pendingSalePayments,
-            icon: CreditCard,
-            iconBg: "bg-purple-500",
-            valueBg: "text-purple-600",
-            subtitle: "From customers",
-          },
-          {
-            title: "Collected Amount",
-            value: stats.collectedAmount,
+            title: `${monthName} Collected`,
+            value: stats.thisMonthCollected,
+            change: changes.collected,
             icon: Receipt,
             iconBg: "bg-green-500",
             valueBg: "text-green-600",
-            subtitle: "Total collected from sales",
+            subtitle: "Cash received this month",
+          },
+          {
+            title: `${monthName} To Collect`,
+            value: stats.thisMonthToCollect,
+            change: changes.toCollect,
+            icon: CreditCard,
+            iconBg: "bg-purple-500",
+            valueBg: "text-purple-600",
+            subtitle: "Pending from customers",
           },
         ].map((card) => {
           const Icon = card.icon;
@@ -299,38 +442,105 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Inventory Value breakdown */}
-      <div className="card-hover p-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Current Stock Value (at Cost)
-          </p>
-          <div className="bg-primary-100 p-1.5 rounded-lg">
-            <Package className="w-4 h-4 text-primary-600" />
-          </div>
+      {/* Period selector */}
+      <div className="flex items-center gap-3">
+        <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+          {[
+            ["month", "Month"],
+            ["year", "Year"],
+            ["all", "All Time"],
+          ].map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setSelectedPeriod(v)}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all ${selectedPeriod === v ? "bg-white shadow text-gray-900" : "text-gray-500"}`}
+            >
+              {l}
+            </button>
+          ))}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
-          <div>
-            <p className="text-xs text-gray-400">Base Cost</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">
-              {fmtAmt(stats.inventoryValue, showAmount)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">IGST (5%)</p>
-            <p className="text-lg font-bold text-gray-500 mt-0.5">
-              + {fmtAmt(stats.inventoryValue * 0.05, showAmount)}
-            </p>
-          </div>
-          <div className="col-span-2 sm:col-span-1 pt-3 sm:pt-0 border-t sm:border-0 border-gray-100">
-            <p className="text-xs text-primary-600 font-medium">
-              Total Value with GST
-            </p>
-            <p className="text-2xl font-black text-primary-700 mt-0.5">
-              {fmtAmt(stats.inventoryValue * 1.05, showAmount)}
-            </p>
-          </div>
-        </div>
+        {selectedPeriod !== "all" && (
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className="input w-24 text-xs"
+          >
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        )}
+        {selectedPeriod === "month" && (
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+            className="input w-24 text-xs"
+          >
+            {MONTHS.map((m, i) => (
+              <option key={i} value={i}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* Period stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          {
+            title: `${periodLabel} Sales`,
+            value: periodStats.sales,
+            icon: TrendingUp,
+            iconBg: "bg-blue-500",
+            valueBg: "text-gray-900",
+          },
+          {
+            title: `${periodLabel} Profit`,
+            value: periodStats.profit,
+            icon: DollarSign,
+            iconBg: "bg-green-500",
+            valueBg: "text-green-700",
+          },
+          {
+            title: `${periodLabel} Collected`,
+            value: periodStats.collected,
+            icon: Receipt,
+            iconBg: "bg-green-500",
+            valueBg: "text-green-600",
+          },
+          {
+            title: `${periodLabel} To Collect`,
+            value: periodStats.toCollect,
+            icon: CreditCard,
+            iconBg: "bg-purple-500",
+            valueBg: "text-purple-600",
+          },
+        ].map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.title} className="card-hover p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-medium text-gray-500 leading-tight">
+                  {card.title}
+                </p>
+                <div className={`${card.iconBg} p-1.5 rounded-lg`}>
+                  <Icon className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+              <p className={`text-xl font-bold ${card.valueBg}`}>
+                {fmtAmt(card.value, showAmount)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* All-time totals */}
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        Lifetime Summary
       </div>
 
       {/* Supplier payment breakdown */}

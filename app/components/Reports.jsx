@@ -356,14 +356,6 @@ export default function Reports() {
       text: "text-green-700",
     },
     {
-      title: "Total Expenses",
-      value: summary.totalExpenses,
-      icon: Receipt,
-      bg: "bg-red-50",
-      iconBg: "bg-red-500",
-      text: "text-red-600",
-    },
-    {
       title: "Net Profit",
       value: summary.netProfit,
       prev: prevSummary.netProfit,
@@ -371,6 +363,14 @@ export default function Reports() {
       bg: summary.netProfit >= 0 ? "bg-emerald-50" : "bg-red-50",
       iconBg: summary.netProfit >= 0 ? "bg-emerald-500" : "bg-red-500",
       text: summary.netProfit >= 0 ? "text-emerald-700" : "text-red-600",
+    },
+    {
+      title: "Total Expenses",
+      value: summary.totalExpenses,
+      icon: Receipt,
+      bg: "bg-red-50",
+      iconBg: "bg-red-500",
+      text: "text-red-600",
     },
     {
       title: "Total Purchases",
@@ -471,6 +471,11 @@ export default function Reports() {
                   <p className="text-xs text-gray-400 mt-0.5">
                     {fmt(card.value, showAmount)}
                   </p>
+                  {card.subtitle && (
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      {card.subtitle}
+                    </p>
+                  )}
                   {yoy && (
                     <p
                       className={`text-xs mt-1 flex items-center gap-0.5 ${yoy.up ? "text-green-600" : "text-red-500"}`}
