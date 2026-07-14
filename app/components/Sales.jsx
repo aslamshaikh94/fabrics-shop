@@ -54,8 +54,10 @@ export default function Sales() {
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [customRange, setCustomRange] = useState(false);
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmDeletePayment, setConfirmDeletePayment] = useState(null);
@@ -269,6 +271,47 @@ export default function Sales() {
     }
   }
 
+  function toLocalDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  // Compute effective dateFrom/dateTo based on the dateFilter preset
+  const effectiveDateRange = useMemo(() => {
+    if (customRange) {
+      return { dateFrom, dateTo };
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = toLocalDateStr(today);
+    switch (dateFilter) {
+      case "today":
+        return { dateFrom: todayStr, dateTo: todayStr };
+      case "yesterday": {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return {
+          dateFrom: toLocalDateStr(yesterday),
+          dateTo: toLocalDateStr(yesterday),
+        };
+      }
+      case "week": {
+        const week = new Date(today);
+        week.setDate(week.getDate() - 6);
+        return { dateFrom: toLocalDateStr(week), dateTo: todayStr };
+      }
+      case "month": {
+        const month = new Date(today);
+        month.setMonth(month.getMonth() - 1);
+        return { dateFrom: toLocalDateStr(month), dateTo: todayStr };
+      }
+      default:
+        return { dateFrom: "", dateTo: "" };
+    }
+  }, [dateFilter, customRange, dateFrom, dateTo]);
+
   const filteredSales = useMemo(
     () =>
       sales.filter((s) => {
@@ -277,17 +320,19 @@ export default function Sales() {
         const n = s.notes?.toLowerCase() || "";
         const f = s.fabric_name?.toLowerCase() || "";
         const cust = s.customer_name?.toLowerCase() || "";
+        const efFrom = effectiveDateRange.dateFrom;
+        const efTo = effectiveDateRange.dateTo;
         return (
           (c.includes(term) ||
             n.includes(term) ||
             f.includes(term) ||
             cust.includes(term)) &&
           (filterType === "all" || s.payment_type === filterType) &&
-          (!dateFrom || s.sale_date >= dateFrom) &&
-          (!dateTo || s.sale_date <= dateTo)
+          (!efFrom || s.sale_date >= efFrom) &&
+          (!efTo || s.sale_date <= efTo)
         );
       }),
-    [sales, searchTerm, filterType, dateFrom, dateTo],
+    [sales, searchTerm, filterType, effectiveDateRange],
   );
 
   const groupedArray = useMemo(() => {
@@ -490,7 +535,10 @@ export default function Sales() {
         />
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => {
+            setFilterType(e.target.value);
+            setPage(1);
+          }}
           className="input w-full sm:w-40"
         >
           <option value="all">All Types</option>
@@ -498,27 +546,46 @@ export default function Sales() {
           <option value="credit">Credit</option>
           <option value="partial">Partial</option>
         </select>
-        <div className="flex gap-2 items-center">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className="input w-full sm:w-36"
-          />
-          <span className="text-gray-400">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className="input w-full sm:w-36"
-          />
-        </div>
+        <select
+          value={dateFilter}
+          onChange={(e) => {
+            const val = e.target.value;
+            setDateFilter(val);
+            setCustomRange(val === "custom");
+            setPage(1);
+          }}
+          className="input w-full sm:w-40"
+        >
+          <option value="all">All Dates</option>
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="week">Last 7 Days</option>
+          <option value="month">Last 30 Days</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {customRange && (
+          <div className="flex gap-2 items-center">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setPage(1);
+              }}
+              className="input w-full sm:w-36"
+            />
+            <span className="text-gray-400">-</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setPage(1);
+              }}
+              className="input w-full sm:w-36"
+            />
+          </div>
+        )}
       </div>
 
       <SaleForm
