@@ -638,32 +638,13 @@ export default function Purchases() {
               quantity: row.quantity || "",
               barcode: row.barcode || "",
               purchase_id: purchaseId,
+              supplier_id: selectedPurchase.supplier_id,
               created_at: selectedPurchase.purchase_date + "T00:00:00",
             },
           ]);
           if (error) throw error;
         }
       }
-
-      // Update purchase total_amount
-      const { data: allLinkedFabrics } = await supabase
-        .from("fabrics")
-        .select("total_meters, purchase_price_per_meter")
-        .eq("purchase_id", purchaseId);
-
-      const updatedTotal = (allLinkedFabrics || []).reduce(
-        (sum, f) =>
-          sum +
-          (parseFloat(f.total_meters) || 0) *
-            (parseFloat(f.purchase_price_per_meter) || 0),
-        0,
-      );
-
-      const { error: updatePurchaseError } = await supabase
-        .from("purchases")
-        .update({ total_amount: updatedTotal })
-        .eq("id", purchaseId);
-      if (updatePurchaseError) throw updatePurchaseError;
 
       const hasRestock = validRows.some((r) => r.fabric_id);
       toast(
