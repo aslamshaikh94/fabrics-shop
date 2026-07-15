@@ -11,6 +11,7 @@ import {
   ScanLine,
   Download,
   FileUp,
+  Trash,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
@@ -47,6 +48,9 @@ export default function Fabrics() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const toast = useToast();
   const [formData, setFormData] = useState(emptyForm);
   const [existingPurchaseInfo, setExistingPurchaseInfo] = useState(null);
@@ -128,6 +132,8 @@ export default function Fabrics() {
 
   useEffect(() => {
     setPage(1);
+    setSelectedIds(new Set());
+    setSelectMode(false);
   }, [searchTerm, filterSupplier, dateFrom, dateTo]);
 
   const handlePurchaseNumberChange = useCallback((e) => {
@@ -276,6 +282,39 @@ export default function Fabrics() {
     }
   }
 
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === paginated.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(paginated.map((f) => f.id)));
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      const { error } = await supabase.from("fabrics").delete().in("id", ids);
+      if (error) throw error;
+      toast(`${ids.length} fabric${ids.length > 1 ? "s" : ""} deleted`);
+      setSelectedIds(new Set());
+      setConfirmBulkDelete(false);
+      fetchFabrics();
+    } catch (err) {
+      toast("Failed to delete fabrics", "error");
+      setConfirmBulkDelete(false);
+    }
+  }
+
   async function handleDelete(id) {
     try {
       const { error } = await supabase.from("fabrics").delete().eq("id", id);
@@ -338,6 +377,16 @@ export default function Fabrics() {
           <p className="text-gray-500 mt-1">Manage your fabric inventory</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setSelectMode(!selectMode);
+              if (selectMode) setSelectedIds(new Set());
+            }}
+            className={`btn ${selectMode ? "btn-primary" : "btn-ghost"}`}
+            title={selectMode ? "Exit selection mode" : "Select fabrics"}
+          >
+            <Trash className="w-4 h-4" />
+          </button>
           <button
             onClick={() => setShowImport(true)}
             className="btn btn-secondary"
@@ -684,6 +733,19 @@ export default function Fabrics() {
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
+              {selectMode && (
+                <th className="px-4 py-3 text-left w-10">
+                  <input
+                    type="checkbox"
+                    checked={
+                      paginated.length > 0 &&
+                      selectedIds.size === paginated.length
+                    }
+                    onChange={toggleSelectAll}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                </th>
+              )}
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Name
               </th>
@@ -723,8 +785,18 @@ export default function Fabrics() {
             {paginated.map((fabric) => (
               <tr
                 key={fabric.id}
-                className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${selectedIds.has(fabric.id) ? "bg-primary-50" : ""}`}
               >
+                {selectMode && (
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(fabric.id)}
+                      onChange={() => toggleSelect(fabric.id)}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-3">
                   <p className="font-medium text-gray-900">{fabric.name}</p>
                 </td>
@@ -832,13 +904,50 @@ export default function Fabrics() {
         </table>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl px-4 py-3">
+          <span className="text-sm text-primary-700">
+            <strong>{selectedIds.size}</strong> fabric
+            {selectedIds.size > 1 ? "s" : ""} selected
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="btn btn-secondary text-sm"
+            >
+              Clear Selection
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              className="btn text-sm"
+              style={{ backgroundColor: "#dc2626", color: "white" }}
+            >
+              <Trash className="w-4 h-4 mr-1" />
+              Delete Selected
+            </button>
+          </div>
+        </div>
+      )}
+
       <Pagination
         currentPage={page}
         totalPages={totalPages}
-        onPageChange={setPage}
+        onPageChange={(p) => {
+          setPage(p);
+          setSelectedIds(new Set());
+        }}
         totalItems={filtered.length}
         label="fabrics"
       />
+
+      {confirmBulkDelete && (
+        <ConfirmModal
+          message={`This will permanently delete ${selectedIds.size} fabric${selectedIds.size > 1 ? "s" : ""}.`}
+          onConfirm={handleBulkDelete}
+          onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmModal

@@ -646,26 +646,6 @@ export default function Purchases() {
         }
       }
 
-      // Update purchase total_amount
-      const { data: allLinkedFabrics } = await supabase
-        .from("fabrics")
-        .select("total_meters, purchase_price_per_meter")
-        .eq("purchase_id", purchaseId);
-
-      const updatedTotal = (allLinkedFabrics || []).reduce(
-        (sum, f) =>
-          sum +
-          (parseFloat(f.total_meters) || 0) *
-            (parseFloat(f.purchase_price_per_meter) || 0),
-        0,
-      );
-
-      const { error: updatePurchaseError } = await supabase
-        .from("purchases")
-        .update({ total_amount: updatedTotal })
-        .eq("id", purchaseId);
-      if (updatePurchaseError) throw updatePurchaseError;
-
       const hasRestock = validRows.some((r) => r.fabric_id);
       toast(
         `${validRows.length} fabric${validRows.length > 1 ? "s" : ""} added to purchase${hasRestock ? " (restocked existing)" : ""}`,
