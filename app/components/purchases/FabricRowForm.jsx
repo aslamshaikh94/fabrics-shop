@@ -47,6 +47,10 @@ export default function FabricRowForm({
               setFabricSearch(row.fabric_name || "");
               setActiveFabricIdx(idx);
             }}
+            onBlur={() => {
+              // Delay clearing so click on suggestion can register first
+              setTimeout(() => setActiveFabricIdx(null), 200);
+            }}
             placeholder="Type to search existing fabrics..."
           />
           {row.fabric_id && (
