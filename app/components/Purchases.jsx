@@ -638,6 +638,7 @@ export default function Purchases() {
               quantity: row.quantity || "",
               barcode: row.barcode || "",
               purchase_id: purchaseId,
+              supplier_id: selectedPurchase.supplier_id,
               created_at: selectedPurchase.purchase_date + "T00:00:00",
             },
           ]);
