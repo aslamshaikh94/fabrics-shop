@@ -16,6 +16,7 @@ import {
   ShoppingBag,
   ScanLine,
   Package,
+  Loader2,
 } from "lucide-react";
 import DateRangeFilter from "./DateRangeFilter";
 import PurchasesImport from "./PurchasesImport";
@@ -35,6 +36,7 @@ import BarcodeScanner from "./BarcodeScanner";
 import FabricRowForm from "./purchases/FabricRowForm";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
+import { extractPdfText, parseFabricEntries } from "../utils/pdfExtractor";
 
 const PAGE_SIZE = 10;
 
@@ -69,6 +71,7 @@ function makeEmptyFabricRow() {
     purchase_price_per_meter: "",
     quantity: "",
     barcode: "",
+    discount_amount: "",
   };
 }
 
@@ -144,6 +147,9 @@ export default function Purchases() {
   const [activeFabricIdx, setActiveFabricIdx] = useState(null);
   const [savingFabrics, setSavingFabrics] = useState(false);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
+  const [pdfExtracting, setPdfExtracting] = useState(false);
+  const [jsonExtracting, setJsonExtracting] = useState(false);
+  const [editingFabricIdx, setEditingFabricIdx] = useState(null);
 
   useEffect(() => {
     fetchAll();
@@ -418,6 +424,7 @@ export default function Purchases() {
     setFabricSearch("");
     setActiveFabricIdx(null);
     setScanningRowIdx(null);
+    setEditingFabricIdx(null);
   }
 
   function updateFabricRow(idx, fields) {
@@ -455,6 +462,126 @@ export default function Purchases() {
       return;
     }
     setFabricRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleJsonUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith(".json")) {
+      toast("Please upload a .json file", "error");
+      return;
+    }
+    setJsonExtracting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const items = Array.isArray(data)
+        ? data
+        : data.items || data.fabrics || data.rows || [];
+
+      if (items.length === 0) {
+        toast("No fabric items found in JSON data", "error");
+        return;
+      }
+
+      const newRows = items.map((item) => ({
+        fabric_id: "",
+        fabric_name:
+          item.fabric_name || item.fabricName || item.name || item.fabric || "",
+        total_meters: String(
+          item.total_meters || item.meters || item.mtrs || "",
+        ),
+        purchase_price_per_meter: String(
+          item.purchase_price_per_meter ||
+            item.price ||
+            item.buy_price ||
+            item.rate ||
+            "",
+        ),
+        quantity: String(item.quantity || item.qty || "1"),
+        barcode: item.barcode || item.barCode || "",
+        discount_amount: String(
+          item.discount_amount || item.discAmt || item.discount || "",
+        ),
+      }));
+
+      // Filter out rows without required fields
+      const validRows = newRows.filter(
+        (r) => r.fabric_name && r.total_meters && r.purchase_price_per_meter,
+      );
+      if (validRows.length === 0) {
+        toast(
+          "JSON data missing required fields: fabric_name, total_meters, purchase_price_per_meter",
+          "error",
+        );
+        return;
+      }
+
+      validRows.push(makeEmptyFabricRow());
+      setFabricRows(validRows);
+      toast(
+        `Loaded ${validRows.length - 1} fabric item${validRows.length - 1 > 1 ? "s" : ""} from JSON.`,
+      );
+    } catch (err) {
+      console.error("JSON parse error:", err);
+      toast("Failed to parse JSON file. Please check the format.", "error");
+    } finally {
+      setJsonExtracting(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handlePdfUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      toast("Please upload a PDF file", "error");
+      return;
+    }
+    setPdfExtracting(true);
+    try {
+      console.log("PDF upload: starting extraction for", file.name, file.size);
+      const text = await extractPdfText(file);
+      console.log("PDF extracted text length:", text.length);
+      console.log("PDF first 1000 chars:", text.slice(0, 1000));
+      console.log(
+        "PDF lines (first 40):",
+        text
+          .split("\n")
+          .slice(0, 40)
+          .map((l, i) => `${i}: ${l}`)
+          .join("\n"),
+      );
+      const entries = parseFabricEntries(text);
+      console.log("PDF parsed entries:", entries);
+      if (entries.length === 0) {
+        toast(
+          `Could not extract fabric data from this PDF. Found ${text.length} chars of text but no fabric rows matched.`,
+          "error",
+        );
+        return;
+      }
+      // Replace current rows with extracted entries + one empty row
+      const newRows = entries.map((entry) => ({
+        fabric_id: "",
+        fabric_name: entry.fabric_name,
+        total_meters: entry.total_meters,
+        purchase_price_per_meter: entry.purchase_price_per_meter,
+        quantity: entry.quantity || "1",
+        barcode: "",
+      }));
+      newRows.push(makeEmptyFabricRow());
+      setFabricRows(newRows);
+      toast(
+        `Extracted ${entries.length} fabric item${entries.length > 1 ? "s" : ""} from PDF. Please review and adjust.`,
+      );
+    } catch (err) {
+      console.error("PDF extraction error:", err);
+      toast("Failed to extract data from PDF. Please enter manually.", "error");
+    } finally {
+      setPdfExtracting(false);
+      e.target.value = "";
+    }
   }
 
   async function handleAddFabricsSubmit(e) {
@@ -511,6 +638,7 @@ export default function Purchases() {
               quantity: row.quantity || "",
               barcode: row.barcode || "",
               purchase_id: purchaseId,
+              created_at: selectedPurchase.purchase_date + "T00:00:00",
             },
           ]);
           if (error) throw error;
@@ -991,6 +1119,98 @@ export default function Purchases() {
         size="lg"
       >
         <form onSubmit={handleAddFabricsSubmit} className="space-y-4">
+          {/* Totals bar */}
+          {(() => {
+            const validRows = fabricRows.filter(
+              (r) => r.fabric_name && r.total_meters,
+            );
+            if (validRows.length === 0) return null;
+            const totalMeters = validRows.reduce(
+              (s, r) => s + (parseFloat(r.total_meters) || 0),
+              0,
+            );
+            const totalAmount = validRows.reduce(
+              (s, r) =>
+                s +
+                (parseFloat(r.total_meters) || 0) *
+                  (parseFloat(r.purchase_price_per_meter) || 0),
+              0,
+            );
+            const totalDisc = validRows.reduce(
+              (s, r) => s + (parseFloat(r.discount_amount) || 0),
+              0,
+            );
+            const netAmount = totalAmount - totalDisc;
+            return (
+              <div className="bg-primary-50 border border-primary-200 rounded-xl p-3">
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <span className="text-primary-700">
+                    Items: <strong>{validRows.length}</strong>
+                  </span>
+                  <span className="text-primary-700">
+                    Mtrs: <strong>{totalMeters.toFixed(2)}m</strong>
+                  </span>
+                  <span className="text-primary-700">
+                    Total:{" "}
+                    <strong>
+                      ₹
+                      {totalAmount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </strong>
+                  </span>
+                  {totalDisc > 0 && (
+                    <span className="text-warning-700">
+                      Disc:{" "}
+                      <strong>
+                        -₹
+                        {totalDisc.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </strong>
+                    </span>
+                  )}
+                  <span className="text-primary-700">
+                    Net:{" "}
+                    <strong>
+                      ₹
+                      {netAmount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </strong>
+                  </span>
+                  <span className="text-primary-700">
+                    GST (5%):{" "}
+                    <strong>
+                      ₹
+                      {(
+                        Math.round(netAmount * 0.05 * 100) / 100
+                      ).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </strong>
+                  </span>
+                  <span className="text-accent-700 font-semibold">
+                    Total with GST:{" "}
+                    <strong>
+                      ₹
+                      {(
+                        Math.round(netAmount * 1.05 * 100) / 100
+                      ).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Added items summary */}
           {fabricRows.length > 1 && (
             <div className="space-y-2 mb-3 pb-3 border-b border-gray-200">
@@ -1002,28 +1222,222 @@ export default function Purchases() {
                   key={idx}
                   className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-2.5"
                 >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {row.fabric_name}
-                      {row.fabric_id && (
-                        <span className="ml-1.5 text-[10px] text-accent-600 bg-accent-100 px-1.5 py-0.5 rounded-full">
-                          restock
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {row.total_meters}m @ ₹{row.purchase_price_per_meter}/m
-                      {row.quantity ? ` • ${row.quantity}` : ""}
-                      {row.barcode ? ` • ${row.barcode}` : ""}
-                    </p>
+                  {editingFabricIdx === idx ? (
+                    <div className="flex-1 space-y-2">
+                      <input
+                        type="text"
+                        value={row.fabric_name}
+                        onChange={(e) =>
+                          updateFabricRow(idx, { fabric_name: e.target.value })
+                        }
+                        className="input text-sm py-1.5"
+                        placeholder="Fabric Name"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={row.total_meters}
+                          onChange={(e) =>
+                            updateFabricRow(idx, {
+                              total_meters: e.target.value,
+                            })
+                          }
+                          className="input text-sm py-1.5 w-24"
+                          placeholder="Meters"
+                        />
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={row.purchase_price_per_meter}
+                          onChange={(e) =>
+                            updateFabricRow(idx, {
+                              purchase_price_per_meter: e.target.value,
+                            })
+                          }
+                          className="input text-sm py-1.5 w-24"
+                          placeholder="₹/m"
+                        />
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={row.discount_amount}
+                          onChange={(e) =>
+                            updateFabricRow(idx, {
+                              discount_amount: e.target.value,
+                            })
+                          }
+                          className="input text-sm py-1.5 w-20"
+                          placeholder="Disc"
+                        />
+                        <input
+                          type="text"
+                          value={row.quantity}
+                          onChange={(e) =>
+                            updateFabricRow(idx, { quantity: e.target.value })
+                          }
+                          className="input text-sm py-1.5 w-20"
+                          placeholder="Qty"
+                        />
+                        <input
+                          type="text"
+                          value={row.barcode}
+                          onChange={(e) =>
+                            updateFabricRow(idx, { barcode: e.target.value })
+                          }
+                          className="input text-sm py-1.5 w-28"
+                          placeholder="Barcode"
+                        />
+                      </div>
+                      {(() => {
+                        const mtrs = parseFloat(row.total_meters) || 0;
+                        const rate =
+                          parseFloat(row.purchase_price_per_meter) || 0;
+                        const disc = parseFloat(row.discount_amount) || 0;
+                        const total = mtrs * rate;
+                        const net = total - disc;
+                        return (
+                          <div className="flex gap-3 text-[11px] text-gray-500">
+                            <span>
+                              Amt:{" "}
+                              <strong>
+                                ₹
+                                {total.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </strong>
+                            </span>
+                            {disc > 0 && (
+                              <span>
+                                Disc:{" "}
+                                <strong>
+                                  -₹
+                                  {disc.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </strong>
+                              </span>
+                            )}
+                            <span>
+                              Net:{" "}
+                              <strong>
+                                ₹
+                                {net.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </strong>
+                            </span>
+                          </div>
+                        );
+                      })()}
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setEditingFabricIdx(null)}
+                          className="btn btn-secondary text-xs py-1.5 px-3"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingFabricIdx(null)}
+                          className="btn btn-primary text-xs py-1.5 px-3"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {row.fabric_name}
+                        {row.fabric_id && (
+                          <span className="ml-1.5 text-[10px] text-accent-600 bg-accent-100 px-1.5 py-0.5 rounded-full">
+                            restock
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {row.total_meters}m @ ₹{row.purchase_price_per_meter}/m
+                        {row.discount_amount
+                          ? ` • Disc: ₹${parseFloat(row.discount_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : ""}
+                        {row.quantity ? ` • ${row.quantity}` : ""}
+                        {row.barcode ? ` • ${row.barcode}` : ""}
+                      </p>
+                      {(() => {
+                        const mtrs = parseFloat(row.total_meters) || 0;
+                        const rate =
+                          parseFloat(row.purchase_price_per_meter) || 0;
+                        const disc = parseFloat(row.discount_amount) || 0;
+                        const total = mtrs * rate;
+                        const net = total - disc;
+                        return (
+                          <div className="flex gap-3 mt-1 text-[11px]">
+                            <span className="text-gray-600">
+                              Amt:{" "}
+                              <strong>
+                                ₹
+                                {total.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </strong>
+                            </span>
+                            <span
+                              className={
+                                disc > 0 ? "text-warning-600" : "text-gray-400"
+                              }
+                            >
+                              Disc:{" "}
+                              <strong>
+                                {disc > 0 ? "-" : ""}₹
+                                {disc.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </strong>
+                            </span>
+                            <span className="text-gray-700">
+                              Net:{" "}
+                              <strong>
+                                ₹
+                                {net.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </strong>
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingFabricIdx(
+                          editingFabricIdx === idx ? null : idx,
+                        );
+                      }}
+                      className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
+                      title="Edit item"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeFabricRow(idx)}
+                      className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600"
+                      title="Remove item"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeFabricRow(idx)}
-                    className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 shrink-0 ml-2"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               ))}
             </div>
@@ -1043,6 +1457,37 @@ export default function Purchases() {
             setScanningRowIdx={setScanningRowIdx}
             isLastRow={true}
           />
+
+          {/* JSON Upload */}
+          <div className="border-t border-gray-200 pt-4">
+            <label className="flex items-center justify-center gap-2 cursor-pointer border-2 border-dashed border-gray-300 rounded-xl p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors">
+              {jsonExtracting ? (
+                <>
+                  <Loader2 className="w-5 h-5 text-primary-500 animate-spin" />
+                  <span className="text-sm text-gray-500">
+                    Loading JSON data...
+                  </span>
+                </>
+              ) : (
+                <>
+                  <FileUp className="w-5 h-5 text-gray-400" />
+                  <span className="text-sm text-gray-500">
+                    Load from JSON file
+                  </span>
+                </>
+              )}
+              <input
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleJsonUpload}
+                disabled={jsonExtracting}
+              />
+            </label>
+            <p className="text-xs text-gray-400 mt-1.5 text-center">
+              JSON format: [{"{"}fabricName, meters, price, quantity{"}"}]
+            </p>
+          </div>
 
           <div className="flex gap-3 pt-2">
             <button

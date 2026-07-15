@@ -320,7 +320,7 @@ export default function Fabrics() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const lowStock = fabrics.filter((f) => f.available_meters < 10);
+  const lowStock = fabrics.filter((f) => f.available_meters < 2);
 
   if (loading) {
     return (
@@ -756,13 +756,13 @@ export default function Fabrics() {
                 <td className="px-4 py-3 text-center">
                   <p
                     className={`font-semibold text-sm ${
-                      fabric.available_meters < 10
+                      fabric.available_meters < 2
                         ? "text-red-600"
                         : "text-gray-900"
                     }`}
                   >
                     {(fabric.available_meters || 0).toFixed(2)}m
-                    {fabric.available_meters < 10 && (
+                    {fabric.available_meters < 2 && (
                       <span className="ml-1">⚠️</span>
                     )}
                   </p>
