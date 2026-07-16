@@ -150,6 +150,9 @@ export default function Purchases() {
   const [pdfExtracting, setPdfExtracting] = useState(false);
   const [jsonExtracting, setJsonExtracting] = useState(false);
   const [editingFabricIdx, setEditingFabricIdx] = useState(null);
+  const [editingDetailFabricId, setEditingDetailFabricId] = useState(null);
+  const [editingDetailFabricData, setEditingDetailFabricData] = useState(null);
+  const [savingDetailFabric, setSavingDetailFabric] = useState(false);
 
   useEffect(() => {
     fetchAll();
@@ -659,6 +662,72 @@ export default function Purchases() {
       toast(err?.message || "Failed to add fabrics", "error");
     } finally {
       setSavingFabrics(false);
+    }
+  }
+
+  function handleEditDetailFabric(fabric) {
+    setEditingDetailFabricId(fabric.id);
+    setEditingDetailFabricData({
+      name: fabric.name,
+      total_meters: fabric.total_meters?.toString() || "",
+      purchase_price_per_meter:
+        fabric.purchase_price_per_meter?.toString() || "",
+      quantity: fabric.quantity?.toString() || "",
+      barcode: fabric.barcode || "",
+    });
+  }
+
+  function handleCancelEditDetailFabric() {
+    setEditingDetailFabricId(null);
+    setEditingDetailFabricData(null);
+  }
+
+  async function handleSaveDetailFabric() {
+    if (!editingDetailFabricId || !editingDetailFabricData) return;
+    setSavingDetailFabric(true);
+    try {
+      const oldFabric = purchaseFabrics.find(
+        (f) => f.id === editingDetailFabricId,
+      );
+      const oldTotal = oldFabric?.total_meters || 0;
+      const newTotal = parseFloat(editingDetailFabricData.total_meters) || 0;
+      const diff = newTotal - oldTotal;
+
+      const payload = {
+        name: editingDetailFabricData.name,
+        total_meters: newTotal,
+        purchase_price_per_meter:
+          parseFloat(editingDetailFabricData.purchase_price_per_meter) || 0,
+        quantity: editingDetailFabricData.quantity || "",
+        barcode: editingDetailFabricData.barcode || "",
+      };
+
+      // If total_meters changed, update available_meters accordingly
+      if (diff !== 0) {
+        payload.available_meters = Math.max(
+          0,
+          (oldFabric?.available_meters || 0) + diff,
+        );
+      }
+
+      const { error } = await supabase
+        .from("fabrics")
+        .update(payload)
+        .eq("id", editingDetailFabricId);
+      if (error) throw error;
+
+      toast("Fabric updated");
+      setEditingDetailFabricId(null);
+      setEditingDetailFabricData(null);
+      // Refresh the fabrics list for this purchase
+      if (selectedPurchase) {
+        fetchPurchaseFabrics(selectedPurchase.id);
+      }
+    } catch (err) {
+      console.error("Error updating fabric:", err);
+      toast(err?.message || "Failed to update fabric", "error");
+    } finally {
+      setSavingDetailFabric(false);
     }
   }
 
@@ -1602,27 +1671,158 @@ export default function Purchases() {
                   {purchaseFabrics.map((fabric) => (
                     <div
                       key={fabric.id}
-                      className="border border-gray-200 rounded-lg p-3 flex items-center justify-between bg-white"
+                      className="border border-gray-200 rounded-lg p-3 bg-white"
                     >
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">
-                          {fabric.name}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {fabric.total_meters}m @ ₹
-                          {fabric.purchase_price_per_meter}/m
-                          {fabric.quantity ? ` • ${fabric.quantity}` : ""}
-                        </p>
-                      </div>
-                      <p className="font-semibold text-gray-900 text-sm">
-                        ₹
-                        {(
-                          fabric.total_meters * fabric.purchase_price_per_meter
-                        ).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
+                      {editingDetailFabricId === fabric.id ? (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={editingDetailFabricData?.name || ""}
+                            onChange={(e) =>
+                              setEditingDetailFabricData((prev) => ({
+                                ...prev,
+                                name: e.target.value,
+                              }))
+                            }
+                            className="input text-sm py-1.5"
+                            placeholder="Fabric Name"
+                          />
+                          <div className="flex gap-2 flex-wrap">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={
+                                editingDetailFabricData?.total_meters || ""
+                              }
+                              onChange={(e) =>
+                                setEditingDetailFabricData((prev) => ({
+                                  ...prev,
+                                  total_meters: e.target.value,
+                                }))
+                              }
+                              className="input text-sm py-1.5 w-24"
+                              placeholder="Meters"
+                            />
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={
+                                editingDetailFabricData?.purchase_price_per_meter ||
+                                ""
+                              }
+                              onChange={(e) =>
+                                setEditingDetailFabricData((prev) => ({
+                                  ...prev,
+                                  purchase_price_per_meter: e.target.value,
+                                }))
+                              }
+                              className="input text-sm py-1.5 w-24"
+                              placeholder="₹/m"
+                            />
+                            <input
+                              type="text"
+                              value={editingDetailFabricData?.quantity || ""}
+                              onChange={(e) =>
+                                setEditingDetailFabricData((prev) => ({
+                                  ...prev,
+                                  quantity: e.target.value,
+                                }))
+                              }
+                              className="input text-sm py-1.5 w-20"
+                              placeholder="Qty"
+                            />
+                            <input
+                              type="text"
+                              value={editingDetailFabricData?.barcode || ""}
+                              onChange={(e) =>
+                                setEditingDetailFabricData((prev) => ({
+                                  ...prev,
+                                  barcode: e.target.value,
+                                }))
+                              }
+                              className="input text-sm py-1.5 w-28"
+                              placeholder="Barcode"
+                            />
+                          </div>
+                          {(() => {
+                            const mtrs =
+                              parseFloat(
+                                editingDetailFabricData?.total_meters,
+                              ) || 0;
+                            const rate =
+                              parseFloat(
+                                editingDetailFabricData?.purchase_price_per_meter,
+                              ) || 0;
+                            const total = mtrs * rate;
+                            return (
+                              <div className="flex gap-3 text-[11px] text-gray-500">
+                                <span>
+                                  Amt:{" "}
+                                  <strong>
+                                    ₹
+                                    {total.toLocaleString("en-IN", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </strong>
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              type="button"
+                              onClick={handleCancelEditDetailFabric}
+                              className="btn btn-secondary text-xs py-1.5 px-3"
+                              disabled={savingDetailFabric}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveDetailFabric}
+                              className="btn btn-primary text-xs py-1.5 px-3"
+                              disabled={savingDetailFabric}
+                            >
+                              {savingDetailFabric ? "Saving..." : "Save"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-gray-900 text-sm">
+                              {fabric.name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {fabric.total_meters}m @ ₹
+                              {fabric.purchase_price_per_meter}/m
+                              {fabric.quantity ? ` • ${fabric.quantity}` : ""}
+                              {fabric.barcode ? ` • ${fabric.barcode}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-gray-900 text-sm">
+                              ₹
+                              {(
+                                fabric.total_meters *
+                                fabric.purchase_price_per_meter
+                              ).toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleEditDetailFabric(fabric)}
+                              className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
+                              title="Edit fabric"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
