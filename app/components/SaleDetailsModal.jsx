@@ -94,16 +94,37 @@ export default function SaleDetailsModal({
     }
     setSavingEditItem(true);
     try {
+      const m = parseFloat(editItemForm.meters) || 0;
+      const ppm = parseFloat(editItemForm.price_per_meter) || 0;
+      const cpm = parseFloat(editItemForm.cost_price_per_meter) || 0;
+      const recalculatedTotal = Math.round(m * ppm * 100) / 100;
+      const recalculatedMargin = Math.max(
+        Math.round(m * (ppm - cpm) * 100) / 100,
+        0,
+      );
+
+      // Fetch the original item to get current paid_amount
+      const { data: originalItem } = await supabase
+        .from("sales")
+        .select("paid_amount, discount_amount")
+        .eq("id", itemId)
+        .single();
+
+      const paid = parseFloat(originalItem?.paid_amount) || 0;
+      const discount = parseFloat(originalItem?.discount_amount) || 0;
+
       await supabase
         .from("sales")
         .update({
           fabric_id: editItemForm.fabric_id || null,
-          meters: parseFloat(editItemForm.meters) || 0,
-          price_per_meter: parseFloat(editItemForm.price_per_meter) || 0,
-          cost_price_per_meter:
-            parseFloat(editItemForm.cost_price_per_meter) || 0,
+          meters: m,
+          price_per_meter: ppm,
+          cost_price_per_meter: cpm,
           fabric_name: editItemForm.fabric_name,
           notes: `Fabric: ${editItemForm.fabric_name}`,
+          total_amount: recalculatedTotal,
+          margin: recalculatedMargin,
+          remaining_amount: Math.max(recalculatedTotal - discount - paid, 0),
         })
         .eq("id", itemId);
       setEditingItemId(null);
