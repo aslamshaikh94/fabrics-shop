@@ -505,7 +505,7 @@ export default function SaleDetailsModal({
                         fabrics={fabrics}
                         required
                       />
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="block text-xs font-bold text-gray-900 mb-1">
                             Meters *
@@ -541,24 +541,6 @@ export default function SaleDetailsModal({
                             }
                             className="input"
                             required
-                            onWheel={(e) => e.target.blur()}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-900 mb-1">
-                            Cost ₹/m
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={editItemForm.cost_price_per_meter}
-                            onChange={(e) =>
-                              setEditItemForm({
-                                ...editItemForm,
-                                cost_price_per_meter: e.target.value,
-                              })
-                            }
-                            className="input"
                             onWheel={(e) => e.target.blur()}
                           />
                         </div>
@@ -989,24 +971,6 @@ export default function SaleDetailsModal({
                 onWheel={(e) => e.target.blur()}
               />
             </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Cost/Meter ₹
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={newItemForm.cost_price_per_meter}
-              onChange={(e) =>
-                setNewItemForm({
-                  ...newItemForm,
-                  cost_price_per_meter: e.target.value,
-                })
-              }
-              className="input bg-white"
-              onWheel={(e) => e.target.blur()}
-            />
           </div>
           <div className="flex gap-3 pt-2">
             <button

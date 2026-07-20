@@ -936,19 +936,9 @@ export default function SaleForm({
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                          Cost
-                        </p>
-                        <p className="text-sm font-semibold text-primary-900">
-                          ₹{item.cost_price_per_meter}/m
-                        </p>
-                      </div>
                     </div>
                   )}
-                  <div
-                    className={`grid ${item.fabric_id ? "grid-cols-2" : "grid-cols-3"} gap-2`}
-                  >
+                  <div className={`grid grid-cols-2 gap-2`}>
                     <div>
                       <label className="block text-xs font-bold text-gray-900 mb-1">
                         Meters *
@@ -1000,35 +990,6 @@ export default function SaleForm({
                         </p>
                       )}
                     </div>
-                    {!item.fabric_id && (
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Cost ₹/m
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.cost_price_per_meter}
-                          onChange={(e) => {
-                            updateItem(currentIdx, {
-                              cost_price_per_meter: e.target.value,
-                            });
-                            if (formErrors.cost_price_per_meter) {
-                              const { cost_price_per_meter, ...rest } =
-                                formErrors;
-                              setFormErrors(rest);
-                            }
-                          }}
-                          className="input bg-white"
-                          onWheel={(e) => e.target.blur()}
-                        />
-                        {formErrors.cost_price_per_meter && (
-                          <p className="text-xs text-red-500 mt-1">
-                            {formErrors.cost_price_per_meter}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               );
