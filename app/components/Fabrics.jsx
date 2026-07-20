@@ -749,24 +749,22 @@ export default function Fabrics() {
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Name
               </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+              {/* <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Barcode
-              </th>
+              </th> */}
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Qty
               </th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Supplier
               </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+              {/* <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Purchase #
-              </th>
+              </th> */}
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                 Date Added
               </th>
-              <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                Available
-              </th>
+
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 Total
               </th>
@@ -775,6 +773,9 @@ export default function Fabrics() {
               </th>
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Total Price
+              </th>
+              <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
+                Available
               </th>
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Actions
@@ -800,11 +801,11 @@ export default function Fabrics() {
                 <td className="px-4 py-3">
                   <p className="font-medium text-gray-900">{fabric.name}</p>
                 </td>
-                <td className="px-4 py-3">
+                {/* <td className="px-4 py-3">
                   <p className="text-sm text-gray-600 font-mono">
                     {fabric.barcode || "—"}
                   </p>
-                </td>
+                </td> */}
                 <td className="px-4 py-3">
                   <p className="text-sm text-gray-600">
                     {fabric.quantity || "—"}
@@ -815,30 +816,17 @@ export default function Fabrics() {
                     {fabric.supplier?.name || "—"}
                   </p>
                 </td>
-                <td className="px-4 py-3">
+                {/* <td className="px-4 py-3">
                   <p className="text-xs text-gray-600 font-mono">
                     {fabric.purchase?.purchase_number || "—"}
                   </p>
-                </td>
+                </td> */}
                 <td className="px-4 py-3 whitespace-nowrap">
                   <p className="text-sm text-gray-600">
                     {fabric.created_at ? formatDate(fabric.created_at) : "—"}
                   </p>
                 </td>
-                <td className="px-4 py-3 text-center">
-                  <p
-                    className={`font-semibold text-sm ${
-                      fabric.available_meters < 2
-                        ? "text-red-600"
-                        : "text-gray-900"
-                    }`}
-                  >
-                    {(fabric.available_meters || 0).toFixed(2)}m
-                    {fabric.available_meters < 2 && (
-                      <span className="ml-1">⚠️</span>
-                    )}
-                  </p>
-                </td>
+
                 <td className="px-4 py-3 text-center">
                   <p className="text-sm text-gray-900">
                     {(fabric.total_meters || 0).toFixed(2)}m
@@ -859,6 +847,20 @@ export default function Fabrics() {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
+                  </p>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <p
+                    className={`font-semibold text-sm ${
+                      fabric.available_meters < 2
+                        ? "text-red-600"
+                        : "text-gray-900"
+                    }`}
+                  >
+                    {(fabric.available_meters || 0).toFixed(2)}m
+                    {fabric.available_meters < 2 && (
+                      <span className="ml-1">⚠️</span>
+                    )}
                   </p>
                 </td>
                 <td className="px-4 py-3 text-right">

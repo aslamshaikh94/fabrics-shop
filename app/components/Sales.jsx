@@ -757,7 +757,7 @@ export default function Sales() {
                   "Total",
                   "Paid",
                   ...(showMargin ? ["Margin"] : []),
-                  "Disc.",
+                  "Disc./Extra",
                   "Remaining",
                   "Type",
                   "Actions",
@@ -859,17 +859,18 @@ export default function Sales() {
                       const netAfterDiscount =
                         group.total_amount - group.discount_amount;
                       const extraPaid = group.paid_amount - netAfterDiscount;
-                      if (extraPaid > 0) {
-                        return (
-                          <span className="font-medium text-accent-600">
-                            +₹
-                            {extraPaid.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </span>
-                        );
-                      }
+
+                      // if (extraPaid > 0) {
+                      //   return (
+                      //     <span className="font-medium text-accent-600">
+                      //       +₹
+                      //       {extraPaid.toLocaleString("en-IN", {
+                      //         minimumFractionDigits: 2,
+                      //         maximumFractionDigits: 2,
+                      //       })}
+                      //     </span>
+                      //   );
+                      // }
                       if (group.discount_amount > 0) {
                         return (
                           <span className="font-medium text-primary-600">
