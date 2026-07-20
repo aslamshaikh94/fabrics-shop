@@ -924,8 +924,8 @@ export default function SaleForm({
                   </div>
 
                   {item.fabric_id && (
-                    <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
-                      <div className="flex items-center gap-2">
+                    <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
                         <CheckCircle className="w-4 h-4 text-accent-500" />
                         <div>
                           <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
@@ -935,6 +935,12 @@ export default function SaleForm({
                             {item.fabric_name}
                           </p>
                         </div>
+                      </div>
+                      <div className="flex gap-4 text-xs text-primary-700 border-t border-primary-200 pt-2">
+                        <span>
+                          Buying:{" "}
+                          <strong>₹{item.cost_price_per_meter}/m</strong>
+                        </span>
                       </div>
                     </div>
                   )}

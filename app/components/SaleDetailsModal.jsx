@@ -587,10 +587,20 @@ export default function SaleDetailsModal({
                           )}
                         </div>
                       </div>
-                      <div className="grid grid-cols-5 gap-3 text-sm">
+                      <div className="grid grid-cols-6 gap-3 text-sm">
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Meters</p>
                           <p className="font-semibold">{item.meters}m</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Buy/M</p>
+                          <p className="font-semibold">
+                            ₹
+                            {item.cost_price_per_meter.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Price/M</p>
