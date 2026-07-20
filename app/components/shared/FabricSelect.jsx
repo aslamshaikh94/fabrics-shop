@@ -43,9 +43,10 @@ export default function FabricSelect({
             onChange={(e) => {
               setSearch(e.target.value);
               onChange({
-                ...value,
                 fabric_id: "",
                 fabric_name: e.target.value,
+                cost_price_per_meter: "",
+                price_per_meter: "",
               });
               setOpen(true);
             }}
