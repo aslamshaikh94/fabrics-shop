@@ -772,16 +772,20 @@ export default function SaleForm({
                     className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-center justify-between"
                   >
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-green-600" />
                         <p className="font-semibold text-gray-900">
                           {item.fabric_name || `Item ${idx + 1}`}
                         </p>
-                        <span className="text-xs text-gray-700 font-medium">
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-600 ml-4">
+                        <span>
                           {item.meters}m @ ₹{item.price_per_meter}/m
                         </span>
+                        <span className="text-gray-300">|</span>
+                        <span>Buying: ₹{item.cost_price_per_meter}/m</span>
                       </div>
-                      <p className="text-xs text-gray-700 font-medium">
+                      <p className="text-xs text-gray-700 font-medium mt-1 ml-4">
                         Total: ₹
                         {(
                           parseFloat(item.meters) *
