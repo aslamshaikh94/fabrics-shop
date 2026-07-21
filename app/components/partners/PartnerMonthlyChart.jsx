@@ -1,4 +1,5 @@
 "use client";
+import { useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -46,6 +47,18 @@ export default function PartnerMonthlyChart({
   setChartView,
   partners,
 }) {
+  const sharesData = useMemo(() => {
+    const totalShare =
+      partners.reduce((s, p) => s + (p.share_percentage || 0), 0) || 100;
+    return monthlyData.map((m) => {
+      const row = { month: m.month };
+      partners.forEach((p) => {
+        row[p.name] = m.grossProfit * ((p.share_percentage || 0) / totalShare);
+      });
+      return row;
+    });
+  }, [monthlyData, partners]);
+
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-4">
@@ -91,19 +104,7 @@ export default function PartnerMonthlyChart({
         </ResponsiveContainer>
       ) : (
         <ResponsiveContainer width="100%" height={250}>
-          <BarChart
-            data={monthlyData.map((m) => {
-              const row = { month: m.month };
-              const totalShare =
-                partners.reduce((s, p) => s + (p.share_percentage || 0), 0) ||
-                100;
-              partners.forEach((p) => {
-                row[p.name] =
-                  m.grossProfit * ((p.share_percentage || 0) / totalShare);
-              });
-              return row;
-            })}
-          >
+          <BarChart data={sharesData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="month" tick={{ fontSize: 10 }} />
             <YAxis

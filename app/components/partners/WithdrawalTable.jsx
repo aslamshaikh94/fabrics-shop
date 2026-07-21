@@ -1,4 +1,5 @@
 "use client";
+import { useMemo } from "react";
 import { Wallet, Calendar, Pencil, Trash2, Plus } from "lucide-react";
 import ConfirmModal from "../ConfirmModal";
 
@@ -46,6 +47,20 @@ export default function WithdrawalTable({
   setConfirmDelete,
   allWithdrawals,
 }) {
+  const partnerIndexMap = useMemo(() => {
+    const map = {};
+    partners.forEach((p, idx) => { map[p.name.toLowerCase()] = idx; });
+    return map;
+  }, [partners]);
+
+  function getPartnerColor(w) {
+    const by = (w.withdrawn_by || "").toLowerCase();
+    for (const [nameLower, idx] of Object.entries(partnerIndexMap)) {
+      if (by.includes(nameLower)) return partnerColors[idx % partnerColors.length].chart;
+    }
+    return "#999";
+  }
+
   function getPartnerName(w) {
     const by = (w.withdrawn_by || "").toLowerCase();
     for (const p of partners) {
@@ -140,21 +155,7 @@ export default function WithdrawalTable({
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className="w-2 h-2 rounded-full"
-                        style={{
-                          backgroundColor: partners.find((p) =>
-                            (w.withdrawn_by || "")
-                              .toLowerCase()
-                              .includes(p.name.toLowerCase()),
-                          )?.id
-                            ? partnerColors[
-                                partners.findIndex((p) =>
-                                  (w.withdrawn_by || "")
-                                    .toLowerCase()
-                                    .includes(p.name.toLowerCase()),
-                                ) % partnerColors.length
-                              ]?.chart
-                            : "#999",
-                        }}
+                        style={{ backgroundColor: getPartnerColor(w) }}
                       />
                       <span className="text-sm font-medium text-gray-900">
                         {getPartnerName(w)}

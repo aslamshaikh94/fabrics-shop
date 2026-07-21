@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import dynamic from "next/dynamic";
 import {
@@ -113,16 +113,24 @@ export default function PartnersPage() {
   useEffect(() => {
     async function init() {
       await fetchYears();
-      await fetchPartners();
-      await fetchData();
+      const { data } = await supabase
+        .from("partners")
+        .select("*")
+        .eq("is_active", true)
+        .order("created_at");
+      const loaded = data || [];
+      setPartners(loaded);
+      await fetchData(loaded);
     }
     init();
   }, []);
+
   useEffect(() => {
-    fetchData();
+    if (partners.length === 0) return;
+    fetchData(partners);
     setFilterMonth("all");
     setFilterPartner("all");
-  }, [year, partners]);
+  }, [year]);
 
   async function fetchYears() {
     const { data } = await supabase
@@ -146,14 +154,17 @@ export default function PartnersPage() {
         .select("*")
         .eq("is_active", true)
         .order("created_at");
-      setPartners(data || []);
+      const loaded = data || [];
+      setPartners(loaded);
+      return loaded;
     } catch (err) {
       console.error("Error fetching partners:", err);
       setPartners([]);
+      return [];
     }
   }
 
-  async function fetchData() {
+  async function fetchData(currentPartners) {
     setLoading(true);
     try {
       const [salesRes, withdrawalsRes, fabricsRes] = await Promise.all([
@@ -213,10 +224,11 @@ export default function PartnersPage() {
 
       const pSum = {};
       const pDet = {};
+      const activePartners = currentPartners ?? partners;
       const totalShare =
-        partners.reduce((s, p) => s + (p.share_percentage || 0), 0) || 100;
+        activePartners.reduce((s, p) => s + (p.share_percentage || 0), 0) || 100;
 
-      partners.forEach((partner, idx) => {
+      activePartners.forEach((partner, idx) => {
         const sharePct = (partner.share_percentage || 0) / totalShare;
         const nameLower = partner.name.toLowerCase();
         const shareAmount = grossProfit * sharePct;
@@ -281,7 +293,7 @@ export default function PartnersPage() {
       }
       setShowWithdrawalForm(false);
       resetWithdrawalForm();
-      fetchData();
+      fetchData(partners);
     } catch (err) {
       toast("Failed to save withdrawal", "error");
     } finally {
@@ -306,7 +318,7 @@ export default function PartnersPage() {
       await supabase.from("withdrawals").delete().eq("id", id);
       toast("Withdrawal deleted");
       setConfirmDeleteWithdrawal(null);
-      fetchData();
+      fetchData(partners);
     } catch (err) {
       toast("Failed to delete withdrawal", "error");
       setConfirmDeleteWithdrawal(null);
@@ -333,7 +345,8 @@ export default function PartnersPage() {
       setShowAddPartnerForm(false);
       setNewPartnerName("");
       setNewPartnerShare("50");
-      await fetchPartners();
+      const updated = await fetchPartners();
+      await fetchData(updated);
     } catch (err) {
       toast("Failed to add partner", "error");
     }
@@ -360,7 +373,8 @@ export default function PartnersPage() {
       setNewPartnerName("");
       setNewPartnerShare("50");
       setEditingPartner(null);
-      await fetchPartners();
+      const updated = await fetchPartners();
+      await fetchData(updated);
     } catch (err) {
       toast("Failed to update partner", "error");
     }
@@ -374,7 +388,8 @@ export default function PartnersPage() {
         .eq("id", partnerId);
       toast("Partner removed");
       setConfirmRemovePartner(null);
-      await fetchPartners();
+      const updated = await fetchPartners();
+      await fetchData(updated);
     } catch (err) {
       toast("Failed to remove partner", "error");
       setConfirmRemovePartner(null);
@@ -465,11 +480,7 @@ export default function PartnersPage() {
             ))}
           </select>
           <button
-            onClick={() => {
-              setLoading(true);
-              fetchData();
-              toast("Recalculated successfully");
-            }}
+            onClick={() => fetchData(partners)}
             className="btn btn-secondary"
           >
             <RefreshCw className="w-4 h-4" />
