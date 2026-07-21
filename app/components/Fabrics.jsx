@@ -282,6 +282,11 @@ export default function Fabrics() {
     }
   }
 
+  const handleNavigateToPurchase = useCallback((purchaseNumber) => {
+    localStorage.setItem("prefill_purchase_number", purchaseNumber);
+    window.dispatchEvent(new CustomEvent("navigate", { detail: { page: "purchases" } }));
+  }, []);
+
   function toggleSelect(id) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -867,17 +872,7 @@ export default function Fabrics() {
                   <div className="flex justify-end gap-1">
                     {fabric.purchase?.purchase_number && (
                       <button
-                        onClick={() => {
-                          localStorage.setItem(
-                            "prefill_purchase_number",
-                            fabric.purchase.purchase_number,
-                          );
-                          window.dispatchEvent(
-                            new CustomEvent("navigate", {
-                              detail: { page: "purchases" },
-                            }),
-                          );
-                        }}
+                        onClick={() => handleNavigateToPurchase(fabric.purchase.purchase_number)}
                         className="p-2 hover:bg-blue-100 rounded-lg text-gray-500 hover:text-blue-600"
                         title={"View " + fabric.purchase.purchase_number}
                       >

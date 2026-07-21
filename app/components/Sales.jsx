@@ -382,8 +382,6 @@ export default function Sales() {
       } else {
         group.payment_type = "partial";
       }
-      // Margin is already discount-adjusted by the DB trigger per item
-      // No need to subtract discount again
     });
 
     return Object.values(groups).sort((a, b) => {
@@ -856,21 +854,19 @@ export default function Sales() {
                   )}
                   <td className="px-4 py-3 text-right text-sm">
                     {(() => {
-                      const netAfterDiscount =
-                        group.total_amount - group.discount_amount;
-                      const extraPaid = group.paid_amount - netAfterDiscount;
-
-                      // if (extraPaid > 0) {
-                      //   return (
-                      //     <span className="font-medium text-accent-600">
-                      //       +₹
-                      //       {extraPaid.toLocaleString("en-IN", {
-                      //         minimumFractionDigits: 2,
-                      //         maximumFractionDigits: 2,
-                      //       })}
-                      //     </span>
-                      //   );
-                      // }
+                      const netTotal = group.total_amount - group.discount_amount;
+                      const extraPaid = group.paid_amount - netTotal;
+                      if (extraPaid > 0.005) {
+                        return (
+                          <span className="font-medium text-accent-600">
+                            +₹
+                            {extraPaid.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        );
+                      }
                       if (group.discount_amount > 0) {
                         return (
                           <span className="font-medium text-primary-600">

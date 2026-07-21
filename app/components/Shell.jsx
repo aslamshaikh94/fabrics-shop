@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -64,6 +64,10 @@ export default function Shell({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const { showAmount, setShowAmount } = useShowAmount();
+
+  const handleSignOut = useCallback(() => getSupabase().auth.signOut(), []);
+  const toggleShowAmount = useCallback(() => setShowAmount((v) => !v), [setShowAmount]);
+  const toggleDark = useCallback(() => setDark((d) => !d), []);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
@@ -223,7 +227,7 @@ export default function Shell({ children }) {
 
         <div className="px-3 pb-4 pt-2 border-t border-gray-100 dark:border-gray-700/50 space-y-0.5">
           <button
-            onClick={() => setShowAmount((v) => !v)}
+            onClick={toggleShowAmount}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all text-sm"
           >
             {showAmount ? (
@@ -234,7 +238,7 @@ export default function Shell({ children }) {
             <span>{showAmount ? "Hide Amounts" : "Show Amounts"}</span>
           </button>
           <button
-            onClick={() => setDark((d) => !d)}
+            onClick={toggleDark}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all text-sm"
           >
             {dark ? (
@@ -245,7 +249,7 @@ export default function Shell({ children }) {
             <span>{dark ? "Light Mode" : "Dark Mode"}</span>
           </button>
           <button
-            onClick={() => getSupabase().auth.signOut()}
+            onClick={handleSignOut}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-sm"
           >
             <LogOut className="w-[18px] h-[18px]" />
