@@ -57,6 +57,8 @@ export default function Dashboard() {
     totalCustomers: 0,
     totalPurchases: 0,
     collectedAmount: 0,
+    reinvestedAmount: 0,
+    freshAmount: 0,
     inventoryValue: 0,
   });
   const [changes, setChanges] = useState({});
@@ -95,6 +97,7 @@ export default function Dashboard() {
         recentRes,
         allCustomersRes,
         yearsRes,
+        purchasePaymentsRes,
       ] = await Promise.all([
         supabase
           .from("sales")
@@ -134,6 +137,7 @@ export default function Dashboard() {
           .limit(20),
         supabase.from("customers").select("id, name"),
         supabase.from("sales").select("sale_date").order("sale_date").limit(1),
+        supabase.from("purchase_payments").select("reinvested_amount"),
       ]);
 
       // Build available years
@@ -216,6 +220,16 @@ export default function Dashboard() {
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
           0,
         collectedAmount: totalPaidAmount,
+        reinvestedAmount: (purchasePaymentsRes.data || []).reduce(
+          (s, r) => s + (r.reinvested_amount || 0),
+          0,
+        ),
+        freshAmount:
+          purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) -
+            (purchasePaymentsRes.data || []).reduce(
+              (s, r) => s + (r.reinvested_amount || 0),
+              0,
+            ) || 0,
       });
       setChanges({
         sales: pctChange(currSales, prevSales),
@@ -543,70 +557,134 @@ export default function Dashboard() {
         Lifetime Summary
       </div>
 
-      {/* Supplier payment breakdown */}
-      <div className="card-hover p-4">
-        <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
-          Supplier Payments
-        </p>
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <p className="text-xs text-gray-400">Purchased</p>
-            <p className="text-sm font-bold text-gray-900 mt-0.5">
-              {fmtAmt(stats.totalPurchases, showAmount)}
-            </p>
+      {/* Reinvestment & Supplier Payments row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Reinvestment widget */}
+        <div className="card-hover p-4">
+          <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
+            Collected vs Reinvested
+          </p>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <p className="text-xs text-gray-400">Total Collected</p>
+              <p className="text-sm font-bold text-blue-600 mt-0.5">
+                {fmtAmt(stats.collectedAmount, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Reinvested</p>
+              <p className="text-sm font-bold text-emerald-600 mt-0.5">
+                {fmtAmt(stats.reinvestedAmount, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Fresh Capital</p>
+              <p className="text-sm font-bold text-primary-600 mt-0.5">
+                {fmtAmt(stats.freshAmount, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Available to Reinvest</p>
+              <p
+                className={`text-sm font-bold mt-0.5 ${
+                  stats.collectedAmount - stats.reinvestedAmount >= 0
+                    ? "text-green-600"
+                    : "text-red-500"
+                }`}
+              >
+                {fmtAmt(
+                  Math.max(stats.collectedAmount - stats.reinvestedAmount, 0),
+                  showAmount,
+                )}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-400">Paid</p>
-            <p className="text-sm font-bold text-green-600 mt-0.5">
-              {fmtAmt(stats.paidPurchasePayments, showAmount)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">Pending</p>
-            <p className="text-sm font-bold text-orange-600 mt-0.5">
-              {fmtAmt(stats.pendingPurchasePayments, showAmount)}
-            </p>
-          </div>
+          {stats.collectedAmount > 0 && (
+            <>
+              <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+                <div
+                  className="h-2.5 bg-emerald-500"
+                  style={{
+                    width: `${Math.min((stats.reinvestedAmount / stats.collectedAmount) * 100, 100)}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-1.5">
+                {Math.round(
+                  (stats.reinvestedAmount / stats.collectedAmount) * 100,
+                )}
+                % of collected amount reinvested
+              </p>
+            </>
+          )}
         </div>
-        <div className="mt-3 h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
-          <div
-            className="h-2.5 bg-green-500"
-            style={{
-              width:
-                stats.totalPurchases > 0
-                  ? `${(stats.paidPurchasePayments / stats.totalPurchases) * 100}%`
-                  : "0%",
-            }}
-          />
-          <div
-            className="h-2.5 bg-orange-400"
-            style={{
-              width:
-                stats.totalPurchases > 0
-                  ? `${(stats.pendingPurchasePayments / stats.totalPurchases) * 100}%`
-                  : "0%",
-            }}
-          />
-        </div>
-        <div className="flex items-center gap-3 mt-1.5">
-          <span className="flex items-center gap-1 text-xs text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
-            {stats.totalPurchases > 0
-              ? Math.round(
-                  (stats.paidPurchasePayments / stats.totalPurchases) * 100,
-                )
-              : 0}
-            % paid
-          </span>
-          <span className="flex items-center gap-1 text-xs text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>
-            {stats.totalPurchases > 0
-              ? Math.round(
-                  (stats.pendingPurchasePayments / stats.totalPurchases) * 100,
-                )
-              : 0}
-            % pending
-          </span>
+
+        {/* Supplier payment breakdown */}
+        <div className="card-hover p-4">
+          <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
+            Supplier Payments
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-xs text-gray-400">Purchased</p>
+              <p className="text-sm font-bold text-gray-900 mt-0.5">
+                {fmtAmt(stats.totalPurchases, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Paid</p>
+              <p className="text-sm font-bold text-green-600 mt-0.5">
+                {fmtAmt(stats.paidPurchasePayments, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Pending</p>
+              <p className="text-sm font-bold text-orange-600 mt-0.5">
+                {fmtAmt(stats.pendingPurchasePayments, showAmount)}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+            <div
+              className="h-2.5 bg-green-500"
+              style={{
+                width:
+                  stats.totalPurchases > 0
+                    ? `${(stats.paidPurchasePayments / stats.totalPurchases) * 100}%`
+                    : "0%",
+              }}
+            />
+            <div
+              className="h-2.5 bg-orange-400"
+              style={{
+                width:
+                  stats.totalPurchases > 0
+                    ? `${(stats.pendingPurchasePayments / stats.totalPurchases) * 100}%`
+                    : "0%",
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-3 mt-1.5">
+            <span className="flex items-center gap-1 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+              {stats.totalPurchases > 0
+                ? Math.round(
+                    (stats.paidPurchasePayments / stats.totalPurchases) * 100,
+                  )
+                : 0}
+              % paid
+            </span>
+            <span className="flex items-center gap-1 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>
+              {stats.totalPurchases > 0
+                ? Math.round(
+                    (stats.pendingPurchasePayments / stats.totalPurchases) *
+                      100,
+                  )
+                : 0}
+              % pending
+            </span>
+          </div>
         </div>
       </div>
 

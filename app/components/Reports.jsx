@@ -88,6 +88,15 @@ export default function Reports() {
   const [availableYears, setAvailableYears] = useState([
     new Date().getFullYear(),
   ]);
+  const [filterMode, setFilterMode] = useState("year"); // "year" | "custom"
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [customTo, setCustomTo] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
   const [chartView, setChartView] = useState("all");
   const [rankView, setRankView] = useState("revenue");
   const { showAmount } = useShowAmount();
@@ -98,7 +107,7 @@ export default function Reports() {
   }, []);
   useEffect(() => {
     fetchAll();
-  }, [year]);
+  }, [year, filterMode, customFrom, customTo]);
 
   async function fetchYears() {
     const { data } = await supabase
@@ -128,7 +137,7 @@ export default function Reports() {
           supabase
             .from("fabrics")
             .select("name, available_meters")
-            .lt("available_meters", 10),
+            .lt("available_meters", 2),
           supabase.from("customers").select("id, name, phone"),
           supabase.from("suppliers").select("id, name"),
         ]);
@@ -189,10 +198,13 @@ export default function Reports() {
   async function fetchAll() {
     setLoading(true);
     try {
-      const startDate = `${year}-01-01`;
-      const endDate = `${year}-12-31`;
+      const startDate = filterMode === "custom" ? `${customFrom}-01` : `${year}-01-01`;
+      const endDate = filterMode === "custom"
+        ? (() => { const [y, m] = customTo.split("-"); const d = new Date(y, m, 0); return d.toISOString().split("T")[0]; })()
+        : `${year}-12-31`;
       const prevStart = `${year - 1}-01-01`;
       const prevEnd = `${year - 1}-12-31`;
+      const isYearMode = filterMode === "year";
 
       // Run queries with individual error handling so one failure doesn't break everything
       const safeQuery = async (promise, fallback = []) => {
@@ -258,14 +270,18 @@ export default function Reports() {
       // Build customer lookup map
       const customerMap = Object.fromEntries(customers.map((c) => [c.id, c]));
 
-      // Previous year summary for YoY
-      const prevMargin = prevSales.reduce((s, r) => s + (r.margin || 0), 0);
-      setPrevSummary({
-        totalSales: prevSales.reduce((s, r) => s + (r.total_amount || 0), 0),
-        totalProfit: prevMargin,
-        netProfit:
-          prevMargin - prevExp.reduce((s, r) => s + (r.amount || 0), 0),
-      });
+      // Previous year summary for YoY (only in year mode)
+      if (isYearMode) {
+        const prevMargin = prevSales.reduce((s, r) => s + (r.margin || 0), 0);
+        setPrevSummary({
+          totalSales: prevSales.reduce((s, r) => s + (r.total_amount || 0), 0),
+          totalProfit: prevMargin,
+          netProfit:
+            prevMargin - prevExp.reduce((s, r) => s + (r.amount || 0), 0),
+        });
+      } else {
+        setPrevSummary({ totalSales: 0, totalProfit: 0, netProfit: 0 });
+      }
 
       // Monthly data with prev year overlay
       const monthly = Array.from({ length: 12 }, (_, i) => ({
@@ -406,21 +422,49 @@ export default function Reports() {
             Reports & Analytics
           </h1>
           <p className="text-gray-500 mt-0.5 text-sm">
-            Business performance — {year}
+            Business performance
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="input w-28"
-          >
-            {availableYears.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
+          <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+            {[["year", "Year"], ["custom", "Custom"]].map(([v, l]) => (
+              <button
+                key={v}
+                onClick={() => setFilterMode(v)}
+                className={`px-2.5 py-1.5 rounded-md font-medium transition-all ${filterMode === v ? "bg-white shadow text-gray-900" : "text-gray-500"}`}
+              >
+                {l}
+              </button>
             ))}
-          </select>
+          </div>
+          {filterMode === "year" ? (
+            <select
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="input w-28"
+            >
+              {availableYears.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="month"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="input w-36 text-sm"
+              />
+              <span className="text-gray-400 text-xs">to</span>
+              <input
+                type="month"
+                value={customTo}
+                min={customFrom}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="input w-36 text-sm"
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -476,7 +520,7 @@ export default function Reports() {
                       {card.subtitle}
                     </p>
                   )}
-                  {yoy && (
+                  {yoy && filterMode === "year" && (
                     <p
                       className={`text-xs mt-1 flex items-center gap-0.5 ${yoy.up ? "text-green-600" : "text-red-500"}`}
                     >
@@ -625,7 +669,7 @@ export default function Reports() {
             </h2>
             {topCustomers.length === 0 ? (
               <p className="text-gray-400 text-sm text-center py-6">
-                No data for {year}
+                No data for selected period
               </p>
             ) : (
               (() => {
@@ -688,7 +732,7 @@ export default function Reports() {
             <h2 className="font-semibold text-gray-900 mb-4">Top 10 Fabrics</h2>
             {topFabrics.length === 0 ? (
               <p className="text-gray-400 text-sm text-center py-6">
-                No data for {year}
+                No data for selected period
               </p>
             ) : (
               (() => {

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -122,11 +122,11 @@ export default function Suppliers() {
     setShowForm(true);
   }
 
-  const filteredSuppliers = suppliers.filter(
+  const filteredSuppliers = useMemo(() => suppliers.filter(
     (s) =>
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.phone.includes(searchTerm),
-  );
+  ), [suppliers, searchTerm]);
 
   const totalPages = Math.ceil(filteredSuppliers.length / PAGE_SIZE);
   const paginated = filteredSuppliers.slice(

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -229,7 +229,7 @@ export default function Expenses() {
     }
   }
 
-  const filtered = expenses.filter((e) => {
+  const filtered = useMemo(() => expenses.filter((e) => {
     const matchSearch =
       e.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       e.notes?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -238,16 +238,16 @@ export default function Expenses() {
     const matchesFrom = !dateFrom || e.expense_date >= dateFrom;
     const matchesTo = !dateTo || e.expense_date <= dateTo;
     return matchSearch && matchCat && matchMonth && matchesFrom && matchesTo;
-  });
+  }), [expenses, searchTerm, filterCategory, filterMonth, dateFrom, dateTo]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const totalFiltered = filtered.reduce((s, e) => s + (e.amount || 0), 0);
-  const totalAll = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-  const totalUncleared = expenses
+  const totalFiltered = useMemo(() => filtered.reduce((s, e) => s + (e.amount || 0), 0), [filtered]);
+  const totalAll = useMemo(() => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
+  const totalUncleared = useMemo(() => expenses
     .filter((e) => !e.cleared)
-    .reduce((s, e) => s + (e.amount || 0), 0);
+    .reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
 
   const categoryColors = {
     Rent: "bg-blue-100 text-blue-800",

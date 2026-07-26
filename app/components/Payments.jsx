@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Search,
@@ -40,10 +40,63 @@ export default function Payments() {
   const [editForm, setEditForm] = useState({});
 
   useEffect(() => {
-    fetchPayments();
-    fetchSupplierSummary();
-    fetchCustomerSummary();
+    fetchAll();
   }, []);
+
+  async function fetchAll() {
+    try {
+      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, purchasesRes] =
+        await Promise.all([
+          supabase.from("purchase_payments").select("*, purchase_id").order("payment_date", { ascending: false }),
+          supabase.from("sale_payments").select("*, sale_id").order("payment_date", { ascending: false }),
+          supabase.from("suppliers").select("id, name"),
+          supabase.from("customers").select("id, name"),
+          supabase.from("sales").select("id, customer_id, customer_name, total_amount, paid_amount, remaining_amount"),
+          supabase.from("purchases").select("id, supplier_id, total_amount, paid_amount, remaining_amount"),
+        ]);
+
+      const supplierMap = Object.fromEntries((suppliersRes.data || []).map((s) => [s.id, s.name]));
+      const customerMap = Object.fromEntries((customersRes.data || []).map((c) => [c.id, c.name]));
+      const purchaseSupplierMap = Object.fromEntries((purchasesRes.data || []).map((p) => [p.id, p.supplier_id]));
+      const saleInfoMap = Object.fromEntries((salesRes.data || []).map((s) => [s.id, { customer_id: s.customer_id, customer_name: s.customer_name }]));
+
+      setPurchasePayments((purchaseRes.data || []).map((p) => ({
+        ...p,
+        purchase: { suppliers: { name: supplierMap[purchaseSupplierMap[p.purchase_id]] || "Unknown" } },
+      })));
+      setSalePayments((saleRes.data || []).map((s) => {
+        const info = saleInfoMap[s.sale_id] || {};
+        const name = info.customer_name || (info.customer_id ? customerMap[info.customer_id] : null) || "Walk-in";
+        return { ...s, sale: { customers: { name } } };
+      }));
+
+      // Supplier summary
+      const supMap = {};
+      (purchasesRes.data || []).forEach((p) => {
+        const name = supplierMap[p.supplier_id] || "Unknown";
+        if (!supMap[name]) supMap[name] = { name, total: 0, paid: 0, pending: 0 };
+        supMap[name].total += p.total_amount || 0;
+        supMap[name].paid += p.paid_amount || 0;
+        supMap[name].pending += Math.max((p.total_amount || 0) - (p.paid_amount || 0), 0);
+      });
+      setSupplierSummary(Object.values(supMap).sort((a, b) => b.pending - a.pending));
+
+      // Customer summary
+      const custMap = {};
+      (salesRes.data || []).forEach((s) => {
+        const name = s.customer_name || (s.customer_id ? customerMap[s.customer_id] : null) || "Walk-in";
+        if (!custMap[name]) custMap[name] = { name, total: 0, paid: 0, pending: 0 };
+        custMap[name].total += s.total_amount || 0;
+        custMap[name].paid += s.paid_amount || 0;
+        custMap[name].pending += Math.max((s.total_amount || 0) - (s.paid_amount || 0), 0);
+      });
+      setCustomerSummary(Object.values(custMap).sort((a, b) => b.pending - a.pending));
+    } catch (error) {
+      console.error("Error fetching payments:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     setPage(1);
@@ -56,35 +109,6 @@ export default function Payments() {
   ]);
 
   async function handleEditPayment(e) {
-    e.preventDefault();
-    try {
-      const table =
-        editingPayment.type === "received"
-          ? "sale_payments"
-          : "purchase_payments";
-      const { error } = await supabase
-        .from(table)
-        .update({
-          amount: parseFloat(editForm.amount),
-          payment_date: editForm.payment_date,
-          payment_method: editForm.payment_method,
-          reference_number: editForm.reference_number,
-          notes: editForm.notes,
-        })
-        .eq("id", editingPayment.id);
-      if (error) throw error;
-      setEditingPayment(null);
-      fetchPayments();
-      fetchSupplierSummary();
-      fetchCustomerSummary();
-      toast("Payment updated");
-    } catch (err) {
-      console.error("Error updating payment:", err);
-      toast("Failed to update payment", "error");
-    }
-  }
-
-  async function fetchCustomerSummary() {
     try {
       const [salesRes, customersRes] = await Promise.all([
         supabase
