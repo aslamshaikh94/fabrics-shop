@@ -73,6 +73,7 @@ const TABLE_COLUMNS = {
     "payment_date",
     "payment_method",
     "reference_number",
+    "reinvested_amount",
     "notes",
     "created_at",
   ],

@@ -31,6 +31,7 @@ export default function BackupRestore() {
   const [backupFile, setBackupFile] = useState(null);
   const [backupPreview, setBackupPreview] = useState(null);
   const [restoreProgress, setRestoreProgress] = useState(null);
+  const [progressLog, setProgressLog] = useState([]);
   const [clearExisting, setClearExisting] = useState(false);
 
   const scheduleInfo = getBackupScheduleInfo();
@@ -82,13 +83,18 @@ export default function BackupRestore() {
     if (!backupPreview) return;
 
     setRestoring(true);
+    setShowRestoreConfirm(false);
     setRestoreProgress({ step: 0, total: 10, action: "Starting restore..." });
+    setProgressLog([]);
 
     try {
       await restoreBackup(backupPreview, {
         clearExisting,
         onProgress: (progress) => {
           setRestoreProgress(progress);
+          if (progress.action && !progress.done) {
+            setProgressLog((prev) => [...prev, progress.action]);
+          }
         },
       });
 
@@ -97,6 +103,7 @@ export default function BackupRestore() {
       setBackupFile(null);
       setBackupPreview(null);
       setClearExisting(false);
+      setProgressLog([]);
 
       // Reload page to refresh data
       setTimeout(() => {
@@ -339,32 +346,63 @@ export default function BackupRestore() {
       {/* Restore Progress Modal */}
       {restoreProgress && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              Restoring Data...
-            </h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">{restoreProgress.action}</span>
-                <span className="font-medium">
-                  {restoreProgress.step}/{restoreProgress.total}
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-5">
+              {restoreProgress.done ? (
+                <CheckCircle className="w-6 h-6 text-green-500 shrink-0" />
+              ) : (
+                <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary-200 border-t-primary-600 shrink-0" />
+              )}
+              <h3 className="text-lg font-semibold text-gray-900">
+                {restoreProgress.done ? "Restore Complete!" : "Restoring Data..."}
+              </h3>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mb-2">
+              <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+                <span>{restoreProgress.action}</span>
+                <span className="font-medium tabular-nums">
+                  {Math.round((restoreProgress.step / restoreProgress.total) * 100)}%
                 </span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
                 <div
-                  className="bg-primary-600 h-2 rounded-full transition-all duration-300"
-                  style={{
-                    width: `${(restoreProgress.step / restoreProgress.total) * 100}%`,
-                  }}
+                  className={`h-2.5 rounded-full transition-all duration-300 ${
+                    restoreProgress.done ? "bg-green-500" : "bg-primary-600"
+                  }`}
+                  style={{ width: `${(restoreProgress.step / restoreProgress.total) * 100}%` }}
                 />
               </div>
-              {restoreProgress.done && (
-                <div className="flex items-center gap-2 text-green-600 text-sm mt-4">
-                  <CheckCircle className="w-5 h-5" />
-                  <span>Restore completed! Reloading page...</span>
-                </div>
-              )}
+              <p className="text-xs text-gray-400 mt-1 text-right">
+                Step {restoreProgress.step} of {restoreProgress.total}
+              </p>
             </div>
+
+            {/* Step log */}
+            {progressLog.length > 0 && (
+              <div className="mt-4 bg-gray-50 rounded-xl p-3 max-h-44 overflow-y-auto space-y-1">
+                {progressLog.map((entry, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                    <span className="text-gray-600">{entry}</span>
+                  </div>
+                ))}
+                {!restoreProgress.done && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-primary-300 border-t-primary-600 animate-spin shrink-0" />
+                    <span className="text-primary-600 font-medium">{restoreProgress.action}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {restoreProgress.done && (
+              <div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                Restore completed! Page will reload shortly...
+              </div>
+            )}
           </div>
         </div>
       )}
