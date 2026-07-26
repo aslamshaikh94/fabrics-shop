@@ -16,7 +16,6 @@ export default function CustomerSelect({
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  // Remember names separately so switching tabs restores them
   const [savedWalkinName, setSavedWalkinName] = useState(() =>
     !value.customer_id && value.customer_name && value.customer_name !== "Walk-in Customer"
       ? value.customer_name
@@ -38,6 +37,13 @@ export default function CustomerSelect({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const walkinSuggestions =
+    tab === "walkin" && open && walkinName && walkinName.length > 0
+      ? customers.filter((c) =>
+          c.name.toLowerCase().includes(walkinName.toLowerCase())
+        )
+      : [];
+
   return (
     <div
       ref={ref}
@@ -50,7 +56,6 @@ export default function CustomerSelect({
         <button
           type="button"
           onClick={() => {
-            // Save current walk-in name before switching
             if (tab === "walkin") {
               setSavedWalkinName(value.customer_name && value.customer_name !== "Walk-in Customer" ? value.customer_name : savedWalkinName);
             }
@@ -70,7 +75,6 @@ export default function CustomerSelect({
         <button
           type="button"
           onClick={() => {
-            // Save current existing customer before switching
             if (tab === "existing" && value.customer_id) {
               setSavedExistingId(value.customer_id);
               setSavedExistingName(value.customer_name || "");
@@ -153,7 +157,7 @@ export default function CustomerSelect({
           )}
         </div>
       ) : (
-        <div>
+        <div className="relative">
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
             Enter Walk-in Name
           </label>
@@ -167,10 +171,32 @@ export default function CustomerSelect({
                 customer_id: "",
                 customer_name: e.target.value || "Walk-in Customer",
               });
+              setOpen(true);
             }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
             className="input bg-white dark:bg-gray-800"
             placeholder="e.g. John Doe"
           />
+          {walkinSuggestions.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+              {walkinSuggestions.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setSavedWalkinName(c.name);
+                    onChange({ ...value, customer_id: c.id, customer_name: c.name });
+                    setOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -138,19 +138,24 @@ export default function Customers() {
 
   // Only search in phone if searchTerm looks like a phone number (digits/min length)
   const isPhoneSearch = /^[\d\s\-+]{2,}$/.test(searchTerm.trim());
-  const filteredCustomers = customers.filter((c) => {
-    const nameMatch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
-    if (isPhoneSearch) {
-      // For phone search, match digits only and require at least 3 consecutive matching digits
-      const searchDigits = searchTerm.replace(/\D/g, "");
-      const phoneDigits = (c.phone || "").replace(/\D/g, "");
-      return (
-        nameMatch ||
-        (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
-      );
-    }
-    return nameMatch;
-  });
+  const filteredCustomers = useMemo(
+    () =>
+      customers.filter((c) => {
+        const nameMatch = c.name
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase());
+        if (isPhoneSearch) {
+          const searchDigits = searchTerm.replace(/\D/g, "");
+          const phoneDigits = (c.phone || "").replace(/\D/g, "");
+          return (
+            nameMatch ||
+            (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
+          );
+        }
+        return nameMatch;
+      }),
+    [customers, searchTerm, isPhoneSearch],
+  );
 
   const totalPages = Math.ceil(filteredCustomers.length / PAGE_SIZE);
   const paginated = filteredCustomers.slice(
@@ -293,76 +298,123 @@ export default function Customers() {
         </form>
       </Modal>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredCustomers.map((customer) => (
-          <div key={customer.id} className="card-hover p-5">
-            <div className="flex items-start justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">{customer.name}</h3>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setLedgerCustomer(customer)}
-                  className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600"
-                  title="View Ledger"
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50">
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                  Name
+                </th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                  Phone
+                </th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                  Address
+                </th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                  Notes
+                </th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">
+                  Balance
+                </th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filteredCustomers.map((customer) => (
+                <tr
+                  key={customer.id}
+                  className="hover:bg-gray-50 transition-colors"
                 >
-                  <BookOpen className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleEdit(customer)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-                {customer.current_balance > 0 && (
-                  <button
-                    onClick={() => handleWhatsApp(customer)}
-                    className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
-                    title="Send WhatsApp reminder"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setConfirmDelete(customer.id)}
-                  className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm text-gray-600">
-              {customer.phone && (
-                <div className="flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-gray-400" />
-                  <span>{customer.phone}</span>
-                </div>
-              )}
-              {customer.address && (
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-gray-400" />
-                  <span>{customer.address}</span>
-                </div>
-              )}
-            </div>
-            {customer.notes && (
-              <p className="text-gray-500 italic text-xs mt-2">
-                {customer.notes}
-              </p>
-            )}
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <p
-                className={`text-sm font-semibold ${
-                  customer.current_balance > 0
-                    ? "text-warning-600"
-                    : "text-accent-600"
-                }`}
-              >
-                {customer.current_balance > 0
-                  ? `Due: ₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : "Cleared ✓"}
-              </p>
-            </div>
-          </div>
-        ))}
+                  <td className="px-4 py-3">
+                    <span className="font-medium text-gray-900">
+                      {customer.name}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {customer.phone ? (
+                      <span className="flex items-center gap-1.5 text-gray-600">
+                        <Phone className="w-3.5 h-3.5 text-gray-400" />
+                        {customer.phone}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {customer.address ? (
+                      <span className="flex items-center gap-1.5 text-gray-600">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                        <span className="truncate max-w-[180px] block">
+                          {customer.address}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {customer.notes ? (
+                      <span className="text-gray-500 italic text-xs">
+                        {customer.notes}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span
+                      className={`font-semibold ${
+                        customer.current_balance > 0
+                          ? "text-warning-600"
+                          : "text-accent-600"
+                      }`}
+                    >
+                      {customer.current_balance > 0
+                        ? `₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "Cleared ✓"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => setLedgerCustomer(customer)}
+                        className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600"
+                        title="View Ledger"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleEdit(customer)}
+                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      {customer.current_balance > 0 && (
+                        <button
+                          onClick={() => handleWhatsApp(customer)}
+                          className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
+                          title="Send WhatsApp reminder"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setConfirmDelete(customer.id)}
+                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <Pagination

@@ -52,6 +52,7 @@ const INITIAL_PAYMENT = {
   payment_date: new Date().toISOString().split("T")[0],
   payment_method: "cash",
   reference_number: "",
+  reinvested_amount: "",
   notes: "",
 };
 
@@ -123,6 +124,9 @@ export default function Purchases() {
   const [selectedPurchase, setSelectedPurchase] = useState(null);
   const [purchaseFabrics, setPurchaseFabrics] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({});
+  const [confirmDeletePayment, setConfirmDeletePayment] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -333,6 +337,7 @@ export default function Purchases() {
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
           reference_number: paymentData.reference_number,
+          reinvested_amount: parseFloat(paymentData.reinvested_amount) || 0,
           notes: paymentData.notes,
         },
       ]);
@@ -345,6 +350,47 @@ export default function Purchases() {
     } catch (error) {
       console.error("Error saving payment:", error);
       toast("Failed to save payment", "error");
+    }
+  }
+
+  async function handleEditPaymentSubmit(e) {
+    e.preventDefault();
+    try {
+      const { error } = await supabase
+        .from("purchase_payments")
+        .update({
+          amount: parseFloat(editPaymentForm.amount),
+          payment_date: editPaymentForm.payment_date,
+          payment_method: editPaymentForm.payment_method,
+          reference_number: editPaymentForm.reference_number,
+          reinvested_amount: parseFloat(editPaymentForm.reinvested_amount) || 0,
+          notes: editPaymentForm.notes,
+        })
+        .eq("id", editingPayment.id);
+      if (error) throw error;
+      setEditingPayment(null);
+      fetchPayments(selectedPurchase.id);
+      fetchPurchases();
+      toast("Payment updated");
+    } catch (err) {
+      toast("Failed to update payment", "error");
+    }
+  }
+
+  async function handleDeletePayment(paymentId) {
+    try {
+      const { error } = await supabase
+        .from("purchase_payments")
+        .delete()
+        .eq("id", paymentId);
+      if (error) throw error;
+      fetchPayments(selectedPurchase.id);
+      fetchPurchases();
+      toast("Payment deleted");
+    } catch (err) {
+      toast("Failed to delete payment", "error");
+    } finally {
+      setConfirmDeletePayment(null);
     }
   }
 
@@ -1133,6 +1179,29 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reinvested Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max={paymentData.amount || undefined}
+                  value={paymentData.reinvested_amount}
+                  onChange={(e) =>
+                    setPaymentData({ ...paymentData, reinvested_amount: e.target.value })
+                  }
+                  className="input"
+                  placeholder="How much from collected sales? (0 = all fresh)"
+                  onWheel={(e) => e.target.blur()}
+                />
+                {paymentData.amount && paymentData.reinvested_amount && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Fresh capital: ₹{Math.max(parseFloat(paymentData.amount) - parseFloat(paymentData.reinvested_amount), 0).toLocaleString("en-IN")}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Notes
                 </label>
                 <textarea
@@ -1849,32 +1918,50 @@ export default function Purchases() {
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-semibold text-gray-900">
-                            ₹
-                            {payment.amount.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            ₹{payment.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {new Date(payment.payment_date).toLocaleDateString(
-                              "en-GB",
-                              {
-                                day: "numeric",
-                                month: "short",
-                                year: "2-digit",
-                              },
-                            )}
+                            {new Date(payment.payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
                           </p>
-                        </div>
-                        <div className="text-right">
-                          <span className="badge bg-gray-200 text-gray-700">
-                            {payment.payment_method.toUpperCase()}
-                          </span>
-                          {payment.reference_number && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              {payment.reference_number}
+                          {payment.reinvested_amount > 0 && (
+                            <p className="text-xs text-emerald-600 mt-0.5">
+                              ♻️ ₹{payment.reinvested_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} reinvested
                             </p>
                           )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="text-right mr-1">
+                            <span className="badge bg-gray-200 text-gray-700">
+                              {payment.payment_method.toUpperCase()}
+                            </span>
+                            {payment.reference_number && (
+                              <p className="text-xs text-gray-500 mt-1">{payment.reference_number}</p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPayment(payment);
+                              setEditPaymentForm({
+                                amount: payment.amount,
+                                payment_date: payment.payment_date,
+                                payment_method: payment.payment_method,
+                                reference_number: payment.reference_number || "",
+                                reinvested_amount: payment.reinvested_amount || "",
+                                notes: payment.notes || "",
+                              });
+                            }}
+                            className="p-1.5 hover:bg-primary-100 rounded-lg text-gray-400 hover:text-primary-600"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeletePayment(payment.id)}
+                            className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2096,6 +2183,76 @@ export default function Purchases() {
           onConfirm={() => handleDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
+      )}
+
+      {confirmDeletePayment && (
+        <ConfirmModal
+          message="This will permanently delete this payment record."
+          onConfirm={() => handleDeletePayment(confirmDeletePayment)}
+          onCancel={() => setConfirmDeletePayment(null)}
+        />
+      )}
+
+      {editingPayment && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Edit Payment</h2>
+              <button onClick={() => setEditingPayment(null)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditPaymentSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+                <input type="number" step="0.01" required value={editPaymentForm.amount}
+                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, amount: e.target.value })}
+                  className="input" onWheel={(e) => e.target.blur()} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reinvested Amount (₹)</label>
+                <input type="number" step="0.01" min="0" value={editPaymentForm.reinvested_amount}
+                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, reinvested_amount: e.target.value })}
+                  className="input" placeholder="How much from collected sales?" onWheel={(e) => e.target.blur()} />
+                {editPaymentForm.amount && editPaymentForm.reinvested_amount && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Fresh capital: ₹{Math.max(parseFloat(editPaymentForm.amount) - parseFloat(editPaymentForm.reinvested_amount), 0).toLocaleString("en-IN")}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
+                <input type="date" value={editPaymentForm.payment_date}
+                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, payment_date: e.target.value })}
+                  className="input w-full" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+                <select value={editPaymentForm.payment_method}
+                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, payment_method: e.target.value })}
+                  className="input">
+                  {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reference Number</label>
+                <input type="text" value={editPaymentForm.reference_number}
+                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, reference_number: e.target.value })}
+                  className="input" placeholder="Transaction ID / Check No." />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea value={editPaymentForm.notes}
+                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, notes: e.target.value })}
+                  className="input" rows={2} />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEditingPayment(null)} className="btn btn-secondary flex-1">Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">Update Payment</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {filteredPurchases.length === 0 && (
