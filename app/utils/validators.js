@@ -80,8 +80,10 @@ export const validatePurchase = (formData) => {
 
 export const validatePayment = (formData) => {
   const errors = {};
-  if (!formData.amount || parseFloat(formData.amount) <= 0)
-    errors.amount = "Amount must be greater than 0";
+  const amount = parseFloat(formData.amount) || 0;
+  const reinvested = parseFloat(formData.reinvested_amount) || 0;
+  if (amount <= 0 && reinvested <= 0)
+    errors.amount = "Amount or reinvested amount must be greater than 0";
   if (!formData.payment_date) errors.payment_date = "Payment date is required";
   if (!formData.payment_method || formData.payment_method.trim() === "")
     errors.payment_method = "Payment method is required";
