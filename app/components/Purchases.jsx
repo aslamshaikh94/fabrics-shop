@@ -330,14 +330,17 @@ export default function Purchases() {
     }
     setPaymentErrors({});
     try {
+      const freshAmount = parseFloat(paymentData.amount) || 0;
+      const reinvestedAmount = parseFloat(paymentData.reinvested_amount) || 0;
+      const paymentAmount = freshAmount + reinvestedAmount;
       const { error } = await supabase.from("purchase_payments").insert([
         {
           purchase_id: selectedPurchase.id,
-          amount: parseFloat(paymentData.amount),
+          amount: paymentAmount,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
           reference_number: paymentData.reference_number,
-          reinvested_amount: parseFloat(paymentData.reinvested_amount) || 0,
+          reinvested_amount: reinvestedAmount,
           notes: paymentData.notes,
         },
       ]);
@@ -356,14 +359,18 @@ export default function Purchases() {
   async function handleEditPaymentSubmit(e) {
     e.preventDefault();
     try {
+      const editFreshAmount = parseFloat(editPaymentForm.amount) || 0;
+      const editReinvestedAmount =
+        parseFloat(editPaymentForm.reinvested_amount) || 0;
+      const editPaymentAmount = editFreshAmount + editReinvestedAmount;
       const { error } = await supabase
         .from("purchase_payments")
         .update({
-          amount: parseFloat(editPaymentForm.amount),
+          amount: editPaymentAmount,
           payment_date: editPaymentForm.payment_date,
           payment_method: editPaymentForm.payment_method,
           reference_number: editPaymentForm.reference_number,
-          reinvested_amount: parseFloat(editPaymentForm.reinvested_amount) || 0,
+          reinvested_amount: editReinvestedAmount,
           notes: editPaymentForm.notes,
         })
         .eq("id", editingPayment.id);
@@ -1100,12 +1107,11 @@ export default function Purchases() {
             <form onSubmit={handlePaymentSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount *
+                  Amount
                 </label>
                 <input
                   type="number"
                   step="0.01"
-                  required
                   max={selectedPurchase.remaining_amount}
                   value={paymentData.amount}
                   onChange={(e) => {
@@ -1114,12 +1120,41 @@ export default function Purchases() {
                       setPaymentErrors({ ...paymentErrors, amount: "" });
                   }}
                   className={`input ${paymentErrors.amount ? "border-error-400" : ""}`}
-                  placeholder="0.00"
+                  placeholder="Leave empty to use reinvested amount"
                   onWheel={(e) => e.target.blur()}
                 />
                 {paymentErrors.amount && (
                   <p className="text-error-600 text-sm mt-1">
                     {paymentErrors.amount}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reinvested Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={paymentData.reinvested_amount}
+                  onChange={(e) =>
+                    setPaymentData({
+                      ...paymentData,
+                      reinvested_amount: e.target.value,
+                    })
+                  }
+                  className="input"
+                  placeholder="How much from collected sales? (0 = all fresh)"
+                  onWheel={(e) => e.target.blur()}
+                />
+                {(paymentData.amount || paymentData.reinvested_amount) && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Total: ₹
+                    {(
+                      (parseFloat(paymentData.amount) || 0) +
+                      (parseFloat(paymentData.reinvested_amount) || 0)
+                    ).toLocaleString("en-IN")}
                   </p>
                 )}
               </div>
@@ -1176,29 +1211,6 @@ export default function Purchases() {
                   className="input"
                   placeholder="Transaction ID / Check No."
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reinvested Amount (₹)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max={paymentData.amount || undefined}
-                  value={paymentData.reinvested_amount}
-                  onChange={(e) =>
-                    setPaymentData({ ...paymentData, reinvested_amount: e.target.value })
-                  }
-                  className="input"
-                  placeholder="How much from collected sales? (0 = all fresh)"
-                  onWheel={(e) => e.target.blur()}
-                />
-                {paymentData.amount && paymentData.reinvested_amount && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    Fresh capital: ₹{Math.max(parseFloat(paymentData.amount) - parseFloat(paymentData.reinvested_amount), 0).toLocaleString("en-IN")}
-                  </p>
-                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1918,14 +1930,33 @@ export default function Purchases() {
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="font-semibold text-gray-900">
-                            ₹{payment.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ₹
+                            {payment.amount.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {new Date(payment.payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
+                            {new Date(payment.payment_date).toLocaleDateString(
+                              "en-GB",
+                              {
+                                day: "numeric",
+                                month: "short",
+                                year: "2-digit",
+                              },
+                            )}
                           </p>
                           {payment.reinvested_amount > 0 && (
                             <p className="text-xs text-emerald-600 mt-0.5">
-                              ♻️ ₹{payment.reinvested_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} reinvested
+                              ♻️ ₹
+                              {payment.reinvested_amount.toLocaleString(
+                                "en-IN",
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )}{" "}
+                              reinvested
                             </p>
                           )}
                         </div>
@@ -1935,7 +1966,9 @@ export default function Purchases() {
                               {payment.payment_method.toUpperCase()}
                             </span>
                             {payment.reference_number && (
-                              <p className="text-xs text-gray-500 mt-1">{payment.reference_number}</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {payment.reference_number}
+                              </p>
                             )}
                           </div>
                           <button
@@ -1943,11 +1976,15 @@ export default function Purchases() {
                             onClick={() => {
                               setEditingPayment(payment);
                               setEditPaymentForm({
-                                amount: payment.amount,
+                                amount:
+                                  payment.amount -
+                                    (payment.reinvested_amount || 0) || "",
                                 payment_date: payment.payment_date,
                                 payment_method: payment.payment_method,
-                                reference_number: payment.reference_number || "",
-                                reinvested_amount: payment.reinvested_amount || "",
+                                reference_number:
+                                  payment.reference_number || "",
+                                reinvested_amount:
+                                  payment.reinvested_amount || "",
                                 notes: payment.notes || "",
                               });
                             }}
@@ -2198,57 +2235,143 @@ export default function Purchases() {
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Edit Payment</h2>
-              <button onClick={() => setEditingPayment(null)} className="p-2 hover:bg-gray-100 rounded-lg">
+              <button
+                onClick={() => setEditingPayment(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleEditPaymentSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
-                <input type="number" step="0.01" required value={editPaymentForm.amount}
-                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, amount: e.target.value })}
-                  className="input" onWheel={(e) => e.target.blur()} />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editPaymentForm.amount}
+                  onChange={(e) =>
+                    setEditPaymentForm({
+                      ...editPaymentForm,
+                      amount: e.target.value,
+                    })
+                  }
+                  className="input"
+                  onWheel={(e) => e.target.blur()}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reinvested Amount (₹)</label>
-                <input type="number" step="0.01" min="0" value={editPaymentForm.reinvested_amount}
-                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, reinvested_amount: e.target.value })}
-                  className="input" placeholder="How much from collected sales?" onWheel={(e) => e.target.blur()} />
-                {editPaymentForm.amount && editPaymentForm.reinvested_amount && (
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reinvested Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editPaymentForm.reinvested_amount}
+                  onChange={(e) =>
+                    setEditPaymentForm({
+                      ...editPaymentForm,
+                      reinvested_amount: e.target.value,
+                    })
+                  }
+                  className="input"
+                  placeholder="How much from collected sales?"
+                  onWheel={(e) => e.target.blur()}
+                />
+                {(editPaymentForm.amount ||
+                  editPaymentForm.reinvested_amount) && (
                   <p className="text-xs text-gray-400 mt-1">
-                    Fresh capital: ₹{Math.max(parseFloat(editPaymentForm.amount) - parseFloat(editPaymentForm.reinvested_amount), 0).toLocaleString("en-IN")}
+                    Total: ₹
+                    {(
+                      (parseFloat(editPaymentForm.amount) || 0) +
+                      (parseFloat(editPaymentForm.reinvested_amount) || 0)
+                    ).toLocaleString("en-IN")}
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
-                <input type="date" value={editPaymentForm.payment_date}
-                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, payment_date: e.target.value })}
-                  className="input w-full" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Payment Date
+                </label>
+                <input
+                  type="date"
+                  value={editPaymentForm.payment_date}
+                  onChange={(e) =>
+                    setEditPaymentForm({
+                      ...editPaymentForm,
+                      payment_date: e.target.value,
+                    })
+                  }
+                  className="input w-full"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                <select value={editPaymentForm.payment_method}
-                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, payment_method: e.target.value })}
-                  className="input">
-                  {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={editPaymentForm.payment_method}
+                  onChange={(e) =>
+                    setEditPaymentForm({
+                      ...editPaymentForm,
+                      payment_method: e.target.value,
+                    })
+                  }
+                  className="input"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reference Number</label>
-                <input type="text" value={editPaymentForm.reference_number}
-                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, reference_number: e.target.value })}
-                  className="input" placeholder="Transaction ID / Check No." />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reference Number
+                </label>
+                <input
+                  type="text"
+                  value={editPaymentForm.reference_number}
+                  onChange={(e) =>
+                    setEditPaymentForm({
+                      ...editPaymentForm,
+                      reference_number: e.target.value,
+                    })
+                  }
+                  className="input"
+                  placeholder="Transaction ID / Check No."
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                <textarea value={editPaymentForm.notes}
-                  onChange={(e) => setEditPaymentForm({ ...editPaymentForm, notes: e.target.value })}
-                  className="input" rows={2} />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={editPaymentForm.notes}
+                  onChange={(e) =>
+                    setEditPaymentForm({
+                      ...editPaymentForm,
+                      notes: e.target.value,
+                    })
+                  }
+                  className="input"
+                  rows={2}
+                />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setEditingPayment(null)} className="btn btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Update Payment</button>
+                <button
+                  type="button"
+                  onClick={() => setEditingPayment(null)}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Update Payment
+                </button>
               </div>
             </form>
           </div>
