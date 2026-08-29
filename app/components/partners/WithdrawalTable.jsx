@@ -1,7 +1,10 @@
 "use client";
-import { useMemo } from "react";
 import { Wallet, Calendar, Pencil, Trash2, Plus } from "lucide-react";
 import ConfirmModal from "../ConfirmModal";
+import {
+  matchPartner,
+  partnerNameForWithdrawal,
+} from "../../utils/partnerWithdrawal";
 
 const MONTHS = [
   "Jan",
@@ -47,26 +50,15 @@ export default function WithdrawalTable({
   setConfirmDelete,
   allWithdrawals,
 }) {
-  const partnerIndexMap = useMemo(() => {
-    const map = {};
-    partners.forEach((p, idx) => { map[p.name.toLowerCase()] = idx; });
-    return map;
-  }, [partners]);
-
   function getPartnerColor(w) {
-    const by = (w.withdrawn_by || "").toLowerCase();
-    for (const [nameLower, idx] of Object.entries(partnerIndexMap)) {
-      if (by.includes(nameLower)) return partnerColors[idx % partnerColors.length].chart;
-    }
-    return "#999";
+    const partner = matchPartner(w.withdrawn_by, partners);
+    if (!partner) return "#999";
+    const idx = partners.findIndex((p) => p.id === partner.id);
+    return partnerColors[idx % partnerColors.length].chart;
   }
 
   function getPartnerName(w) {
-    const by = (w.withdrawn_by || "").toLowerCase();
-    for (const p of partners) {
-      if (by.includes(p.name.toLowerCase())) return p.name;
-    }
-    return w.withdrawn_by || "Unknown";
+    return partnerNameForWithdrawal(w.withdrawn_by, partners);
   }
 
   return (
