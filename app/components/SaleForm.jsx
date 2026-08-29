@@ -868,11 +868,13 @@ export default function SaleForm({
                         {activeFabricDropdown === currentIdx && (
                           <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
                             {allFabrics
-                              .filter((f) =>
-                                f.name
-                                  .toLowerCase()
-                                  .includes(fabricSearch.toLowerCase()),
-                              )
+                              .filter((f) => {
+                                const q = fabricSearch.toLowerCase();
+                                return (
+                                  f.name.toLowerCase().includes(q) ||
+                                  String(f.selling_price_per_meter || "").includes(q)
+                                );
+                              })
                               .map((f) => (
                                 <button
                                   key={f.id}
@@ -891,17 +893,22 @@ export default function SaleForm({
                                   }}
                                   className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
                                 >
-                                  <span>{f.name}</span>{" "}
+                                  <span>{f.name}</span>
+                                  {f.selling_price_per_meter > 0 && (
+                                    <span className="text-xs text-primary-600 ml-2">₹{f.selling_price_per_meter}/m</span>
+                                  )}
                                   <span className="text-[10px] text-gray-400 ml-2">
                                     {f.available_meters}m
                                   </span>
                                 </button>
                               ))}
-                            {allFabrics.filter((f) =>
-                              f.name
-                                .toLowerCase()
-                                .includes(fabricSearch.toLowerCase()),
-                            ).length === 0 && (
+                            {allFabrics.filter((f) => {
+                              const q = fabricSearch.toLowerCase();
+                              return (
+                                f.name.toLowerCase().includes(q) ||
+                                String(f.selling_price_per_meter || "").includes(q)
+                              );
+                            }).length === 0 && (
                               <div className="px-3 py-2.5 text-xs text-gray-400 italic">
                                 No matching fabrics found
                               </div>
@@ -945,6 +952,12 @@ export default function SaleForm({
                           Buying:{" "}
                           <strong>₹{item.cost_price_per_meter}/m</strong>
                         </span>
+                        {item.price_per_meter && (
+                          <span>
+                            Selling:{" "}
+                            <strong>₹{item.price_per_meter}/m</strong>
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
