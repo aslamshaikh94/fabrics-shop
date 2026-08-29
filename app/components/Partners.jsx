@@ -167,11 +167,11 @@ export default function PartnersPage() {
   async function fetchData(currentPartners) {
     setLoading(true);
     try {
-      const [salesRes, withdrawalsRes, fabricsRes] = await Promise.all([
+      const [salesRes, withdrawalsRes] = await Promise.all([
         supabase
           .from("sales")
           .select(
-            "sale_date, total_amount, margin, meters, price_per_meter, cost_price_per_meter, fabric_id, fabric_name",
+            "sale_date, total_amount, margin",
           )
           .gte("sale_date", `${year}-01-01`)
           .lte("sale_date", `${year}-12-31`),
@@ -181,19 +181,11 @@ export default function PartnersPage() {
           .gte("withdrawal_date", `${year}-01-01`)
           .lte("withdrawal_date", `${year}-12-31`)
           .order("withdrawal_date", { ascending: false }),
-        supabase.from("fabrics").select("id, name, purchase_price_per_meter"),
       ]);
 
       const sales = salesRes.data || [];
       const withdrawals = withdrawalsRes.data || [];
-      const fabrics = fabricsRes.data || [];
       setAllWithdrawals(withdrawals);
-
-      const fabricCostMap = {};
-      fabrics.forEach((f) => {
-        fabricCostMap[f.id] = f.purchase_price_per_meter || 0;
-        fabricCostMap[f.name?.toLowerCase()] = f.purchase_price_per_meter || 0;
-      });
 
       const monthly = Array.from({ length: 12 }, (_, i) => ({
         month: MONTHS[i],
@@ -205,16 +197,7 @@ export default function PartnersPage() {
       sales.forEach((s) => {
         const m = new Date(s.sale_date).getMonth();
         monthly[m].sales += s.total_amount || 0;
-        let costPrice = s.cost_price_per_meter || 0;
-        if (costPrice <= 0)
-          costPrice =
-            fabricCostMap[s.fabric_id] ||
-            fabricCostMap[s.fabric_name?.toLowerCase()] ||
-            0;
-        if (costPrice > 0)
-          monthly[m].grossProfit +=
-            (s.meters || 0) * ((s.price_per_meter || 0) - costPrice);
-        else monthly[m].grossProfit += s.margin || 0;
+        monthly[m].grossProfit += s.margin || 0;
       });
 
       setMonthlyData(monthly);

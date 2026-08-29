@@ -468,10 +468,10 @@ export default function Fabrics() {
           >
             <Trash className="w-4 h-4" />
           </button>
-          <div className="relative" ref={colPickerRef}>
+          <div className="relative inline-flex" ref={colPickerRef}>
             <button
               onClick={() => setShowColPicker((v) => !v)}
-              className={`btn btn-secondary`}
+              className="btn btn-secondary"
               title="Show/hide columns"
             >
               <Columns className="w-4 h-4" />

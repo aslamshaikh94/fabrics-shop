@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -12,6 +12,7 @@ import {
   Download,
   FileUp,
   X,
+  Columns,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validatePayment, hasErrors } from "../utils/validators";
@@ -27,6 +28,30 @@ import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
+
+const ALL_SALE_COLUMNS = [
+  { key: "customer",  label: "Customer" },
+  { key: "date",      label: "Date" },
+  { key: "items",     label: "Items" },
+  { key: "mtrs",      label: "Mtrs" },
+  { key: "total",     label: "Total" },
+  { key: "paid",      label: "Paid" },
+  { key: "margin",    label: "Margin" },
+  { key: "discExtra", label: "Disc./Extra" },
+  { key: "remaining", label: "Remaining" },
+  { key: "type",      label: "Type" },
+  { key: "actions",   label: "Actions" },
+];
+
+const SALE_DEFAULT_VISIBLE = new Set(["customer", "date", "items", "mtrs", "total", "paid", "margin", "discExtra", "remaining", "type", "actions"]);
+
+function loadSaleVisibleCols() {
+  try {
+    const saved = localStorage.getItem("sales_visible_cols");
+    if (saved) return new Set(JSON.parse(saved));
+  } catch {}
+  return new Set(SALE_DEFAULT_VISIBLE);
+}
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
   credit: "bg-warning-100 text-warning-800",
@@ -64,14 +89,33 @@ export default function Sales() {
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
   const [showImport, setShowImport] = useState(false);
-  const [showMargin, setShowMargin] = useState(true);
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [visibleCols, setVisibleCols] = useState(loadSaleVisibleCols);
+  const colPickerRef = useRef(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("salesShowMargin");
-    if (saved !== null) {
-      setShowMargin(saved === "true");
+    localStorage.setItem("sales_visible_cols", JSON.stringify([...visibleCols]));
+  }, [visibleCols]);
+
+  useEffect(() => {
+    if (!showColPicker) return;
+    function handleClick(e) {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target))
+        setShowColPicker(false);
     }
-  }, []);
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showColPicker]);
+
+  function toggleCol(key) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const col = (key) => visibleCols.has(key);
 
   useEffect(() => {
     fetchAll();
@@ -475,19 +519,39 @@ export default function Sales() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() =>
-              setShowMargin((v) => {
-                const next = !v;
-                localStorage.setItem("salesShowMargin", String(next));
-                return next;
-              })
-            }
-            className={`btn ${showMargin ? "btn-secondary" : "btn-ghost"}`}
-            title={showMargin ? "Hide margin column" : "Show margin column"}
-          >
-            <TrendingUp className="w-4 h-4" />
-          </button>
+          <div className="relative inline-flex" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker((v) => !v)}
+              className="btn btn-secondary"
+              title="Show/hide columns"
+            >
+              <Columns className="w-4 h-4" />
+            </button>
+            {showColPicker && (
+              <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-44">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                <div className="space-y-1">
+                  {ALL_SALE_COLUMNS.map(({ key, label }) => (
+                    <label key={key} className="flex items-center gap-2 cursor-pointer py-0.5 hover:text-primary-600">
+                      <input
+                        type="checkbox"
+                        checked={visibleCols.has(key)}
+                        onChange={() => toggleCol(key)}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm text-gray-700">{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setVisibleCols(new Set(SALE_DEFAULT_VISIBLE))}
+                  className="mt-2 text-xs text-primary-600 hover:underline w-full text-left"
+                >
+                  Reset to default
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowImport(true)}
             className="btn btn-secondary"
@@ -747,41 +811,17 @@ export default function Sales() {
           <table className="w-full" style={{ minWidth: "700px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {[
-                  "Customer",
-                  "Date",
-                  "Items",
-                  "Mtrs",
-                  "Total",
-                  "Paid",
-                  ...(showMargin ? ["Margin"] : []),
-                  "Disc./Extra",
-                  "Remaining",
-                  "Type",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                      [
-                        "Total",
-                        "Paid",
-                        "Margin",
-                        "Remaining",
-                        "Items",
-                        "Mtrs",
-                      ].includes(h)
-                        ? "text-right"
-                        : h === "Type"
-                          ? "text-center"
-                          : h === "Actions"
-                            ? "text-right"
-                            : "text-left"
-                    }`}
-                  >
-                    {h}
-                  </th>
-                ))}
+                {col("customer") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-left">Customer</th>}
+                {col("date")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-left">Date</th>}
+                {col("items")     && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Items</th>}
+                {col("mtrs")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Mtrs</th>}
+                {col("total")     && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Total</th>}
+                {col("paid")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Paid</th>}
+                {col("margin") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Margin</th>}
+                {col("discExtra") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Disc./Extra</th>}
+                {col("remaining") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Remaining</th>}
+                {col("type")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-center">Type</th>}
+                {col("actions") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -790,161 +830,136 @@ export default function Sales() {
                   key={group.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-gray-900">
-                        {formatCustomerName(group)}
-                      </p>
-                      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded bg-gray-200 text-gray-500 text-[10px] font-bold shrink-0">
-                        {group.items
-                          .map((i) => i.fabric_name?.trim().charAt(0) || "")
-                          .filter(Boolean)
-                          .join("")
-                          .toUpperCase()
-                          .slice(0, 4)}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className="text-gray-600 text-sm">
-                      {formatDate(group.sale_date)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setSelectedGroupForDetails(group)}
-                      className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700 hover:bg-primary-200 hover:text-primary-800 transition-colors cursor-pointer"
-                      title="View items"
-                    >
-                      {group.items.length}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-600 text-sm">
-                    {group.items
-                      .reduce((s, i) => s + (parseFloat(i.meters) || 0), 0)
-                      .toFixed(1)}
-                    m
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-sm">
-                    ₹
-                    {group.total_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span className="font-medium">
-                      ₹
-                      {group.paid_amount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </span>
-                  </td>
-                  {showMargin && (
+                  {col("customer") && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-gray-900">
+                          {formatCustomerName(group)}
+                        </p>
+                        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded bg-gray-200 text-gray-500 text-[10px] font-bold shrink-0">
+                          {group.items
+                            .map((i) => i.fabric_name?.trim().charAt(0) || "")
+                            .filter(Boolean)
+                            .join("")
+                            .toUpperCase()
+                            .slice(0, 4)}
+                        </span>
+                      </div>
+                    </td>
+                  )}
+                  {col("date") && (
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="text-gray-600 text-sm">{formatDate(group.sale_date)}</span>
+                    </td>
+                  )}
+                  {col("items") && (
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => setSelectedGroupForDetails(group)}
+                        className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700 hover:bg-primary-200 hover:text-primary-800 transition-colors cursor-pointer"
+                        title="View items"
+                      >
+                        {group.items.length}
+                      </button>
+                    </td>
+                  )}
+                  {col("mtrs") && (
+                    <td className="px-4 py-3 text-right text-gray-600 text-sm">
+                      {group.items.reduce((s, i) => s + (parseFloat(i.meters) || 0), 0).toFixed(1)}m
+                    </td>
+                  )}
+                  {col("total") && (
+                    <td className="px-4 py-3 text-right font-medium text-sm">
+                      ₹{group.total_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  )}
+                  {col("paid") && (
                     <td className="px-4 py-3 text-right text-sm">
-                      <span className="text-accent-600 font-medium">
-                        ₹
-                        {group.margin.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      <span className="font-medium">
+                        ₹{group.paid_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </td>
                   )}
-                  <td className="px-4 py-3 text-right text-sm">
-                    {(() => {
-                      const netTotal = group.total_amount - group.discount_amount;
-                      const extraPaid = group.paid_amount - netTotal;
-                      if (extraPaid > 0.005) {
-                        return (
-                          <span className="font-medium text-accent-600">
-                            +₹
-                            {extraPaid.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </span>
-                        );
-                      }
-                      if (group.discount_amount > 0) {
-                        return (
-                          <span className="font-medium text-primary-600">
-                            -₹
-                            {group.discount_amount.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </span>
-                        );
-                      }
-                      return <span className="text-gray-300">—</span>;
-                    })()}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span
-                      className={
-                        group.remaining_amount > 0
-                          ? "text-warning-600 font-semibold"
-                          : "text-gray-500"
-                      }
-                    >
-                      ₹
-                      {group.remaining_amount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <PaymentBadge type={group.payment_type} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => setSelectedGroupForDetails(group)}
-                        className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
-                        title="View details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelectedSale(group);
-                          fetchPayments(group.items.map((i) => i.id));
-                        }}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
-                        title="View payments"
-                      >
-                        <History className="w-4 h-4" />
-                      </button>
-                      {group.remaining_amount > 0 && (
+                  {col("margin") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className="text-accent-600 font-medium">
+                        ₹{group.margin.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                  )}
+                  {col("discExtra") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      {(() => {
+                        const netTotal = group.total_amount - group.discount_amount;
+                        const extraPaid = group.paid_amount - netTotal;
+                        if (extraPaid > 0.005)
+                          return <span className="font-medium text-accent-600">+₹{extraPaid.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+                        if (group.discount_amount > 0)
+                          return <span className="font-medium text-primary-600">-₹{group.discount_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+                        return <span className="text-gray-300">—</span>;
+                      })()}
+                    </td>
+                  )}
+                  {col("remaining") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className={group.remaining_amount > 0 ? "text-warning-600 font-semibold" : "text-gray-500"}>
+                        ₹{group.remaining_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                  )}
+                  {col("type") && (
+                    <td className="px-4 py-3 text-center">
+                      <PaymentBadge type={group.payment_type} />
+                    </td>
+                  )}
+                  {col("actions") && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setSelectedGroupForDetails(group)}
+                          className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
+                          title="View details"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => {
                             setSelectedSale(group);
-                            setShowPaymentForm(true);
+                            fetchPayments(group.items.map((i) => i.id));
                           }}
-                          className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
-                          title="Receive payment"
+                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+                          title="View payments"
                         >
-                          <CreditCard className="w-4 h-4" />
+                          <History className="w-4 h-4" />
                         </button>
-                      )}
-                      <button
-                        onClick={() =>
-                          setConfirmDelete({
-                            isGroup: true,
-                            saleIds: group.items.map((i) => i.id),
-                            itemCount: group.items.length,
-                          })
-                        }
-                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
-                        title="Delete sale"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                        {group.remaining_amount > 0 && (
+                          <button
+                            onClick={() => {
+                              setSelectedSale(group);
+                              setShowPaymentForm(true);
+                            }}
+                            className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
+                            title="Receive payment"
+                          >
+                            <CreditCard className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() =>
+                            setConfirmDelete({
+                              isGroup: true,
+                              saleIds: group.items.map((i) => i.id),
+                              itemCount: group.items.length,
+                            })
+                          }
+                          className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
+                          title="Delete sale"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
