@@ -69,7 +69,6 @@ export default function Reports() {
   const [summary, setSummary] = useState({
     totalSales: 0,
     totalProfit: 0,
-    netProfit: 0,
     totalPurchases: 0,
     totalReceivables: 0,
     totalExpenses: 0,
@@ -77,7 +76,6 @@ export default function Reports() {
   const [prevSummary, setPrevSummary] = useState({
     totalSales: 0,
     totalProfit: 0,
-    netProfit: 0,
   });
   const [alerts, setAlerts] = useState({
     pendingCustomers: [],
@@ -113,15 +111,15 @@ export default function Reports() {
     const { data } = await supabase
       .from("sales")
       .select("sale_date")
-      .order("sale_date");
-    if (data?.length) {
-      const years = [
-        ...new Set(data.map((s) => new Date(s.sale_date).getFullYear())),
-      ];
-      const cur = new Date().getFullYear();
-      if (!years.includes(cur)) years.push(cur);
-      setAvailableYears(years.sort((a, b) => b - a));
-    }
+      .order("sale_date", { ascending: true })
+      .limit(1);
+    const firstYear = data?.length
+      ? new Date(data[0].sale_date).getFullYear()
+      : new Date().getFullYear();
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let y = firstYear; y <= currentYear; y++) years.push(y);
+    setAvailableYears(years.reverse());
   }
 
   async function fetchAlerts() {
@@ -130,7 +128,7 @@ export default function Reports() {
         await Promise.all([
           supabase
             .from("sales")
-            .select("customer_id, total_amount, paid_amount"),
+            .select("customer_id, total_amount, paid_amount, discount_amount"),
           supabase
             .from("purchases")
             .select("supplier_id, total_amount, paid_amount"),
@@ -153,7 +151,9 @@ export default function Reports() {
       const custMap = {};
       (custRes.data || []).forEach((s) => {
         const pending = Math.max(
-          (s.total_amount || 0) - (s.paid_amount || 0),
+          (s.total_amount || 0) -
+            (s.discount_amount || 0) -
+            (s.paid_amount || 0),
           0,
         );
         if (pending <= 0) return;
@@ -198,10 +198,20 @@ export default function Reports() {
   async function fetchAll() {
     setLoading(true);
     try {
-      const startDate = filterMode === "custom" ? `${customFrom}-01` : `${year}-01-01`;
-      const endDate = filterMode === "custom"
-        ? (() => { const [y, m] = customTo.split("-"); const d = new Date(y, m, 0); return d.toISOString().split("T")[0]; })()
-        : `${year}-12-31`;
+      const startDate =
+        filterMode === "custom" && customFrom
+          ? `${customFrom}-01`
+          : `${year}-01-01`;
+      // Build end date with LOCAL date components — toISOString() shifts to UTC
+      // and can drop the last day of the month (e.g. Dec 31 -> Dec 30 in IST).
+      const endDate =
+        filterMode === "custom" && customTo
+          ? (() => {
+              const [y, m] = customTo.split("-").map(Number);
+              const lastDay = new Date(y, m, 0).getDate();
+              return `${y}-${String(m).padStart(2, "0")}-${lastDay}`;
+            })()
+          : `${year}-12-31`;
       const prevStart = `${year - 1}-01-01`;
       const prevEnd = `${year - 1}-12-31`;
       const isYearMode = filterMode === "year";
@@ -217,13 +227,13 @@ export default function Reports() {
         }
       };
 
-      const [sales, purchases, expenses, prevSales, prevExp, customers] =
+      const [sales, purchases, expenses, prevSales, customers] =
         await Promise.all([
           safeQuery(
             supabase
               .from("sales")
               .select(
-                "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer_id",
+                "sale_date, total_amount, margin, remaining_amount, meters, notes, fabric_name, customer_id, discount_amount",
               )
               .gte("sale_date", startDate)
               .lte("sale_date", endDate),
@@ -248,17 +258,9 @@ export default function Reports() {
           safeQuery(
             supabase
               .from("sales")
-              .select("total_amount, margin")
+              .select("total_amount, margin, discount_amount")
               .gte("sale_date", prevStart)
               .lte("sale_date", prevEnd),
-            [],
-          ),
-          safeQuery(
-            supabase
-              .from("expenses")
-              .select("amount")
-              .gte("expense_date", prevStart)
-              .lte("expense_date", prevEnd),
             [],
           ),
           safeQuery(supabase.from("customers").select("id, name"), []),
@@ -274,13 +276,14 @@ export default function Reports() {
       if (isYearMode) {
         const prevMargin = prevSales.reduce((s, r) => s + (r.margin || 0), 0);
         setPrevSummary({
-          totalSales: prevSales.reduce((s, r) => s + (r.total_amount || 0), 0),
+          totalSales: prevSales.reduce(
+            (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+            0,
+          ),
           totalProfit: prevMargin,
-          netProfit:
-            prevMargin - prevExp.reduce((s, r) => s + (r.amount || 0), 0),
         });
       } else {
-        setPrevSummary({ totalSales: 0, totalProfit: 0, netProfit: 0 });
+        setPrevSummary({ totalSales: 0, totalProfit: 0 });
       }
 
       // Monthly data with prev year overlay
@@ -292,7 +295,8 @@ export default function Reports() {
       }));
       sales.forEach((s) => {
         const m = new Date(s.sale_date).getMonth();
-        monthly[m].sales += s.total_amount || 0;
+        monthly[m].sales +=
+          (s.total_amount || 0) - (s.discount_amount || 0);
         monthly[m].profit += s.margin || 0;
       });
       purchases.forEach((p) => {
@@ -302,16 +306,19 @@ export default function Reports() {
       setMonthlyData(monthly);
 
       setSummary({
-        totalSales: sales.reduce((s, r) => s + (r.total_amount || 0), 0),
+        // total_amount is stored pre-discount; net it out so sales/profit match
+        totalSales: sales.reduce(
+          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          0,
+        ),
         totalProfit: totalMargin,
-        netProfit: totalMargin - totalExpenses,
         totalPurchases: purchases.reduce(
           (s, r) => s + (r.total_amount || 0),
           0,
         ),
+        // remaining_amount is discount-aware and reflects all-time payments
         totalReceivables: sales.reduce(
-          (s, r) =>
-            s + Math.max((r.total_amount || 0) - (r.paid_amount || 0), 0),
+          (s, r) => s + (r.remaining_amount || 0),
           0,
         ),
         totalExpenses,
@@ -323,11 +330,9 @@ export default function Reports() {
         const customer = customerMap[s.customer_id];
         const name = customer?.name || "Walk-in";
         if (!custMap[name]) custMap[name] = { name, revenue: 0, pending: 0 };
-        custMap[name].revenue += s.total_amount || 0;
-        custMap[name].pending += Math.max(
-          (s.total_amount || 0) - (s.paid_amount || 0),
-          0,
-        );
+        custMap[name].revenue +=
+          (s.total_amount || 0) - (s.discount_amount || 0);
+        custMap[name].pending += s.remaining_amount || 0;
       });
       setTopCustomers(Object.values(custMap));
 
@@ -370,15 +375,6 @@ export default function Reports() {
       bg: "bg-green-50",
       iconBg: "bg-green-500",
       text: "text-green-700",
-    },
-    {
-      title: "Net Profit",
-      value: summary.netProfit,
-      prev: prevSummary.netProfit,
-      icon: DollarSign,
-      bg: summary.netProfit >= 0 ? "bg-emerald-50" : "bg-red-50",
-      iconBg: summary.netProfit >= 0 ? "bg-emerald-500" : "bg-red-500",
-      text: summary.netProfit >= 0 ? "text-emerald-700" : "text-red-600",
     },
     {
       title: "Total Expenses",

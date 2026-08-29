@@ -18,6 +18,7 @@ import {
 import { useToast } from "./Toast";
 import Modal from "./shared/Modal";
 import ConfirmModal from "./ConfirmModal";
+import { matchPartner } from "../utils/partnerWithdrawal";
 
 // Dynamically import heavy sub-components (recharts is only loaded when needed)
 const PartnerMonthlyChart = dynamic(
@@ -136,15 +137,15 @@ export default function PartnersPage() {
     const { data } = await supabase
       .from("sales")
       .select("sale_date")
-      .order("sale_date");
-    if (data?.length) {
-      const years = [
-        ...new Set(data.map((s) => new Date(s.sale_date).getFullYear())),
-      ];
-      const cur = new Date().getFullYear();
-      if (!years.includes(cur)) years.push(cur);
-      setAvailableYears(years.sort((a, b) => b - a));
-    }
+      .order("sale_date", { ascending: true })
+      .limit(1);
+    const firstYear = data?.length
+      ? new Date(data[0].sale_date).getFullYear()
+      : new Date().getFullYear();
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let y = firstYear; y <= currentYear; y++) years.push(y);
+    setAvailableYears(years.reverse());
   }
 
   async function fetchPartners() {
@@ -170,9 +171,7 @@ export default function PartnersPage() {
       const [salesRes, withdrawalsRes] = await Promise.all([
         supabase
           .from("sales")
-          .select(
-            "sale_date, total_amount, margin",
-          )
+          .select("sale_date, total_amount, margin, discount_amount")
           .gte("sale_date", `${year}-01-01`)
           .lte("sale_date", `${year}-12-31`),
         supabase
@@ -196,7 +195,9 @@ export default function PartnersPage() {
 
       sales.forEach((s) => {
         const m = new Date(s.sale_date).getMonth();
-        monthly[m].sales += s.total_amount || 0;
+        // total_amount is stored pre-discount, so net it for consistency
+        monthly[m].sales +=
+          (s.total_amount || 0) - (s.discount_amount || 0);
         monthly[m].grossProfit += s.margin || 0;
       });
 
@@ -211,13 +212,24 @@ export default function PartnersPage() {
       const totalShare =
         activePartners.reduce((s, p) => s + (p.share_percentage || 0), 0) || 100;
 
-      activePartners.forEach((partner, idx) => {
+      // Attach each withdrawal to exactly one partner (whole-name matching,
+      // so "Raj" no longer matches "Raju", etc.)
+      const withdrawalsByPartner = {};
+      activePartners.forEach((p) => {
+        withdrawalsByPartner[p.id] = [];
+      });
+      withdrawals.forEach((w) => {
+        const partner = matchPartner(w.withdrawn_by, activePartners);
+        if (partner && withdrawalsByPartner[partner.id]) {
+          withdrawalsByPartner[partner.id].push(w);
+        }
+      });
+
+      activePartners.forEach((partner) => {
         const sharePct = (partner.share_percentage || 0) / totalShare;
-        const nameLower = partner.name.toLowerCase();
+        // Shares are based on GROSS profit (sales margin)
         const shareAmount = grossProfit * sharePct;
-        const pWithdrawals = withdrawals.filter((w) =>
-          (w.withdrawn_by || "").toLowerCase().includes(nameLower),
-        );
+        const pWithdrawals = withdrawalsByPartner[partner.id] || [];
         const withdrawnAmount = pWithdrawals.reduce(
           (s, w) => s + (w.amount || 0),
           0,
@@ -285,9 +297,7 @@ export default function PartnersPage() {
   }
 
   function openEditWithdrawal(w) {
-    const partner = partners.find((p) =>
-      (w.withdrawn_by || "").toLowerCase().includes(p.name.toLowerCase()),
-    );
+    const partner = matchPartner(w.withdrawn_by, partners);
     setEditingWithdrawalId(w.id);
     setWithdrawalPartnerId(partner?.id || "");
     setWithdrawalAmount(w.amount.toString());
@@ -396,12 +406,10 @@ export default function PartnersPage() {
     const matchMonth =
       filterMonth === "all" ||
       w.withdrawal_date?.startsWith(`${year}-${filterMonth}`);
-    const matchPartner =
+    const matchesPartner =
       filterPartner === "all" ||
-      (w.withdrawn_by || "")
-        .toLowerCase()
-        .includes(filterPartner.toLowerCase());
-    return matchMonth && matchPartner;
+      matchPartner(w.withdrawn_by, partners)?.name === filterPartner;
+    return matchMonth && matchesPartner;
   });
 
   if (loading) {

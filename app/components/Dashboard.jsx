@@ -15,7 +15,11 @@ import { useShowAmount } from "./ShowAmountProvider";
 function pctChange(curr, prev) {
   if (!prev) return null;
   const diff = ((curr - prev) / prev) * 100;
-  return { value: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`, up: diff >= 0 };
+  return {
+    value: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`,
+    up: diff >= 0,
+    good: diff >= 0,
+  };
 }
 
 function fmtAmt(n, show) {
@@ -84,6 +88,8 @@ export default function Dashboard() {
       const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+      const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
 
       const [
         salesRes,
@@ -92,8 +98,10 @@ export default function Dashboard() {
         customersRes,
         thisMoSales,
         prevMoSales,
-        thisMoCollect,
-        prevMoCollect,
+        thisMoPayments,
+        prevMoPayments,
+        thisMoToCollect,
+        prevMoToCollect,
         recentRes,
         allCustomersRes,
         yearsRes,
@@ -111,20 +119,30 @@ export default function Dashboard() {
         supabase.from("customers").select("id", { count: "exact", head: true }),
         supabase
           .from("sales")
-          .select("total_amount, margin")
+          .select("total_amount, margin, discount_amount")
           .gte("sale_date", `${thisMonth}-01`),
         supabase
           .from("sales")
-          .select("total_amount, margin")
+          .select("total_amount, margin, discount_amount")
           .gte("sale_date", `${prevMonth}-01`)
           .lt("sale_date", `${thisMonth}-01`),
         supabase
+          .from("sale_payments")
+          .select("amount")
+          .gte("payment_date", `${thisMonth}-01`)
+          .lt("payment_date", `${nextMonth}-01`),
+        supabase
+          .from("sale_payments")
+          .select("amount")
+          .gte("payment_date", `${prevMonth}-01`)
+          .lt("payment_date", `${thisMonth}-01`),
+        supabase
           .from("sales")
-          .select("paid_amount, remaining_amount")
+          .select("remaining_amount")
           .gte("sale_date", `${thisMonth}-01`),
         supabase
           .from("sales")
-          .select("paid_amount, remaining_amount")
+          .select("remaining_amount")
           .gte("sale_date", `${prevMonth}-01`)
           .lt("sale_date", `${thisMonth}-01`),
         supabase
@@ -168,30 +186,38 @@ export default function Dashboard() {
           return s + (isNaN(num) ? 0 : num);
         }, 0) || 0;
 
+      // Sales are stored pre-discount (total_amount = meters * price), so
+      // net sales = total_amount - discount_amount to stay consistent with margin.
       const currSales =
-        thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
+        thisMoSales.data?.reduce(
+          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          0,
+        ) || 0;
       const prevSales =
-        prevMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
+        prevMoSales.data?.reduce(
+          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          0,
+        ) || 0;
       const currProfit =
         thisMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
       const prevProfit =
         prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
+      // "Collected" = actual cash received during the month (payments by date)
       const currCollected =
-        thisMoCollect.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+        thisMoPayments.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0;
       const prevCollected =
-        prevMoCollect.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+        prevMoPayments.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0;
+      // "To collect" = outstanding balance of sales made in this month
       const currToCollect =
-        thisMoCollect.data?.reduce(
+        thisMoToCollect.data?.reduce(
           (s, r) => s + (r.remaining_amount || 0),
           0,
         ) || 0;
       const prevToCollect =
-        prevMoCollect.data?.reduce(
+        prevMoToCollect.data?.reduce(
           (s, r) => s + (r.remaining_amount || 0),
           0,
         ) || 0;
-      const totalSalesAmount =
-        salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
       const totalRemaining =
         salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0;
       const totalPaidAmount =
@@ -224,18 +250,26 @@ export default function Dashboard() {
           (s, r) => s + (r.reinvested_amount || 0),
           0,
         ),
-        freshAmount:
+        freshAmount: Math.max(
           purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) -
             (purchasePaymentsRes.data || []).reduce(
               (s, r) => s + (r.reinvested_amount || 0),
               0,
-            ) || 0,
+            ),
+          0,
+        ),
       });
+      const toCollectChange = pctChange(currToCollect, prevToCollect);
       setChanges({
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
         collected: pctChange(currCollected, prevCollected),
-        toCollect: pctChange(currToCollect, prevToCollect),
+        // An increase in "to collect" is bad news (more unpaid), so flag it as red
+        toCollect:
+          toCollectChange && {
+            ...toCollectChange,
+            good: !toCollectChange.good,
+          },
       });
 
       // Set initial period stats to current month
@@ -321,28 +355,38 @@ export default function Dashboard() {
         endDate = "2099-12-31";
       }
 
-      const [salesRes, collectRes] = await Promise.all([
+      const [salesRes, toCollectRes, collectRes] = await Promise.all([
         supabase
           .from("sales")
-          .select("total_amount, margin")
+          .select("total_amount, margin, discount_amount")
           .gte("sale_date", startDate)
           .lte("sale_date", endDate),
         supabase
           .from("sales")
-          .select("paid_amount, remaining_amount")
+          .select("remaining_amount")
           .gte("sale_date", startDate)
           .lte("sale_date", endDate),
+        supabase
+          .from("sale_payments")
+          .select("amount")
+          .gte("payment_date", startDate)
+          .lte("payment_date", endDate),
       ]);
 
       setPeriodStats({
         sales:
-          salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0,
+          salesRes.data?.reduce(
+            (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+            0,
+          ) || 0,
         profit: salesRes.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0,
         collected:
-          collectRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
+          collectRes.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0,
         toCollect:
-          collectRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) ||
-          0,
+          toCollectRes.data?.reduce(
+            (s, r) => s + (r.remaining_amount || 0),
+            0,
+          ) || 0,
       });
     } catch (err) {
       console.error("Error fetching period stats:", err);
@@ -438,7 +482,7 @@ export default function Dashboard() {
               </p>
               {card.change && (
                 <p
-                  className={`text-xs mt-1 flex items-center gap-0.5 ${card.change.up ? "text-green-600" : "text-red-500"}`}
+                  className={`text-xs mt-1 flex items-center gap-0.5 ${card.change.good ? "text-green-600" : "text-red-500"}`}
                 >
                   {card.change.up ? (
                     <TrendingUp className="w-3 h-3" />
