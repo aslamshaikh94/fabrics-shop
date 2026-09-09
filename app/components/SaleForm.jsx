@@ -455,54 +455,20 @@ export default function SaleForm({
         }
 
         if (saleRows && saleRows.length > 0) {
-          // Payment logic — account for discount by reducing first item's payment
-          if (paymentType === "cash") {
-            const paymentInserts = saleRows.map((row, idx) => {
-              const fullAmount = row.meters * row.price_per_meter;
-              // Subtract discount from the first item's payment
-              const amount =
-                idx === 0
-                  ? Math.max(fullAmount - discountAmount, 0)
-                  : fullAmount;
-              return {
-                sale_id: row.id,
-                amount,
-                payment_date: formData.sale_date,
-                payment_method: "cash",
-              };
-            });
-            const { error: payErr } = await supabase
-              .from("sale_payments")
-              .insert(paymentInserts);
+          const totalPay = paymentType === "cash" ? netTotal : Math.min(initialPayment, netTotal);
+          if (totalPay > 0) {
+            // Distribute payment proportionally across items
+            const paymentInserts = saleRows.map((row) => ({
+              sale_id: row.id,
+              amount: Math.round((row.meters * row.price_per_meter / subtotal) * totalPay * 100) / 100,
+              payment_date: formData.sale_date,
+              payment_method: "cash",
+            }));
+            // Fix rounding: adjust last item so sum equals totalPay exactly
+            const sumSoFar = paymentInserts.slice(0, -1).reduce((s, p) => s + p.amount, 0);
+            paymentInserts[paymentInserts.length - 1].amount = Math.round((totalPay - sumSoFar) * 100) / 100;
+            const { error: payErr } = await supabase.from("sale_payments").insert(paymentInserts);
             if (payErr) throw payErr;
-          } else if (initialPayment > 0) {
-            let remaining = Math.min(initialPayment, netTotal);
-            const paymentInserts = [];
-            for (const [idx, row] of saleRows.entries()) {
-              if (remaining <= 0) break;
-              const fullAmount = row.meters * row.price_per_meter;
-              // Subtract discount from first item's amount for payment distribution
-              const rowAmount =
-                idx === 0
-                  ? Math.max(fullAmount - discountAmount, 0)
-                  : fullAmount;
-              const pay = Math.min(remaining, rowAmount);
-              if (pay > 0) {
-                paymentInserts.push({
-                  sale_id: row.id,
-                  amount: pay,
-                  payment_date: formData.sale_date,
-                  payment_method: "cash",
-                });
-                remaining -= pay;
-              }
-            }
-            if (paymentInserts.length > 0) {
-              const { error: payErr } = await supabase
-                .from("sale_payments")
-                .insert(paymentInserts);
-              if (payErr) throw payErr;
-            }
           }
         }
       }
