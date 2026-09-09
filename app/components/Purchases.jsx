@@ -157,6 +157,7 @@ export default function Purchases() {
   const [editingDetailFabricId, setEditingDetailFabricId] = useState(null);
   const [editingDetailFabricData, setEditingDetailFabricData] = useState(null);
   const [savingDetailFabric, setSavingDetailFabric] = useState(false);
+  const [confirmDeleteDetailFabric, setConfirmDeleteDetailFabric] = useState(null);
 
   useEffect(() => {
     fetchAll();
@@ -735,6 +736,19 @@ export default function Purchases() {
     setEditingDetailFabricData(null);
   }
 
+  async function handleDeleteDetailFabric(fabricId) {
+    try {
+      const { error } = await supabase.from("fabrics").delete().eq("id", fabricId);
+      if (error) throw error;
+      toast("Fabric deleted");
+      if (selectedPurchase) fetchPurchaseFabrics(selectedPurchase.id);
+    } catch (err) {
+      toast(err?.message || "Failed to delete fabric", "error");
+    } finally {
+      setConfirmDeleteDetailFabric(null);
+    }
+  }
+
   async function handleSaveDetailFabric() {
     if (!editingDetailFabricId || !editingDetailFabricData) return;
     setSavingDetailFabric(true);
@@ -786,11 +800,10 @@ export default function Purchases() {
 
   async function handleDelete(id) {
     try {
-      const { error: payErr } = await supabase
-        .from("purchase_payments")
-        .delete()
-        .eq("purchase_id", id);
-      if (payErr) throw payErr;
+      await Promise.all([
+        supabase.from("purchase_payments").delete().eq("purchase_id", id),
+        supabase.from("fabrics").delete().eq("purchase_id", id),
+      ]);
       const { error } = await supabase.from("purchases").delete().eq("id", id);
       if (error) throw error;
       toast("Purchase deleted");
@@ -1901,6 +1914,14 @@ export default function Purchases() {
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteDetailFabric(fabric.id)}
+                              className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
+                              title="Delete fabric"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       )}
@@ -2216,7 +2237,7 @@ export default function Purchases() {
 
       {confirmDelete && (
         <ConfirmModal
-          message="This will permanently delete the purchase and all its payments."
+          message="This will permanently delete the purchase, all its payments, and all linked fabric items."
           onConfirm={() => handleDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
@@ -2227,6 +2248,14 @@ export default function Purchases() {
           message="This will permanently delete this payment record."
           onConfirm={() => handleDeletePayment(confirmDeletePayment)}
           onCancel={() => setConfirmDeletePayment(null)}
+        />
+      )}
+
+      {confirmDeleteDetailFabric && (
+        <ConfirmModal
+          message="This will permanently delete this fabric from inventory."
+          onConfirm={() => handleDeleteDetailFabric(confirmDeleteDetailFabric)}
+          onCancel={() => setConfirmDeleteDetailFabric(null)}
         />
       )}
 

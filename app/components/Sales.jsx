@@ -199,46 +199,38 @@ export default function Sales() {
       return;
     }
     try {
-      let remainingToPay = parseFloat(paymentData.amount);
-      const paymentInserts = [];
-      for (const item of selectedSale.items || []) {
-        if (remainingToPay <= 0) break;
-        if (item.remaining_amount <= 0) continue;
-        const pay = Math.min(remainingToPay, item.remaining_amount);
-        paymentInserts.push({
+      const totalPay = parseFloat(paymentData.amount);
+      const groupSubtotal = selectedSale.items.reduce(
+        (s, i) => s + (parseFloat(i.meters) || 0) * (parseFloat(i.price_per_meter) || 0), 0
+      );
+
+      // Insert one payment row per item proportionally (DB trigger needs sale_id)
+      // but tag them with a shared reference so they display as one payment
+      const sharedRef = paymentData.reference_number ||
+        `PAY-${Date.now()}`;
+
+      const paymentInserts = selectedSale.items.map((item, idx) => {
+        const itemSubtotal = (parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0);
+        const proportion = groupSubtotal > 0 ? itemSubtotal / groupSubtotal : 1 / selectedSale.items.length;
+        const amount = idx === selectedSale.items.length - 1
+          ? Math.round((totalPay - selectedSale.items.slice(0, -1).reduce((s, it, i) => {
+              const sub = (parseFloat(it.meters) || 0) * (parseFloat(it.price_per_meter) || 0);
+              const p = groupSubtotal > 0 ? sub / groupSubtotal : 1 / selectedSale.items.length;
+              return s + Math.round(p * totalPay * 100) / 100;
+            }, 0)) * 100) / 100
+          : Math.round(proportion * totalPay * 100) / 100;
+        return {
           sale_id: item.id,
-          amount: pay,
+          amount,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
-          reference_number: paymentData.reference_number,
+          reference_number: sharedRef,
           notes: paymentData.notes,
-        });
-        remainingToPay -= pay;
-      }
-      const { error } = await supabase
-        .from("sale_payments")
-        .insert(paymentInserts);
-      if (error) throw error;
+        };
+      });
 
-      // Update payment_type based on remaining amount after this payment
-      for (const item of selectedSale.items || []) {
-        const paymentForItem = paymentInserts.find(
-          (p) => p.sale_id === item.id,
-        );
-        if (!paymentForItem) continue;
-        const newRemaining = item.remaining_amount - paymentForItem.amount;
-        if (newRemaining <= 0) {
-          await supabase
-            .from("sales")
-            .update({ payment_type: "cash" })
-            .eq("id", item.id);
-        } else if (item.payment_type === "credit") {
-          await supabase
-            .from("sales")
-            .update({ payment_type: "partial" })
-            .eq("id", item.id);
-        }
-      }
+      const { error } = await supabase.from("sale_payments").insert(paymentInserts);
+      if (error) throw error;
 
       setShowPaymentForm(false);
       setPaymentData({ ...INITIAL_PAYMENT });
@@ -263,12 +255,13 @@ export default function Sales() {
     }
   }
 
-  async function handleDeletePayment(paymentId) {
+  async function handleDeletePayment(paymentIds) {
     try {
+      const ids = Array.isArray(paymentIds) ? paymentIds : [paymentIds];
       const { error } = await supabase
         .from("sale_payments")
         .delete()
-        .eq("id", paymentId);
+        .in("id", ids);
       if (error) throw error;
       toast("Payment deleted");
       fetchPayments(selectedSale.items.map((i) => i.id));
@@ -528,28 +521,32 @@ export default function Sales() {
               <Columns className="w-4 h-4" />
             </button>
             {showColPicker && (
-              <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-44">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
-                <div className="space-y-1">
-                  {ALL_SALE_COLUMNS.map(({ key, label }) => (
-                    <label key={key} className="flex items-center gap-2 cursor-pointer py-0.5 hover:text-primary-600">
-                      <input
-                        type="checkbox"
-                        checked={visibleCols.has(key)}
-                        onChange={() => toggleCol(key)}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-sm text-gray-700">{label}</span>
-                    </label>
-                  ))}
+              <>
+                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
+                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
+                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
+                    {ALL_SALE_COLUMNS.map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
+                        <input
+                          type="checkbox"
+                          checked={visibleCols.has(key)}
+                          onChange={() => toggleCol(key)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setVisibleCols(new Set(SALE_DEFAULT_VISIBLE))}
+                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
+                  >
+                    Reset to default
+                  </button>
                 </div>
-                <button
-                  onClick={() => setVisibleCols(new Set(SALE_DEFAULT_VISIBLE))}
-                  className="mt-2 text-xs text-primary-600 hover:underline w-full text-left"
-                >
-                  Reset to default
-                </button>
-              </div>
+              </>
             )}
           </div>
           <button
@@ -751,7 +748,16 @@ export default function Sales() {
               </p>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
-              {payments.map((p) => (
+              {Object.values(
+                payments.reduce((acc, p) => {
+                  const key = `${p.reference_number}|${p.payment_date}|${p.payment_method}`;
+                  if (!acc[key]) acc[key] = { ...p, amount: 0, ids: [] };
+                  acc[key].amount += p.amount;
+                  acc[key].ids.push(p.id);
+                  return acc;
+                }, {})
+              ).sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date))
+              .map((p) => (
                 <div key={p.id} className="bg-gray-50 rounded-lg p-3">
                   <div className="flex justify-between items-start">
                     <div>
@@ -775,14 +781,14 @@ export default function Sales() {
                         <span className="badge bg-gray-200 text-gray-700">
                           {p.payment_method.toUpperCase()}
                         </span>
-                        {p.reference_number && (
+                        {p.reference_number && !p.reference_number.startsWith("PAY-") && (
                           <p className="text-xs text-gray-500 mt-1">
                             {p.reference_number}
                           </p>
                         )}
                       </div>
                       <button
-                        onClick={() => setConfirmDeletePayment(p.id)}
+                        onClick={() => setConfirmDeletePayment(p.ids)}
                         className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
                         title="Delete payment"
                       >

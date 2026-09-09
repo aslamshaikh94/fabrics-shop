@@ -94,16 +94,26 @@ export default function SaleDetailsModal({
     }
     setSavingEditItem(true);
     try {
+      const item = group.items.find((i) => i.id === itemId);
+      const m = parseFloat(editItemForm.meters) || 0;
+      const ppm = parseFloat(editItemForm.price_per_meter) || 0;
+      const cpm = parseFloat(editItemForm.cost_price_per_meter) || 0;
+      const discount = parseFloat(item?.discount_amount) || 0;
+      const newTotal = Math.round(m * ppm * 100) / 100;
+      const newMargin = Math.max(Math.round((m * (ppm - cpm) - discount) * 100) / 100, 0);
+      const newRemaining = Math.max(Math.round((newTotal - discount - (parseFloat(item?.paid_amount) || 0)) * 100) / 100, 0);
       await supabase
         .from("sales")
         .update({
           fabric_id: editItemForm.fabric_id || null,
-          meters: parseFloat(editItemForm.meters) || 0,
-          price_per_meter: parseFloat(editItemForm.price_per_meter) || 0,
-          cost_price_per_meter:
-            parseFloat(editItemForm.cost_price_per_meter) || 0,
+          meters: m,
+          price_per_meter: ppm,
+          cost_price_per_meter: cpm,
           fabric_name: editItemForm.fabric_name,
           notes: `Fabric: ${editItemForm.fabric_name}`,
+          total_amount: newTotal,
+          margin: newMargin,
+          remaining_amount: newRemaining,
         })
         .eq("id", itemId);
       setEditingItemId(null);
@@ -212,45 +222,19 @@ export default function SaleDetailsModal({
       for (const item of group.items) {
         await supabase.from("sale_payments").delete().eq("sale_id", item.id);
       }
-      if (derivedPaymentType === "cash") {
-        for (const [idx, item] of group.items.entries()) {
-          const m = parseFloat(item.meters) || 0;
-          const ppm = parseFloat(item.price_per_meter) || 0;
-          const itemTotal = Math.round(m * ppm * 100) / 100;
-          // Subtract discount from first item's payment
-          const amount =
-            idx === 0 ? Math.max(itemTotal - discountAmount, 0) : itemTotal;
-          await supabase.from("sale_payments").insert([
-            {
-              sale_id: item.id,
-              amount,
-              payment_date: editGroupFields.sale_date,
-              payment_method: "cash",
-            },
-          ]);
-        }
-      } else if (initialPay > 0) {
-        let remaining = initialPay;
-        for (const [idx, item] of group.items.entries()) {
-          if (remaining <= 0) break;
-          const m = parseFloat(item.meters) || 0;
-          const ppm = parseFloat(item.price_per_meter) || 0;
-          const itemTotal = Math.round(m * ppm * 100) / 100;
-          // Subtract discount from first item's amount
-          const rowAmount =
-            idx === 0 ? Math.max(itemTotal - discountAmount, 0) : itemTotal;
-          const pay = Math.min(remaining, rowAmount);
-          if (pay > 0) {
-            await supabase.from("sale_payments").insert([
-              {
-                sale_id: item.id,
-                amount: pay,
-                payment_date: editGroupFields.sale_date,
-                payment_method: "cash",
-              },
-            ]);
-            remaining -= pay;
-          }
+      const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
+      if (totalPay > 0) {
+        const groupSubtotal = group.items.reduce((s, i) => s + (parseFloat(i.meters) || 0) * (parseFloat(i.price_per_meter) || 0), 0);
+        const paymentInserts = group.items.map((item) => ({
+          sale_id: item.id,
+          amount: Math.round(((parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0) / groupSubtotal) * totalPay * 100) / 100,
+          payment_date: editGroupFields.sale_date,
+          payment_method: "cash",
+        }));
+        const sumSoFar = paymentInserts.slice(0, -1).reduce((s, p) => s + p.amount, 0);
+        paymentInserts[paymentInserts.length - 1].amount = Math.round((totalPay - sumSoFar) * 100) / 100;
+        for (const p of paymentInserts) {
+          await supabase.from("sale_payments").insert([p]);
         }
       }
       onSaleUpdated();
@@ -471,7 +455,11 @@ export default function SaleDetailsModal({
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {group.items.map((item, idx) => {
-              const discAmt = item.discount_amount || 0;
+              const m = parseFloat(item.meters) || 0;
+              const ppm = parseFloat(item.price_per_meter) || 0;
+              const cpm = parseFloat(item.cost_price_per_meter) || 0;
+              const computedTotal = m * ppm;
+              const computedMargin = Math.max(m * (ppm - cpm), 0);
               return (
                 <div
                   key={item.id}
@@ -587,7 +575,7 @@ export default function SaleDetailsModal({
                           )}
                         </div>
                       </div>
-                      <div className="grid grid-cols-6 gap-3 text-sm">
+                      <div className="grid grid-cols-5 gap-3 text-sm">
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Meters</p>
                           <p className="font-semibold">{item.meters}m</p>
@@ -616,25 +604,17 @@ export default function SaleDetailsModal({
                           <p className="text-xs text-gray-500 mb-1">Total</p>
                           <p className="font-semibold">
                             ₹
-                            {item.total_amount.toLocaleString("en-IN", {
+                            {computedTotal.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}
                           </p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 mb-1">Disc.</p>
-                          <p className="font-semibold text-primary-600">
-                            {discAmt > 0
-                              ? `-₹${discAmt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : "—"}
-                          </p>
-                        </div>
-                        <div>
                           <p className="text-xs text-gray-500 mb-1">Margin</p>
                           <p className="font-semibold text-accent-600">
                             ₹
-                            {item.margin.toLocaleString("en-IN", {
+                            {computedMargin.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}
@@ -680,7 +660,7 @@ export default function SaleDetailsModal({
               </p>
               <p className="text-xl font-bold text-accent-600">
                 ₹
-                {group.margin.toLocaleString("en-IN", {
+                {group.items.reduce((s, i) => s + Math.max((parseFloat(i.meters) || 0) * ((parseFloat(i.price_per_meter) || 0) - (parseFloat(i.cost_price_per_meter) || 0)), 0), 0).toLocaleString("en-IN", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}
