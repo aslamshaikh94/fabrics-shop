@@ -78,7 +78,6 @@ export default function SaleDetailsModal({
     ...EMPTY_GROUP_FIELDS,
   });
   const [savingGroupFields, setSavingGroupFields] = useState(false);
-  const [customerTab, setCustomerTab] = useState("existing");
   const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
 
   if (!open || !group) return null;
@@ -302,8 +301,6 @@ export default function SaleDetailsModal({
     const walkInName = !group.customer_id
       ? group.items[0]?.customer_name || ""
       : "";
-    const isWalkin = !group.customer_id;
-    setCustomerTab(isWalkin ? "walkin" : "existing");
     setEditGroupFields({
       customer_id: group.customer_id || "",
       customer_name:
@@ -707,7 +704,6 @@ export default function SaleDetailsModal({
             value={editGroupFields}
             onChange={setEditGroupFields}
             customers={customers}
-            customerTab={customerTab}
           />
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -745,80 +741,44 @@ export default function SaleDetailsModal({
                 </span>
               </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Total Payment Amount
-                <span className="ml-1 text-gray-400 font-normal">
-                  (will reset & reapply payments)
-                </span>
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={editGroupFields.initial_payment}
-                onChange={(e) =>
-                  setEditGroupFields({
-                    ...editGroupFields,
-                    initial_payment: e.target.value,
-                  })
-                }
-                className="input bg-white"
-                placeholder="Enter amount received (0 for credit)"
-                max={group.total_amount}
-                onWheel={(e) => e.target.blur()}
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Total Payment Amount
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editGroupFields.initial_payment}
+                  onChange={(e) =>
+                    setEditGroupFields({ ...editGroupFields, initial_payment: e.target.value })
+                  }
+                  className="input bg-white"
+                  placeholder="0 for credit"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Discount (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editGroupFields.discount_amount}
+                  onChange={(e) =>
+                    setEditGroupFields({ ...editGroupFields, discount_amount: e.target.value })
+                  }
+                  className="input bg-white"
+                  placeholder="0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
             </div>
-            {parseFloat(editGroupFields.initial_payment) >= 0 &&
-              editGroupFields.initial_payment !== "" && (
-                <div className="flex justify-between text-xs px-1">
-                  <span className="text-gray-500">New remaining balance</span>
-                  <span
-                    className={`font-semibold ${
-                      group.total_amount -
-                        (parseFloat(editGroupFields.initial_payment) || 0) >
-                      0
-                        ? "text-warning-600"
-                        : "text-accent-600"
-                    }`}
-                  >
-                    ₹
-                    {Math.max(
-                      0,
-                      group.total_amount -
-                        (parseFloat(editGroupFields.initial_payment) || 0),
-                    ).toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </div>
-              )}
+
           </div>
-          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Discount (Applied on Total)
-            </span>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Discount Amount (₹)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={editGroupFields.discount_amount}
-                onChange={(e) =>
-                  setEditGroupFields({
-                    ...editGroupFields,
-                    discount_amount: e.target.value,
-                  })
-                }
-                className="input bg-white"
-                placeholder="e.g. 500"
-                onWheel={(e) => e.target.blur()}
-              />
-            </div>
-          </div>
+
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Details & Documents

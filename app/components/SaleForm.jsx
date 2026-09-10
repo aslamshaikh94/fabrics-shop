@@ -4,12 +4,9 @@ import { supabase } from "../lib/supabase";
 import {
   X,
   ScanLine,
-  Search,
   ChevronDown,
   CircleCheck as CheckCircle,
   Plus,
-  Users,
-  UserPlus,
 } from "lucide-react";
 import {
   validateSale,
@@ -71,7 +68,6 @@ export default function SaleForm({
   const [scanningItemIdx, setScanningItemIdx] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [itemJustAdded, setItemJustAdded] = useState(false);
-  const [customerTab, setCustomerTab] = useState("existing");
   const customerDropdownRef = useRef(null);
 
   useEffect(() => {
@@ -289,22 +285,15 @@ export default function SaleForm({
 
       // Auto-create customer for walk-in with a name
       let customerId = formData.customer_id;
-      if (
-        !customerId &&
-        formData.customer_name &&
-        formData.customer_name !== "Walk-in Customer"
-      ) {
-        // Check if customer with this name already exists
+      if (!customerId && formData.customer_name?.trim()) {
         const { data: existingCustomer } = await supabase
           .from("customers")
           .select("id")
           .eq("name", formData.customer_name.trim())
           .maybeSingle();
-
         if (existingCustomer) {
           customerId = existingCustomer.id;
         } else {
-          // Create new customer
           const { data: newCustomer, error: createError } = await supabase
             .from("customers")
             .insert([{ name: formData.customer_name.trim() }])
@@ -363,11 +352,7 @@ export default function SaleForm({
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
           payment_type: paymentType,
-          customer_name: !customerId
-            ? formData.customer_name !== "Walk-in Customer"
-              ? formData.customer_name
-              : ""
-            : "",
+          customer_name: !customerId ? formData.customer_name || "" : "",
           fabric_name: item.fabric_name,
           invoice_url,
           discount_amount: discountAmount,
@@ -405,13 +390,6 @@ export default function SaleForm({
         }
       } else {
         const saleGroupId = generateUUID();
-        const walkInNameInfo =
-          !customerId &&
-          formData.customer_name &&
-          formData.customer_name !== "Walk-in Customer"
-            ? ` (Name: ${formData.customer_name})`
-            : "";
-        // Apply discount to first item only (group-level discount)
         const salePayloads = itemsToSave.map((item, idx) => {
           return {
             customer_id: customerId || null,
@@ -421,13 +399,9 @@ export default function SaleForm({
             cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
             sale_date: formData.sale_date,
             payment_type: paymentType,
-            customer_name: !customerId
-              ? formData.customer_name !== "Walk-in Customer"
-                ? formData.customer_name
-                : ""
-              : "",
+            customer_name: !customerId ? formData.customer_name || "" : "",
             fabric_name: item.fabric_name,
-            notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
+            notes: `Fabric: ${item.fabric_name}`,
             sale_group_id: saleGroupId,
             invoice_url,
             discount_amount: idx === 0 ? discountAmount : 0,
@@ -495,8 +469,6 @@ export default function SaleForm({
   }
 
   function loadSaleForEdit(sale) {
-    const isWalkin = !sale.customer_id;
-    setCustomerTab(isWalkin ? "walkin" : "existing");
     const cleanNotes = (sale.notes || "")
       .replace(/Fabric:\s*[^(|\n]+/i, "")
       .replace(/\(Name:\s*[^)]+\)/g, "")
@@ -505,10 +477,7 @@ export default function SaleForm({
       .trim();
     setFormData({
       customer_id: sale.customer_id || "",
-      customer_name:
-        sale.customer?.name ||
-        sale.customer_name ||
-        (sale.customer_id ? "" : "Walk-in Customer"),
+      customer_name: sale.customer?.name || sale.customer_name || "",
       items: [
         {
           fabric_id: sale.fabric_id || "",
@@ -550,170 +519,71 @@ export default function SaleForm({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Customer Section */}
-          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+          <div className="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Customer
             </span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomerTab("existing");
-                  setCustomerSearch("");
-                  setFormData((prev) => ({
-                    ...prev,
-                    customer_id: "",
-                    customer_name: "",
-                  }));
-                }}
-                className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                  customerTab === "existing"
-                    ? "bg-primary-600 text-white border-primary-600"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
-                }`}
-              >
-                <Users className="w-4 h-4 inline mr-1.5 mb-0.5" />
-                Existing Customer
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomerTab("walkin");
-                  setFormData({
-                    ...formData,
-                    customer_id: "",
-                    customer_name: "Walk-in Customer",
-                  });
-                  setCustomerSearch("");
-                }}
-                className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                  customerTab === "walkin"
-                    ? "bg-primary-600 text-white border-primary-600"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
-                }`}
-              >
-                <UserPlus className="w-4 h-4 inline mr-1.5 mb-0.5" />
-                Walk-in
-              </button>
-            </div>
-
-            {customerTab === "existing" ? (
-              <div className="relative" ref={customerDropdownRef}>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Search Customer
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={
-                      showCustomerDropdown
-                        ? customerSearch
-                        : formData.customer_name || ""
-                    }
-                    onChange={(e) => {
-                      setCustomerSearch(e.target.value);
-                      setFormData({
-                        ...formData,
-                        customer_id: "",
-                        customer_name: e.target.value,
-                      });
-                      setShowCustomerDropdown(true);
-                    }}
-                    onFocus={() => {
-                      setCustomerSearch(formData.customer_name || "");
-                      setShowCustomerDropdown(true);
-                    }}
-                    className="input bg-white pr-10"
-                    placeholder="Type to search customer..."
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    {formData.customer_id && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({
-                            ...formData,
-                            customer_id: "",
-                            customer_name: "",
-                          });
-                          setCustomerSearch("");
-                        }}
-                        className="text-gray-400 hover:text-gray-600 p-0.5"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                    <ChevronDown
-                      className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
-                    />
-                  </div>
-                </div>
-                {showCustomerDropdown && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-                    {allCustomers
-                      .filter((c) =>
-                        c.name
-                          .toLowerCase()
-                          .includes(customerSearch.toLowerCase()),
-                      )
-                      .map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setFormData({
-                              ...formData,
-                              customer_id: c.id,
-                              customer_name: c.name,
-                            });
-                            setCustomerSearch(c.name);
-                            setShowCustomerDropdown(false);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${
-                            formData.customer_id === c.id
-                              ? "bg-primary-50 text-primary-700 font-medium"
-                              : ""
-                          }`}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    {allCustomers.filter((c) =>
-                      c.name
-                        .toLowerCase()
-                        .includes(customerSearch.toLowerCase()),
-                    ).length === 0 && (
-                      <div className="px-3 py-2.5 text-sm text-gray-400 italic">
-                        No customers found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Enter Walk-in Name
-                </label>
+            <div className="relative" ref={customerDropdownRef}>
+              <div className="relative">
                 <input
                   type="text"
-                  value={
-                    formData.customer_name === "Walk-in Customer"
-                      ? ""
-                      : formData.customer_name
-                  }
+                  value={showCustomerDropdown ? customerSearch : formData.customer_name || ""}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({
-                      ...formData,
-                      customer_id: "",
-                      customer_name: val || "Walk-in Customer",
-                    });
+                    setCustomerSearch(e.target.value);
+                    setFormData({ ...formData, customer_id: "", customer_name: e.target.value });
+                    setShowCustomerDropdown(true);
                   }}
-                  className="input bg-white"
-                  placeholder="e.g. John Doe"
+                  onFocus={() => {
+                    setCustomerSearch(formData.customer_name || "");
+                    setShowCustomerDropdown(true);
+                  }}
+                  className="input bg-white pr-10"
+                  placeholder="Customer name (or leave blank for walk-in)"
                 />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {formData.customer_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, customer_id: "", customer_name: "" });
+                        setCustomerSearch("");
+                      }}
+                      className="text-gray-400 hover:text-gray-600 p-0.5"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`} />
+                </div>
               </div>
+              {showCustomerDropdown && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                  {allCustomers
+                    .filter((c) => c.name.toLowerCase().includes(customerSearch.toLowerCase()))
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setFormData({ ...formData, customer_id: c.id, customer_name: c.name });
+                          setCustomerSearch(c.name);
+                          setShowCustomerDropdown(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${
+                          formData.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""
+                        }`}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  {customerSearch && !allCustomers.some((c) => c.name.toLowerCase() === customerSearch.toLowerCase()) && (
+                    <div className="px-3 py-2 text-xs text-gray-400 italic">New customer "{customerSearch}" will be created</div>
+                  )}
+                </div>
+              )}
+            </div>
+            {formData.customer_id && (
+              <p className="text-xs text-accent-600 font-medium">✓ Linked to existing customer</p>
             )}
           </div>
 
@@ -995,68 +865,41 @@ export default function SaleForm({
             )}
           </div>
 
-          {/* Payment Section */}
+          {/* Payment & Discount */}
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Payment
+              Payment & Discount
             </span>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Initial Payment
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={formData.initial_payment}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    initial_payment: e.target.value,
-                  })
-                }
-                className="input bg-white"
-                placeholder="Enter amount received (leave 0 for credit)"
-                onWheel={(e) => e.target.blur()}
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                Leave empty or 0 for credit sale. For partial payment, enter the
-                amount received.
-              </p>
-            </div>
-          </div>
-
-          {/* Discount Section (Flat Amount) */}
-          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Discount (Applied on Total)
-            </span>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Discount Amount (₹)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={formData.discount_amount}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === "" || parseFloat(val) >= 0) {
-                    setFormData({ ...formData, discount_amount: val });
-                  }
-                }}
-                className="input bg-white"
-                placeholder="e.g. 500 for ₹500 off"
-                onWheel={(e) => e.target.blur()}
-              />
-              {discountValue > 0 && (
-                <div className="mt-2 flex justify-between text-xs text-primary-600">
-                  <span>Discount Applied:</span>
-                  <span className="font-semibold">
-                    -{formatCurrency(discountValue)}
-                  </span>
-                </div>
-              )}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Initial Payment (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.initial_payment}
+                  onChange={(e) => setFormData({ ...formData, initial_payment: e.target.value })}
+                  className="input bg-white"
+                  placeholder="0 for credit"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Discount (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.discount_amount}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "" || parseFloat(val) >= 0)
+                      setFormData({ ...formData, discount_amount: val });
+                  }}
+                  className="input bg-white"
+                  placeholder="0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
             </div>
           </div>
 
