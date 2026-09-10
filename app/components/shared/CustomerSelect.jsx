@@ -1,203 +1,94 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Users, UserPlus } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 
 export default function CustomerSelect({
   value,
   onChange,
   customers,
   label = "Customer",
-  customerTab: initialTab,
 }) {
-  const [tab, setTab] = useState(() => {
-    if (initialTab) return initialTab;
-    return value.customer_id ? "existing" : "walkin";
-  });
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  const [savedWalkinName, setSavedWalkinName] = useState(() =>
-    !value.customer_id && value.customer_name && value.customer_name !== "Walk-in Customer"
-      ? value.customer_name
-      : ""
-  );
-  const [savedExistingId, setSavedExistingId] = useState(() => value.customer_id || "");
-  const [savedExistingName, setSavedExistingName] = useState(() => value.customer_id ? value.customer_name || "" : "");
-
-  const walkinName =
-    value.customer_name === "Walk-in Customer" ? "" : value.customer_name;
 
   useEffect(() => {
     function handleClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) {
-        setOpen(false);
-      }
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const walkinSuggestions =
-    tab === "walkin" && open && walkinName && walkinName.length > 0
-      ? customers.filter((c) =>
-          c.name.toLowerCase().includes(walkinName.toLowerCase())
-        )
-      : [];
+  const displayValue = open ? search : value.customer_name || "";
+  const filtered = customers.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div
       ref={ref}
-      className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-3 bg-gray-50 dark:bg-gray-900/40"
+      className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-2 bg-gray-50 dark:bg-gray-900/40"
     >
       <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
         {label}
       </span>
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            if (tab === "walkin") {
-              setSavedWalkinName(value.customer_name && value.customer_name !== "Walk-in Customer" ? value.customer_name : savedWalkinName);
-            }
-            setTab("existing");
-            setSearch(savedExistingName);
-            onChange({ ...value, customer_id: savedExistingId, customer_name: savedExistingName });
+      <div className="relative">
+        <input
+          type="text"
+          value={displayValue}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            onChange({ ...value, customer_id: "", customer_name: e.target.value });
+            setOpen(true);
           }}
-          className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-            tab === "existing"
-              ? "bg-primary-600 text-white border-primary-600"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400"
-          }`}
-        >
-          <Users className="w-4 h-4 inline mr-1.5 mb-0.5" />
-          Existing Customer
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (tab === "existing" && value.customer_id) {
-              setSavedExistingId(value.customer_id);
-              setSavedExistingName(value.customer_name || "");
-            }
-            setTab("walkin");
-            setSearch("");
-            const nameToRestore = savedWalkinName || (value.customer_name && value.customer_name !== "Walk-in Customer" ? value.customer_name : "");
-            onChange({ ...value, customer_id: "", customer_name: nameToRestore || "Walk-in Customer" });
+          onFocus={() => {
+            setSearch(value.customer_name || "");
+            setOpen(true);
           }}
-          className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-            tab === "walkin"
-              ? "bg-primary-600 text-white border-primary-600"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400"
-          }`}
-        >
-          <UserPlus className="w-4 h-4 inline mr-1.5 mb-0.5" />
-          Walk-in
-        </button>
-      </div>
-      {tab === "existing" ? (
-        <div className="relative">
-          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            Search Customer
-          </label>
-          <div className="relative">
-            <input
-              type="text"
-              value={open ? search : value.customer_name || ""}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setSavedExistingName(e.target.value);
-                setSavedExistingId("");
-                onChange({
-                  ...value,
-                  customer_id: "",
-                  customer_name: e.target.value,
-                });
-                setOpen(true);
-              }}
-              onFocus={() => {
-                setSearch(value.customer_name || "");
-                setOpen(true);
-              }}
-              className="input bg-white dark:bg-gray-800 pr-10"
-              placeholder="Type to search customer..."
-            />
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              <ChevronDown
-                className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${open ? "rotate-180" : ""}`}
-              />
-            </div>
+          className="input bg-white dark:bg-gray-800 pr-10"
+          placeholder="Customer name (or leave blank for walk-in)"
+        />
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          {value.customer_id && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...value, customer_id: "", customer_name: "" })}
+              className="text-gray-400 hover:text-gray-600 p-0.5"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </div>
+        {open && (
+          <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+            {filtered.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  onChange({ ...value, customer_id: c.id, customer_name: c.name });
+                  setSearch(c.name);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm ${
+                  value.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+            {search && !customers.some((c) => c.name.toLowerCase() === search.toLowerCase()) && (
+              <div className="px-3 py-2 text-xs text-gray-400 italic">
+                New customer "{search}" will be created
+              </div>
+            )}
           </div>
-          {open && (
-            <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-              {customers
-                .filter((c) =>
-                  c.name.toLowerCase().includes(search.toLowerCase()),
-                )
-                .map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => {
-                      setSavedExistingId(c.id);
-                      setSavedExistingName(c.name);
-                      onChange({
-                        ...value,
-                        customer_id: c.id,
-                        customer_name: c.name,
-                      });
-                      setSearch(c.name);
-                      setOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
-                  >
-                    {c.name}
-                  </button>
-                ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="relative">
-          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            Enter Walk-in Name
-          </label>
-          <input
-            type="text"
-            value={walkinName}
-            onChange={(e) => {
-              setSavedWalkinName(e.target.value);
-              onChange({
-                ...value,
-                customer_id: "",
-                customer_name: e.target.value || "Walk-in Customer",
-              });
-              setOpen(true);
-            }}
-            onFocus={() => setOpen(true)}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
-            className="input bg-white dark:bg-gray-800"
-            placeholder="e.g. John Doe"
-          />
-          {walkinSuggestions.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-              {walkinSuggestions.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setSavedWalkinName(c.name);
-                    onChange({ ...value, customer_id: c.id, customer_name: c.name });
-                    setOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
+      </div>
+      {value.customer_id && (
+        <p className="text-xs text-accent-600 font-medium">✓ Linked to existing customer</p>
       )}
     </div>
   );
