@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -12,6 +12,7 @@ import {
   Paperclip,
   FileText,
   Download,
+  Columns,
   FileUp,
   ShoppingBag,
   ScanLine,
@@ -39,6 +40,27 @@ import { SearchInput } from "./shared/FormField";
 import { extractPdfText, parseFabricEntries } from "../utils/pdfExtractor";
 
 const PAGE_SIZE = 10;
+
+const ALL_PURCHASE_COLUMNS = [
+  { key: "purchaseNo", label: "Purchase #" },
+  { key: "supplier",   label: "Supplier" },
+  { key: "date",       label: "Date" },
+  { key: "total",      label: "Total" },
+  { key: "paid",       label: "Paid" },
+  { key: "remaining",  label: "Remaining" },
+  { key: "status",     label: "Status" },
+  { key: "actions",    label: "Actions" },
+];
+
+const PURCHASE_DEFAULT_VISIBLE = new Set(["purchaseNo", "supplier", "date", "total", "paid", "remaining", "status", "actions"]);
+
+function loadPurchaseVisibleCols() {
+  try {
+    const saved = localStorage.getItem("purchases_visible_cols");
+    if (saved) return new Set(JSON.parse(saved));
+  } catch {}
+  return new Set(PURCHASE_DEFAULT_VISIBLE);
+}
 
 const INITIAL_FORM = {
   supplier_id: "",
@@ -143,6 +165,37 @@ export default function Purchases() {
   const [paymentErrors, setPaymentErrors] = useState({});
   const [formData, setFormData] = useState({ ...INITIAL_FORM });
   const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [visibleCols, setVisibleCols] = useState(loadPurchaseVisibleCols);
+  const colPickerRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "purchases_visible_cols",
+      JSON.stringify([...visibleCols]),
+    );
+  }, [visibleCols]);
+
+  useEffect(() => {
+    if (!showColPicker) return;
+    function handleClick(e) {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target))
+        setShowColPicker(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showColPicker]);
+
+  function toggleCol(key) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const col = (key) => visibleCols.has(key);
 
   // State for Add Fabrics to Purchase modal
   const [showAddFabrics, setShowAddFabrics] = useState(false);
@@ -868,6 +921,43 @@ export default function Purchases() {
           </p>
         </div>
         <div className="flex gap-2">
+          <div className="relative inline-flex" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker((v) => !v)}
+              className="btn btn-secondary"
+              title="Show/hide columns"
+            >
+              <Columns className="w-4 h-4" />
+            </button>
+            {showColPicker && (
+              <>
+                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
+                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
+                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
+                    {ALL_PURCHASE_COLUMNS.map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
+                        <input
+                          type="checkbox"
+                          checked={visibleCols.has(key)}
+                          onChange={() => toggleCol(key)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setVisibleCols(new Set(PURCHASE_DEFAULT_VISIBLE))}
+                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setShowImport(true)}
             className="btn btn-secondary"
@@ -2055,30 +2145,46 @@ export default function Purchases() {
           <table className="w-full" style={{ minWidth: "600px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Purchase #
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Supplier
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Paid
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Remaining
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                {col("purchaseNo") && (
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Purchase #
+                  </th>
+                )}
+                {col("supplier") && (
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Supplier
+                  </th>
+                )}
+                {col("date") && (
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
+                )}
+                {col("total") && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total
+                  </th>
+                )}
+                {col("paid") && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Paid
+                  </th>
+                )}
+                {col("remaining") && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Remaining
+                  </th>
+                )}
+                {col("status") && (
+                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                )}
+                {col("actions") && (
+                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -2087,139 +2193,155 @@ export default function Purchases() {
                   key={purchase.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900 font-mono text-sm">
-                      {purchase.purchase_number || "—"}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">
-                      {purchase.supplier?.name}
-                    </p>
-                    {purchase.notes && (
-                      <p className="text-sm text-gray-500 max-w-xs truncate">
-                        {purchase.notes}
+                  {col("purchaseNo") && (
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-900 font-mono text-sm">
+                        {purchase.purchase_number || "—"}
                       </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-1 text-gray-600 text-sm">
-                      <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(purchase.purchase_date).toLocaleDateString(
-                        "en-GB",
-                        {
-                          day: "numeric",
-                          month: "short",
-                          year: "2-digit",
-                        },
+                    </td>
+                  )}
+                  {col("supplier") && (
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-900">
+                        {purchase.supplier?.name}
+                      </p>
+                      {purchase.notes && (
+                        <p className="text-sm text-gray-500 max-w-xs truncate">
+                          {purchase.notes}
+                        </p>
                       )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
-                    ₹
-                    {purchase.total_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span className="font-medium text-gray-900">
+                    </td>
+                  )}
+                  {col("date") && (
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-1 text-gray-600 text-sm">
+                        <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                        {new Date(purchase.purchase_date).toLocaleDateString(
+                          "en-GB",
+                          {
+                            day: "numeric",
+                            month: "short",
+                            year: "2-digit",
+                          },
+                        )}
+                      </div>
+                    </td>
+                  )}
+                  {col("total") && (
+                    <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
                       ₹
-                      {purchase.paid_amount.toLocaleString("en-IN", {
+                      {purchase.total_amount.toLocaleString("en-IN", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span
-                      className={
-                        purchase.remaining_amount > 0
-                          ? "text-warning-600 font-semibold"
-                          : "text-gray-500"
-                      }
-                    >
-                      ₹
-                      {purchase.remaining_amount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <div
-                      className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
-                      style={{ minWidth: "64px" }}
-                      title={
-                        purchase.total_amount > 0
-                          ? `Paid: ${((purchase.paid_amount / purchase.total_amount) * 100).toFixed(1)}%  |  Pending: ${((purchase.remaining_amount / purchase.total_amount) * 100).toFixed(1)}%`
-                          : "No amount"
-                      }
-                    >
-                      <span className="absolute inset-0 bg-warning-200" />
-                      <span
-                        className="absolute inset-y-0 left-0 bg-accent-400"
-                        style={{
-                          width:
-                            purchase.total_amount > 0
-                              ? `${(purchase.paid_amount / purchase.total_amount) * 100}%`
-                              : "0%",
-                        }}
-                      />
-                      <span
-                        className="relative z-10 font-medium"
-                        style={{ color: "#111" }}
-                      >
-                        {purchase.status.charAt(0).toUpperCase() +
-                          purchase.status.slice(1)}
+                    </td>
+                  )}
+                  {col("paid") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className="font-medium text-gray-900">
+                        ₹
+                        {purchase.paid_amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => handleViewPayments(purchase)}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="View details"
+                    </td>
+                  )}
+                  {col("remaining") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span
+                        className={
+                          purchase.remaining_amount > 0
+                            ? "text-warning-600 font-semibold"
+                            : "text-gray-500"
+                        }
                       >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(purchase)}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                        title="Edit purchase"
+                        ₹
+                        {purchase.remaining_amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </td>
+                  )}
+                  {col("status") && (
+                    <td className="px-4 py-3 text-center">
+                      <div
+                        className="relative inline-flex items-center justify-center rounded-full overflow-hidden text-xs font-medium px-2.5 py-0.5 cursor-pointer"
+                        style={{ minWidth: "64px" }}
+                        title={
+                          purchase.total_amount > 0
+                            ? `Paid: ${((purchase.paid_amount / purchase.total_amount) * 100).toFixed(1)}%  |  Pending: ${((purchase.remaining_amount / purchase.total_amount) * 100).toFixed(1)}%`
+                            : "No amount"
+                        }
                       >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      {purchase.invoice_url && (
-                        <button
-                          onClick={() =>
-                            setViewInvoiceUrl(purchase.invoice_url)
-                          }
-                          className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
-                          title="View invoice"
+                        <span className="absolute inset-0 bg-warning-200" />
+                        <span
+                          className="absolute inset-y-0 left-0 bg-accent-400"
+                          style={{
+                            width:
+                              purchase.total_amount > 0
+                                ? `${(purchase.paid_amount / purchase.total_amount) * 100}%`
+                                : "0%",
+                          }}
+                        />
+                        <span
+                          className="relative z-10 font-medium"
+                          style={{ color: "#111" }}
                         >
-                          <FileText className="w-4 h-4" />
-                        </button>
-                      )}
-                      {purchase.remaining_amount > 0 && (
+                          {purchase.status.charAt(0).toUpperCase() +
+                            purchase.status.slice(1)}
+                        </span>
+                      </div>
+                    </td>
+                  )}
+                  {col("actions") && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-1">
                         <button
-                          onClick={() => handleAddPayment(purchase)}
-                          className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
-                          title="Add payment"
+                          onClick={() => handleViewPayments(purchase)}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
+                          title="View details"
                         >
-                          <CreditCard className="w-4 h-4" />
+                          <Eye className="w-4 h-4" />
                         </button>
-                      )}
-                      <button
-                        onClick={() => setConfirmDelete(purchase.id)}
-                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
-                        title="Delete purchase"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                        <button
+                          onClick={() => handleEdit(purchase)}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
+                          title="Edit purchase"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        {purchase.invoice_url && (
+                          <button
+                            onClick={() =>
+                              setViewInvoiceUrl(purchase.invoice_url)
+                            }
+                            className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
+                            title="View invoice"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        )}
+                        {purchase.remaining_amount > 0 && (
+                          <button
+                            onClick={() => handleAddPayment(purchase)}
+                            className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
+                            title="Add payment"
+                          >
+                            <CreditCard className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setConfirmDelete(purchase.id)}
+                          className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
+                          title="Delete purchase"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
