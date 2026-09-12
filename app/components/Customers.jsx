@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -11,6 +11,7 @@ import {
   MessageCircle,
   Users,
   Download,
+  Columns,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -24,6 +25,25 @@ import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 9;
+
+const ALL_COLUMNS = [
+  { key: "name",    label: "Name" },
+  { key: "phone",   label: "Phone" },
+  { key: "address", label: "Address" },
+  { key: "notes",   label: "Notes" },
+  { key: "balance", label: "Balance" },
+  { key: "actions", label: "Actions" },
+];
+
+const DEFAULT_VISIBLE = new Set(["name", "phone", "address", "notes", "balance", "actions"]);
+
+function loadVisibleCols() {
+  try {
+    const saved = localStorage.getItem("customers_visible_cols");
+    if (saved) return new Set(JSON.parse(saved));
+  } catch {}
+  return new Set(DEFAULT_VISIBLE);
+}
 
 export default function Customers() {
   const toast = useToast();
@@ -41,6 +61,38 @@ export default function Customers() {
   });
   const [ledgerCustomer, setLedgerCustomer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
+  const colPickerRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "customers_visible_cols",
+      JSON.stringify([...visibleCols]),
+    );
+  }, [visibleCols]);
+
+  useEffect(() => {
+    if (!showColPicker) return;
+    function handleClick(e) {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target)) {
+        setShowColPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showColPicker]);
+
+  function toggleCol(key) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const col = (key) => visibleCols.has(key);
 
   useEffect(() => {
     fetchCustomers();
@@ -195,6 +247,43 @@ export default function Customers() {
           >
             <Download className="w-4 h-4" />
           </button>
+          <div className="relative inline-flex" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker((v) => !v)}
+              className="btn btn-secondary"
+              title="Show/hide columns"
+            >
+              <Columns className="w-4 h-4" />
+            </button>
+            {showColPicker && (
+              <>
+                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
+                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
+                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
+                    {ALL_COLUMNS.map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
+                        <input
+                          type="checkbox"
+                          checked={visibleCols.has(key)}
+                          onChange={() => toggleCol(key)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setVisibleCols(new Set(DEFAULT_VISIBLE))}
+                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => {
               setShowForm(true);
@@ -303,24 +392,36 @@ export default function Customers() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">
-                  Name
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">
-                  Phone
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">
-                  Address
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">
-                  Notes
-                </th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">
-                  Balance
-                </th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">
-                  Actions
-                </th>
+                {col("name") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Name
+                  </th>
+                )}
+                {col("phone") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Phone
+                  </th>
+                )}
+                {col("address") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Address
+                  </th>
+                )}
+                {col("notes") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Notes
+                  </th>
+                )}
+                {col("balance") && (
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600">
+                    Balance
+                  </th>
+                )}
+                {col("actions") && (
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -329,56 +430,67 @@ export default function Customers() {
                   key={customer.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
-                  <td className="px-4 py-3">
-                    <span className="font-medium text-gray-900">
-                      {customer.name}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {customer.phone ? (
-                      <span className="flex items-center gap-1.5 text-gray-600">
-                        <Phone className="w-3.5 h-3.5 text-gray-400" />
-                        {customer.phone}
+                  {col("name") && (
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-gray-900">
+                        {customer.name}
                       </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {customer.address ? (
-                      <span className="flex items-center gap-1.5 text-gray-600">
-                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                        <span className="truncate max-w-[180px] block">
-                          {customer.address}
+                    </td>
+                  )}
+                  {col("phone") && (
+                    <td className="px-4 py-3">
+                      {customer.phone ? (
+                        <span className="flex items-center gap-1.5 text-gray-600">
+                          <Phone className="w-3.5 h-3.5 text-gray-400" />
+                          {customer.phone}
                         </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                  )}
+                  {col("address") && (
+                    <td className="px-4 py-3">
+                      {customer.address ? (
+                        <span className="flex items-center gap-1.5 text-gray-600">
+                          <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          <span className="truncate max-w-[180px] block">
+                            {customer.address}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                  )}
+                  {col("notes") && (
+                    <td className="px-4 py-3">
+                      {customer.notes ? (
+                        <span className="text-gray-500 italic text-xs">
+                          {customer.notes}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                  )}
+                  {col("balance") && (
+                    <td className="px-4 py-3 text-right">
+                      <span
+                        className={`font-semibold ${
+                          customer.current_balance > 0
+                            ? "text-warning-600"
+                            : "text-accent-600"
+                        }`}
+                      >
+                        {customer.current_balance > 0
+                          ? `₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : "Cleared ✓"}
                       </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {customer.notes ? (
-                      <span className="text-gray-500 italic text-xs">
-                        {customer.notes}
-                      </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span
-                      className={`font-semibold ${
-                        customer.current_balance > 0
-                          ? "text-warning-600"
-                          : "text-accent-600"
-                      }`}
-                    >
-                      {customer.current_balance > 0
-                        ? `₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : "Cleared ✓"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
+                    </td>
+                  )}
+                  {col("actions") && (
+                    <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button
                         onClick={() => setLedgerCustomer(customer)}
@@ -410,6 +522,7 @@ export default function Customers() {
                       </button>
                     </div>
                   </td>
+                  )}
                 </tr>
               ))}
             </tbody>
