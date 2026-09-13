@@ -775,10 +775,10 @@ export default function SaleForm({
                       <div className="flex items-center gap-2 mb-2">
                         <CheckCircle className="w-4 h-4 text-accent-500" />
                         <div>
-                          <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
+                          <p className="text-[10px] text-primary-700 font-bold uppercase mb-0.5">
                             Linked Inventory
                           </p>
-                          <p className="text-sm font-semibold text-primary-900">
+                          <p className="text-sm font-semibold text-gray-900">
                             {item.fabric_name}
                           </p>
                         </div>
@@ -947,8 +947,8 @@ export default function SaleForm({
               {discountValue > 0 && (
                 <>
                   <div className="flex justify-between text-sm border-t border-gray-200 pt-1 mt-1">
-                    <span className="text-primary-600">Discount:</span>
-                    <span className="font-semibold text-primary-600">
+                    <span className="text-primary-700">Discount:</span>
+                    <span className="font-semibold text-primary-700">
                       -{formatCurrency(discountValue)}
                     </span>
                   </div>

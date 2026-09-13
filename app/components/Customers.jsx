@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -11,13 +11,13 @@ import {
   MessageCircle,
   Users,
   Download,
-  Columns,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
 import Modal from "./shared/Modal";
+import ColumnPicker from "./shared/ColumnPicker";
 import { useToast } from "./Toast";
 import { exportCSV } from "../utils/export";
 import Pagination from "./shared/Pagination";
@@ -61,9 +61,7 @@ export default function Customers() {
   });
   const [ledgerCustomer, setLedgerCustomer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [showColPicker, setShowColPicker] = useState(false);
   const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
-  const colPickerRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(
@@ -71,17 +69,6 @@ export default function Customers() {
       JSON.stringify([...visibleCols]),
     );
   }, [visibleCols]);
-
-  useEffect(() => {
-    if (!showColPicker) return;
-    function handleClick(e) {
-      if (colPickerRef.current && !colPickerRef.current.contains(e.target)) {
-        setShowColPicker(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showColPicker]);
 
   function toggleCol(key) {
     setVisibleCols((prev) => {
@@ -247,43 +234,12 @@ export default function Customers() {
           >
             <Download className="w-4 h-4" />
           </button>
-          <div className="relative inline-flex" ref={colPickerRef}>
-            <button
-              onClick={() => setShowColPicker((v) => !v)}
-              className="btn btn-secondary"
-              title="Show/hide columns"
-            >
-              <Columns className="w-4 h-4" />
-            </button>
-            {showColPicker && (
-              <>
-                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
-                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
-                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
-                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
-                    {ALL_COLUMNS.map(({ key, label }) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
-                        <input
-                          type="checkbox"
-                          checked={visibleCols.has(key)}
-                          onChange={() => toggleCol(key)}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                        <span className="text-sm text-gray-700">{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setVisibleCols(new Set(DEFAULT_VISIBLE))}
-                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
-                  >
-                    Reset to default
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+          <ColumnPicker
+            columns={ALL_COLUMNS}
+            visibleCols={visibleCols}
+            onToggle={toggleCol}
+            onReset={() => setVisibleCols(new Set(DEFAULT_VISIBLE))}
+          />
           <button
             onClick={() => {
               setShowForm(true);
