@@ -2058,7 +2058,7 @@ export default function Purchases() {
                             )}
                           </p>
                           {payment.reinvested_amount > 0 && (
-                            <p className="text-xs text-emerald-600 mt-0.5">
+                            <p className="text-xs text-accent-600 mt-0.5">
                               ♻️ ₹
                               {payment.reinvested_amount.toLocaleString(
                                 "en-IN",

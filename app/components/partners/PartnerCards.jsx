@@ -9,14 +9,14 @@ const partnerColors = [
     iconColor: "text-blue-600",
   },
   {
-    border: "border-l-purple-500",
-    iconBg: "bg-purple-100",
-    iconColor: "text-purple-600",
+    border: "border-l-secondary-500",
+    iconBg: "bg-secondary-100",
+    iconColor: "text-secondary-600",
   },
   {
-    border: "border-l-emerald-500",
-    iconBg: "bg-emerald-100",
-    iconColor: "text-emerald-600",
+    border: "border-l-accent-500",
+    iconBg: "bg-accent-100",
+    iconColor: "text-accent-600",
   },
   {
     border: "border-l-orange-500",

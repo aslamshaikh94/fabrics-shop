@@ -396,9 +396,9 @@ export default function Reports() {
       title: "Receivables",
       value: summary.totalReceivables,
       icon: Users,
-      bg: "bg-purple-50",
-      iconBg: "bg-purple-500",
-      text: "text-purple-700",
+      bg: "bg-secondary-50",
+      iconBg: "bg-secondary-500",
+      text: "text-secondary-700",
     },
   ];
 

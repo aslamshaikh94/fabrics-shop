@@ -252,7 +252,7 @@ export default function Expenses() {
   const categoryColors = {
     Rent: "bg-blue-100 text-blue-800",
     Electricity: "bg-yellow-100 text-yellow-800",
-    "Staff Salary": "bg-purple-100 text-purple-800",
+    "Staff Salary": "bg-secondary-100 text-secondary-800",
     Transport: "bg-green-100 text-green-800",
     Packaging: "bg-orange-100 text-orange-800",
     Maintenance: "bg-red-100 text-red-800",

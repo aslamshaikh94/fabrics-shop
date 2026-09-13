@@ -523,11 +523,11 @@ export default function PartnersPage() {
                 <p className="text-xs font-medium text-gray-500">
                   {year} Total Sales
                 </p>
-                <div className="bg-indigo-500 p-1.5 rounded-lg">
+                <div className="bg-secondary-500 p-1.5 rounded-lg">
                   <DollarSign className="w-3.5 h-3.5 text-white" />
                 </div>
               </div>
-              <p className="text-lg font-bold text-indigo-700">
+              <p className="text-lg font-bold text-secondary-700">
                 {fmtShort(summary.totalSales)}
               </p>
             </div>
@@ -536,11 +536,11 @@ export default function PartnersPage() {
                 <p className="text-xs font-medium text-gray-500">
                   {year} Gross Profit
                 </p>
-                <div className="bg-emerald-500 p-1.5 rounded-lg">
+                <div className="bg-accent-500 p-1.5 rounded-lg">
                   <TrendingUp className="w-3.5 h-3.5 text-white" />
                 </div>
               </div>
-              <p className="text-lg font-bold text-emerald-700">
+              <p className="text-lg font-bold text-accent-700">
                 {fmtShort(summary.grossProfit)}
               </p>
             </div>

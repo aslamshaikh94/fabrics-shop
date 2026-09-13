@@ -29,7 +29,7 @@ const Pagination = memo(function Pagination({
 
   return (
     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2">
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-gray-500 dark:text-gray-400">
         {totalItems} {label} &mdash; page {currentPage} of {totalPages}
       </p>
       <div className="flex items-center gap-1">
@@ -55,7 +55,7 @@ const Pagination = memo(function Pagination({
               className={`min-w-[2rem] px-2 py-1.5 text-sm rounded-lg font-medium transition-colors ${
                 p === currentPage
                   ? "bg-primary-600 text-white shadow-sm"
-                  : "text-gray-600 hover:bg-gray-100"
+                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
               }`}
             >
               {p}

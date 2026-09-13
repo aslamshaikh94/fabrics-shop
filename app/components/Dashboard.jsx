@@ -461,8 +461,8 @@ export default function Dashboard() {
             value: stats.thisMonthToCollect,
             change: changes.toCollect,
             icon: CreditCard,
-            iconBg: "bg-purple-500",
-            valueBg: "text-purple-600",
+            iconBg: "bg-secondary-500",
+            valueBg: "text-secondary-600",
             subtitle: "Pending from customers",
           },
         ].map((card) => {
@@ -573,8 +573,8 @@ export default function Dashboard() {
             title: `${periodLabel} To Collect`,
             value: periodStats.toCollect,
             icon: CreditCard,
-            iconBg: "bg-purple-500",
-            valueBg: "text-purple-600",
+            iconBg: "bg-secondary-500",
+            valueBg: "text-secondary-600",
           },
         ].map((card) => {
           const Icon = card.icon;
@@ -617,7 +617,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-xs text-gray-400">Reinvested</p>
-              <p className="text-sm font-bold text-emerald-600 mt-0.5">
+              <p className="text-sm font-bold text-accent-600 mt-0.5">
                 {fmtAmt(stats.reinvestedAmount, showAmount)}
               </p>
             </div>
@@ -647,7 +647,7 @@ export default function Dashboard() {
             <>
               <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
                 <div
-                  className="h-2.5 bg-emerald-500"
+                  className="h-2.5 bg-accent-500"
                   style={{
                     width: `${Math.min((stats.reinvestedAmount / stats.collectedAmount) * 100, 100)}%`,
                   }}
@@ -758,15 +758,15 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="card p-4 flex items-center gap-3">
-          <div className="bg-indigo-100 p-3 rounded-xl shrink-0">
-            <Package className="w-6 h-6 text-indigo-600" />
+          <div className="bg-secondary-100 p-3 rounded-xl shrink-0">
+            <Package className="w-6 h-6 text-secondary-600" />
           </div>
           <div>
             <p className="text-xs text-gray-500">Total Stock</p>
-            <p className="text-2xl font-bold text-indigo-700">
+            <p className="text-2xl font-bold text-secondary-700">
               {stats.totalFabricMeters.toFixed(2)}
             </p>
-            <p className="text-xs text-indigo-500 mt-0.5">meters</p>
+            <p className="text-xs text-secondary-500 mt-0.5">meters</p>
           </div>
         </div>
         <div className="card p-4 flex items-center gap-3">

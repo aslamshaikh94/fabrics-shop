@@ -48,15 +48,15 @@ const Modal = memo(function Modal({
         onClick={onClose}
       />
       <div
-        className={`relative w-full ${sizeClasses[size] || sizeClasses.md} bg-white rounded-xl shadow-xl max-h-[85vh] flex flex-col`}
+        className={`relative w-full ${sizeClasses[size] || sizeClasses.md} bg-white dark:bg-gray-800 rounded-xl shadow-xl max-h-[85vh] flex flex-col`}
       >
         {title && (
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700 shrink-0">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
             {showClose && (
               <button
                 onClick={onClose}
-                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5 text-gray-400" />
               </button>
