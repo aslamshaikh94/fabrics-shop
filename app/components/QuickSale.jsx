@@ -326,10 +326,10 @@ export default function QuickSale() {
             items[activeItemIdx]?.fabric_id ? (
               <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl p-3 mb-3">
                 <div>
-                  <p className="font-semibold text-primary-900">
+                  <p className="font-semibold text-gray-900">
                     {items[activeItemIdx].fabric_name}
                   </p>
-                  <p className="text-xs text-primary-600">
+                  <p className="text-xs text-primary-700">
                     ₹{items[activeItemIdx].cost_price_per_meter}/m cost
                   </p>
                 </div>
