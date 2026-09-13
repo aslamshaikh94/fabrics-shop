@@ -4,12 +4,9 @@ import { supabase } from "../lib/supabase";
 import {
   X,
   ScanLine,
-  Search,
   ChevronDown,
   CircleCheck as CheckCircle,
   Plus,
-  Users,
-  UserPlus,
 } from "lucide-react";
 import {
   validateSale,
@@ -45,6 +42,7 @@ function makeEmptyForm() {
     sale_date: new Date().toISOString().split("T")[0],
     payment_type: "cash",
     initial_payment: "",
+    discount_amount: "",
     invoice_file: null,
   };
 }
@@ -70,7 +68,6 @@ export default function SaleForm({
   const [scanningItemIdx, setScanningItemIdx] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [itemJustAdded, setItemJustAdded] = useState(false);
-  const [customerTab, setCustomerTab] = useState("existing");
   const customerDropdownRef = useRef(null);
 
   useEffect(() => {
@@ -86,11 +83,22 @@ export default function SaleForm({
   async function fetchSaleForEditing(id) {
     const { data, error } = await supabase
       .from("sales")
-      .select("*, customer:customers(*)")
+      .select("*")
       .eq("id", id)
       .single();
 
     if (data) {
+      // Fetch the customer separately to avoid schema cache join issues
+      if (data.customer_id) {
+        const { data: customerData } = await supabase
+          .from("customers")
+          .select("*")
+          .eq("id", data.customer_id)
+          .single();
+        data.customer = customerData || null;
+      } else {
+        data.customer = null;
+      }
       loadSaleForEdit(data);
     }
   }
@@ -121,7 +129,6 @@ export default function SaleForm({
   }
 
   function addItem() {
-    // Validate only the current (last) item before adding
     const currentItem = formData.items[formData.items.length - 1];
     const itemErrors = validateCurrentItem(currentItem);
     if (Object.keys(itemErrors).length > 0) {
@@ -131,7 +138,6 @@ export default function SaleForm({
     }
 
     setItemJustAdded(true);
-    // Clear errors for the validated item fields
     const clearedErrors = { ...formErrors };
     delete clearedErrors.fabric_name;
     delete clearedErrors.meters;
@@ -155,7 +161,7 @@ export default function SaleForm({
     setTimeout(() => setItemJustAdded(false), 100);
   }
 
-  function calculateTotal() {
+  function calculateSubtotal() {
     return formData.items
       .reduce(
         (sum, item) =>
@@ -167,22 +173,26 @@ export default function SaleForm({
       .toFixed(2);
   }
 
-  function calculateMargin() {
-    return formData.items
-      .reduce(
-        (sum, item) =>
-          sum +
-          (parseFloat(item.meters) || 0) *
-            ((parseFloat(item.price_per_meter) || 0) -
-              (parseFloat(item.cost_price_per_meter) || 0)),
-        0,
-      )
-      .toFixed(2);
+  function calculateNetTotal() {
+    return Math.max(
+      parseFloat(calculateSubtotal()) -
+        (parseFloat(formData.discount_amount) || 0),
+      0,
+    );
   }
 
-  function calculateRemaining() {
-    return (
-      parseFloat(calculateTotal()) - (parseFloat(formData.initial_payment) || 0)
+  function calculateMargin() {
+    const totalMargin = formData.items.reduce(
+      (sum, item) =>
+        sum +
+        (parseFloat(item.meters) || 0) *
+          ((parseFloat(item.price_per_meter) || 0) -
+            (parseFloat(item.cost_price_per_meter) || 0)),
+      0,
+    );
+    return Math.max(
+      totalMargin - (parseFloat(formData.discount_amount) || 0),
+      0,
     ).toFixed(2);
   }
 
@@ -243,7 +253,6 @@ export default function SaleForm({
       return;
     }
 
-    // Filter out the active "new item" row if it hasn't been filled
     const itemsToSave = formData.items.filter((item, idx) => {
       if (formData.items.length === 1) return true;
       if (idx === formData.items.length - 1) {
@@ -252,7 +261,7 @@ export default function SaleForm({
       return true;
     });
 
-    const totalAmount = itemsToSave.reduce(
+    const subtotal = itemsToSave.reduce(
       (sum, item) =>
         sum +
         (parseFloat(item.meters) || 0) *
@@ -262,7 +271,38 @@ export default function SaleForm({
 
     setSaving(true);
     try {
+      const discountAmount = parseFloat(formData.discount_amount) || 0;
       const initialPayment = parseFloat(formData.initial_payment) || 0;
+      const netTotal = Math.max(subtotal - discountAmount, 0);
+
+      // Auto-derive payment_type from initial payment
+      const paymentType =
+        initialPayment <= 0
+          ? "credit"
+          : initialPayment >= netTotal
+            ? "cash"
+            : "partial";
+
+      // Auto-create customer for walk-in with a name
+      let customerId = formData.customer_id;
+      if (!customerId && formData.customer_name?.trim()) {
+        const { data: existingCustomer } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("name", formData.customer_name.trim())
+          .maybeSingle();
+        if (existingCustomer) {
+          customerId = existingCustomer.id;
+        } else {
+          const { data: newCustomer, error: createError } = await supabase
+            .from("customers")
+            .insert([{ name: formData.customer_name.trim() }])
+            .select("id")
+            .single();
+          if (createError) throw createError;
+          customerId = newCustomer.id;
+        }
+      }
 
       let invoice_url = "";
       if (formData.invoice_file) {
@@ -279,16 +319,14 @@ export default function SaleForm({
       }
 
       // Check credit limit for credit/partial
-      if (formData.customer_id && formData.payment_type !== "cash") {
-        const customer = allCustomers.find(
-          (c) => c.id === formData.customer_id,
-        );
+      if (customerId && paymentType !== "cash") {
+        const customer = allCustomers.find((c) => c.id === customerId);
         if (customer?.credit_limit > 0) {
-          const newRemaining = totalAmount - initialPayment;
+          const newRemaining = netTotal - initialPayment;
           const currentDue = customerDues?.[customer.id] || 0;
           if (currentDue + newRemaining > customer.credit_limit) {
             toast(
-              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN")}, current dues: ₹${currentDue.toLocaleString("en-IN")}, new would add: ₹${newRemaining.toLocaleString("en-IN")}`,
+              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, current dues: ₹${currentDue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, new would add: ₹${newRemaining.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
               "error",
             );
             setSaving(false);
@@ -300,7 +338,6 @@ export default function SaleForm({
       if (editingId) {
         const item = itemsToSave[0] || {};
 
-        // Delete old payments for this sale before updating
         const { error: deletePayErr } = await supabase
           .from("sale_payments")
           .delete()
@@ -308,15 +345,17 @@ export default function SaleForm({
         if (deletePayErr) throw deletePayErr;
 
         const salePayload = {
-          customer_id: formData.customer_id || null,
+          customer_id: customerId || null,
           fabric_id: item.fabric_id || null,
           meters: parseFloat(item.meters) || 0,
           price_per_meter: parseFloat(item.price_per_meter) || 0,
           cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
           sale_date: formData.sale_date,
-          payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${!formData.customer_id && formData.customer_name && formData.customer_name !== "Walk-in Customer" ? ` (Name: ${formData.customer_name})` : ""}`,
+          payment_type: paymentType,
+          customer_name: !customerId ? formData.customer_name || "" : "",
+          fabric_name: item.fabric_name,
           invoice_url,
+          discount_amount: discountAmount,
         };
         const { error: updateError } = await supabase
           .from("sales")
@@ -324,17 +363,13 @@ export default function SaleForm({
           .eq("id", editingId);
         if (updateError) throw updateError;
 
-        const totalAmount =
-          parseFloat(item.meters) * parseFloat(item.price_per_meter);
-        const initialPayment = parseFloat(formData.initial_payment) || 0;
-
-        if (formData.payment_type === "cash") {
+        if (paymentType === "cash") {
           const { error: payErr } = await supabase
             .from("sale_payments")
             .insert([
               {
                 sale_id: editingId,
-                amount: totalAmount,
+                amount: netTotal,
                 payment_date: formData.sale_date,
                 payment_method: "cash",
               },
@@ -346,7 +381,7 @@ export default function SaleForm({
             .insert([
               {
                 sale_id: editingId,
-                amount: initialPayment,
+                amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
                 payment_method: "cash",
               },
@@ -355,24 +390,23 @@ export default function SaleForm({
         }
       } else {
         const saleGroupId = generateUUID();
-        const walkInNameInfo =
-          !formData.customer_id &&
-          formData.customer_name &&
-          formData.customer_name !== "Walk-in Customer"
-            ? ` (Name: ${formData.customer_name})`
-            : "";
-        const salePayloads = itemsToSave.map((item) => ({
-          customer_id: formData.customer_id || null,
-          fabric_id: item.fabric_id || null,
-          meters: parseFloat(item.meters) || 0,
-          price_per_meter: parseFloat(item.price_per_meter) || 0,
-          cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
-          sale_date: formData.sale_date,
-          payment_type: formData.payment_type,
-          notes: `Fabric: ${item.fabric_name}${walkInNameInfo}`,
-          sale_group_id: saleGroupId,
-          invoice_url,
-        }));
+        const salePayloads = itemsToSave.map((item, idx) => {
+          return {
+            customer_id: customerId || null,
+            fabric_id: item.fabric_id || null,
+            meters: parseFloat(item.meters) || 0,
+            price_per_meter: parseFloat(item.price_per_meter) || 0,
+            cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
+            sale_date: formData.sale_date,
+            payment_type: paymentType,
+            customer_name: !customerId ? formData.customer_name || "" : "",
+            fabric_name: item.fabric_name,
+            notes: `Fabric: ${item.fabric_name}`,
+            sale_group_id: saleGroupId,
+            invoice_url,
+            discount_amount: idx === 0 ? discountAmount : 0,
+          };
+        });
 
         let saleRows;
         const { data: data1, error: error1 } = await supabase
@@ -395,40 +429,20 @@ export default function SaleForm({
         }
 
         if (saleRows && saleRows.length > 0) {
-          if (formData.payment_type === "cash") {
+          const totalPay = paymentType === "cash" ? netTotal : Math.min(initialPayment, netTotal);
+          if (totalPay > 0) {
+            // Distribute payment proportionally across items
             const paymentInserts = saleRows.map((row) => ({
               sale_id: row.id,
-              amount: row.meters * row.price_per_meter,
+              amount: Math.round((row.meters * row.price_per_meter / subtotal) * totalPay * 100) / 100,
               payment_date: formData.sale_date,
               payment_method: "cash",
             }));
-            const { error: payErr } = await supabase
-              .from("sale_payments")
-              .insert(paymentInserts);
+            // Fix rounding: adjust last item so sum equals totalPay exactly
+            const sumSoFar = paymentInserts.slice(0, -1).reduce((s, p) => s + p.amount, 0);
+            paymentInserts[paymentInserts.length - 1].amount = Math.round((totalPay - sumSoFar) * 100) / 100;
+            const { error: payErr } = await supabase.from("sale_payments").insert(paymentInserts);
             if (payErr) throw payErr;
-          } else if (initialPayment > 0) {
-            let remaining = initialPayment;
-            const paymentInserts = [];
-            for (const row of saleRows) {
-              const itemTotal = row.meters * row.price_per_meter;
-              const pay = Math.min(remaining, itemTotal);
-              if (pay > 0) {
-                paymentInserts.push({
-                  sale_id: row.id,
-                  amount: pay,
-                  payment_date: formData.sale_date,
-                  payment_method: "cash",
-                });
-                remaining -= pay;
-              }
-              if (remaining <= 0) break;
-            }
-            if (paymentInserts.length > 0) {
-              const { error: payErr } = await supabase
-                .from("sale_payments")
-                .insert(paymentInserts);
-              if (payErr) throw payErr;
-            }
           }
         }
       }
@@ -455,18 +469,19 @@ export default function SaleForm({
   }
 
   function loadSaleForEdit(sale) {
-    const notes = sale.notes || "";
-    const fabricMatch = notes.match(/Fabric:\s*([^(|\n]+)/);
-    const isWalkin = !sale.customer_id;
-    setCustomerTab(isWalkin ? "walkin" : "existing");
+    const cleanNotes = (sale.notes || "")
+      .replace(/Fabric:\s*[^(|\n]+/i, "")
+      .replace(/\(Name:\s*[^)]+\)/g, "")
+      .replace(/^[\s,;]+/, "")
+      .replace(/[\s,;]+$/, "")
+      .trim();
     setFormData({
       customer_id: sale.customer_id || "",
-      customer_name:
-        sale.customer?.name || (sale.customer_id ? "" : "Walk-in Customer"),
+      customer_name: sale.customer?.name || sale.customer_name || "",
       items: [
         {
           fabric_id: sale.fabric_id || "",
-          fabric_name: fabricMatch ? fabricMatch[1].trim() : "",
+          fabric_name: sale.fabric_name || "",
           meters: sale.meters.toString(),
           price_per_meter: sale.price_per_meter.toString(),
           cost_price_per_meter: sale.cost_price_per_meter.toString(),
@@ -474,13 +489,18 @@ export default function SaleForm({
       ],
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
-      initial_payment: "",
+      initial_payment: sale.paid_amount > 0 ? sale.paid_amount.toString() : "",
+      discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
     setEditingId(sale.id);
   }
 
   if (!open) return null;
+
+  const netTotal = calculateNetTotal();
+  const subtotal = parseFloat(calculateSubtotal());
+  const discountValue = parseFloat(formData.discount_amount) || 0;
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
@@ -499,170 +519,71 @@ export default function SaleForm({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Customer Section */}
-          <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
+          <div className="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Customer
             </span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomerTab("existing");
-                  setCustomerSearch("");
-                  setFormData((prev) => ({
-                    ...prev,
-                    customer_id: "",
-                    customer_name: "",
-                  }));
-                }}
-                className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                  customerTab === "existing"
-                    ? "bg-primary-600 text-white border-primary-600"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
-                }`}
-              >
-                <Users className="w-4 h-4 inline mr-1.5 mb-0.5" />
-                Existing Customer
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomerTab("walkin");
-                  setFormData({
-                    ...formData,
-                    customer_id: "",
-                    customer_name: "Walk-in Customer",
-                  });
-                  setCustomerSearch("");
-                }}
-                className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                  customerTab === "walkin"
-                    ? "bg-primary-600 text-white border-primary-600"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
-                }`}
-              >
-                <UserPlus className="w-4 h-4 inline mr-1.5 mb-0.5" />
-                Walk-in
-              </button>
-            </div>
-
-            {customerTab === "existing" ? (
-              <div className="relative" ref={customerDropdownRef}>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Search Customer
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={
-                      showCustomerDropdown
-                        ? customerSearch
-                        : formData.customer_name || ""
-                    }
-                    onChange={(e) => {
-                      setCustomerSearch(e.target.value);
-                      setFormData({
-                        ...formData,
-                        customer_id: "",
-                        customer_name: e.target.value,
-                      });
-                      setShowCustomerDropdown(true);
-                    }}
-                    onFocus={() => {
-                      setCustomerSearch(formData.customer_name || "");
-                      setShowCustomerDropdown(true);
-                    }}
-                    className="input bg-white pr-10"
-                    placeholder="Type to search customer..."
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    {formData.customer_id && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({
-                            ...formData,
-                            customer_id: "",
-                            customer_name: "",
-                          });
-                          setCustomerSearch("");
-                        }}
-                        className="text-gray-400 hover:text-gray-600 p-0.5"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                    <ChevronDown
-                      className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`}
-                    />
-                  </div>
-                </div>
-                {showCustomerDropdown && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-                    {allCustomers
-                      .filter((c) =>
-                        c.name
-                          .toLowerCase()
-                          .includes(customerSearch.toLowerCase()),
-                      )
-                      .map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setFormData({
-                              ...formData,
-                              customer_id: c.id,
-                              customer_name: c.name,
-                            });
-                            setCustomerSearch(c.name);
-                            setShowCustomerDropdown(false);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${
-                            formData.customer_id === c.id
-                              ? "bg-primary-50 text-primary-700 font-medium"
-                              : ""
-                          }`}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    {allCustomers.filter((c) =>
-                      c.name
-                        .toLowerCase()
-                        .includes(customerSearch.toLowerCase()),
-                    ).length === 0 && (
-                      <div className="px-3 py-2.5 text-sm text-gray-400 italic">
-                        No customers found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Enter Walk-in Name
-                </label>
+            <div className="relative" ref={customerDropdownRef}>
+              <div className="relative">
                 <input
                   type="text"
-                  value={
-                    formData.customer_name === "Walk-in Customer"
-                      ? ""
-                      : formData.customer_name
-                  }
+                  value={showCustomerDropdown ? customerSearch : formData.customer_name || ""}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({
-                      ...formData,
-                      customer_id: "",
-                      customer_name: val || "Walk-in Customer",
-                    });
+                    setCustomerSearch(e.target.value);
+                    setFormData({ ...formData, customer_id: "", customer_name: e.target.value });
+                    setShowCustomerDropdown(true);
                   }}
-                  className="input bg-white"
-                  placeholder="e.g. John Doe"
+                  onFocus={() => {
+                    setCustomerSearch(formData.customer_name || "");
+                    setShowCustomerDropdown(true);
+                  }}
+                  className="input bg-white pr-10"
+                  placeholder="Customer name (or leave blank for walk-in)"
                 />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {formData.customer_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, customer_id: "", customer_name: "" });
+                        setCustomerSearch("");
+                      }}
+                      className="text-gray-400 hover:text-gray-600 p-0.5"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`} />
+                </div>
               </div>
+              {showCustomerDropdown && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
+                  {allCustomers
+                    .filter((c) => c.name.toLowerCase().includes(customerSearch.toLowerCase()))
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setFormData({ ...formData, customer_id: c.id, customer_name: c.name });
+                          setCustomerSearch(c.name);
+                          setShowCustomerDropdown(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${
+                          formData.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""
+                        }`}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  {customerSearch && !allCustomers.some((c) => c.name.toLowerCase() === customerSearch.toLowerCase()) && (
+                    <div className="px-3 py-2 text-xs text-gray-400 italic">New customer "{customerSearch}" will be created</div>
+                  )}
+                </div>
+              )}
+            </div>
+            {formData.customer_id && (
+              <p className="text-xs text-accent-600 font-medium">✓ Linked to existing customer</p>
             )}
           </div>
 
@@ -687,16 +608,20 @@ export default function SaleForm({
                     className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-center justify-between"
                   >
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-green-600" />
                         <p className="font-semibold text-gray-900">
                           {item.fabric_name || `Item ${idx + 1}`}
                         </p>
-                        <span className="text-xs text-gray-700 font-medium">
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-600 ml-4">
+                        <span>
                           {item.meters}m @ ₹{item.price_per_meter}/m
                         </span>
+                        <span className="text-gray-300">|</span>
+                        <span>Buying: ₹{item.cost_price_per_meter}/m</span>
                       </div>
-                      <p className="text-xs text-gray-700 font-medium">
+                      <p className="text-xs text-gray-700 font-medium mt-1 ml-4">
                         Total: ₹
                         {(
                           parseFloat(item.meters) *
@@ -750,7 +675,6 @@ export default function SaleForm({
                               fabric_id: "",
                               fabric_name: e.target.value,
                             });
-                            // Clear fabric_name error on change
                             if (formErrors.fabric_name) {
                               const { fabric_name, ...rest } = formErrors;
                               setFormErrors(rest);
@@ -780,11 +704,13 @@ export default function SaleForm({
                         {activeFabricDropdown === currentIdx && (
                           <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
                             {allFabrics
-                              .filter((f) =>
-                                f.name
-                                  .toLowerCase()
-                                  .includes(fabricSearch.toLowerCase()),
-                              )
+                              .filter((f) => {
+                                const q = fabricSearch.toLowerCase();
+                                return (
+                                  f.name.toLowerCase().includes(q) ||
+                                  String(f.selling_price_per_meter || "").includes(q)
+                                );
+                              })
                               .map((f) => (
                                 <button
                                   key={f.id}
@@ -803,17 +729,22 @@ export default function SaleForm({
                                   }}
                                   className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm"
                                 >
-                                  <span>{f.name}</span>{" "}
+                                  <span>{f.name}</span>
+                                  {f.selling_price_per_meter > 0 && (
+                                    <span className="text-xs text-primary-600 ml-2">₹{f.selling_price_per_meter}/m</span>
+                                  )}
                                   <span className="text-[10px] text-gray-400 ml-2">
                                     {f.available_meters}m
                                   </span>
                                 </button>
                               ))}
-                            {allFabrics.filter((f) =>
-                              f.name
-                                .toLowerCase()
-                                .includes(fabricSearch.toLowerCase()),
-                            ).length === 0 && (
+                            {allFabrics.filter((f) => {
+                              const q = fabricSearch.toLowerCase();
+                              return (
+                                f.name.toLowerCase().includes(q) ||
+                                String(f.selling_price_per_meter || "").includes(q)
+                              );
+                            }).length === 0 && (
                               <div className="px-3 py-2.5 text-xs text-gray-400 italic">
                                 No matching fabrics found
                               </div>
@@ -840,8 +771,8 @@ export default function SaleForm({
                   </div>
 
                   {item.fabric_id && (
-                    <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex justify-between items-center shadow-sm">
-                      <div className="flex items-center gap-2">
+                    <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
                         <CheckCircle className="w-4 h-4 text-accent-500" />
                         <div>
                           <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
@@ -852,19 +783,21 @@ export default function SaleForm({
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-primary-600 font-bold uppercase mb-0.5">
-                          Cost
-                        </p>
-                        <p className="text-sm font-semibold text-primary-900">
-                          ₹{item.cost_price_per_meter}/m
-                        </p>
+                      <div className="flex gap-4 text-xs text-primary-700 border-t border-primary-200 pt-2">
+                        <span>
+                          Buying:{" "}
+                          <strong>₹{item.cost_price_per_meter}/m</strong>
+                        </span>
+                        {item.price_per_meter && (
+                          <span>
+                            Selling:{" "}
+                            <strong>₹{item.price_per_meter}/m</strong>
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
-                  <div
-                    className={`grid ${item.fabric_id ? "grid-cols-2" : "grid-cols-3"} gap-2`}
-                  >
+                  <div className={`grid grid-cols-2 gap-2`}>
                     <div>
                       <label className="block text-xs font-bold text-gray-900 mb-1">
                         Meters *
@@ -916,35 +849,6 @@ export default function SaleForm({
                         </p>
                       )}
                     </div>
-                    {!item.fabric_id && (
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Cost ₹/m
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.cost_price_per_meter}
-                          onChange={(e) => {
-                            updateItem(currentIdx, {
-                              cost_price_per_meter: e.target.value,
-                            });
-                            if (formErrors.cost_price_per_meter) {
-                              const { cost_price_per_meter, ...rest } =
-                                formErrors;
-                              setFormErrors(rest);
-                            }
-                          }}
-                          className="input bg-white"
-                          onWheel={(e) => e.target.blur()}
-                        />
-                        {formErrors.cost_price_per_meter && (
-                          <p className="text-xs text-red-500 mt-1">
-                            {formErrors.cost_price_per_meter}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               );
@@ -961,60 +865,42 @@ export default function SaleForm({
             )}
           </div>
 
-          {/* Payment Section */}
+          {/* Payment & Discount */}
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Payment
+              Payment & Discount
             </span>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Payment Type *
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  ["cash", "Full Cash"],
-                  ["partial", "Partial"],
-                  ["credit", "Full Credit"],
-                ].map(([v, l]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        payment_type: v,
-                        initial_payment:
-                          v === "partial" ? formData.initial_payment : "",
-                      })
-                    }
-                    className={`py-2 rounded-xl text-sm font-medium border transition-all ${formData.payment_type === v ? "bg-primary-600 text-white border-primary-600" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {formData.payment_type === "partial" && (
+            <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Initial Payment
-                </label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Initial Payment (₹)</label>
                 <input
                   type="number"
                   step="0.01"
                   value={formData.initial_payment}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      initial_payment: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, initial_payment: e.target.value })}
                   className="input bg-white"
-                  placeholder="Amount received now"
+                  placeholder="0 for credit"
                   onWheel={(e) => e.target.blur()}
                 />
               </div>
-            )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Discount (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.discount_amount}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "" || parseFloat(val) >= 0)
+                      setFormData({ ...formData, discount_amount: val });
+                  }}
+                  className="input bg-white"
+                  placeholder="0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+            </div>
           </div>
 
           {/* Date & Invoice */}
@@ -1044,12 +930,12 @@ export default function SaleForm({
             />
           </div>
 
-          {parseFloat(calculateTotal()) > 0 && (
+          {subtotal > 0 && (
             <div className="bg-gray-50 rounded-xl p-3 space-y-1 border border-gray-200">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Total Amount:</span>
+                <span className="text-gray-600">Subtotal:</span>
                 <span className="font-semibold">
-                  {formatCurrency(calculateTotal())}
+                  {formatCurrency(subtotal)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
@@ -1058,6 +944,20 @@ export default function SaleForm({
                   {formatCurrency(calculateMargin())}
                 </span>
               </div>
+              {discountValue > 0 && (
+                <>
+                  <div className="flex justify-between text-sm border-t border-gray-200 pt-1 mt-1">
+                    <span className="text-primary-600">Discount:</span>
+                    <span className="font-semibold text-primary-600">
+                      -{formatCurrency(discountValue)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold border-t border-gray-300 pt-1 mt-1">
+                    <span>Net Total:</span>
+                    <span>{formatCurrency(netTotal)}</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
           <div className="flex gap-3 pt-2">
@@ -1073,7 +973,35 @@ export default function SaleForm({
               disabled={saving}
               className="btn btn-primary flex-1"
             >
-              {saving ? "Saving..." : editingId ? "Update Sale" : "Record Sale"}
+              {saving ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : editingId ? (
+                "Update Sale"
+              ) : (
+                "Record Sale"
+              )}
             </button>
           </div>
         </form>

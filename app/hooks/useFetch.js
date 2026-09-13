@@ -1,10 +1,17 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, safeQuery, withRetry } from "../lib/supabase";
+import {
+  supabase,
+  safeQuery,
+  withRetry,
+  cachedQuery,
+  clearCache,
+} from "../lib/supabase";
 
 /**
  * Custom hook for fetching data from Supabase
  * Handles loading, error states, automatic refetching, and cleanup
+ * Includes in-memory caching to reduce redundant network calls
  */
 export function useFetch(table, options = {}) {
   const [data, setData] = useState([]);
@@ -17,12 +24,17 @@ export function useFetch(table, options = {}) {
     limit = null,
     filter = null,
     dependencies = [],
+    useCache = true,
+    cacheTtl = 30_000,
   } = options;
 
   // Track mounted state to avoid state updates after unmount
   const mountedRef = useRef(true);
+  // Track request ID to prevent stale responses
+  const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    const currentRequestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -49,10 +61,16 @@ export function useFetch(table, options = {}) {
           query = query.limit(limit);
         }
 
+        // Use cache if enabled
+        if (useCache) {
+          return cachedQuery(table, () => safeQuery(query), cacheTtl);
+        }
+
         return safeQuery(query);
       });
 
-      if (mountedRef.current) {
+      // Ignore stale responses from previous requests
+      if (mountedRef.current && currentRequestId === requestIdRef.current) {
         if (result.error) {
           setError(result.error);
         } else {
@@ -60,16 +78,16 @@ export function useFetch(table, options = {}) {
         }
       }
     } catch (err) {
-      if (mountedRef.current) {
+      if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setError(err.message || "Error fetching data");
         console.error(`Error fetching ${table}:`, err);
       }
     } finally {
-      if (mountedRef.current) {
+      if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setLoading(false);
       }
     }
-  }, [table, select, orderBy, limit, filter]);
+  }, [table, select, orderBy, limit, filter, useCache, cacheTtl]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -91,9 +109,11 @@ export function useFetchOne(table, id, select = "*") {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const mountedRef = useRef(true);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
+    const currentRequestId = ++requestIdRef.current;
 
     if (!id) {
       setData(null);
@@ -111,7 +131,7 @@ export function useFetchOne(table, id, select = "*") {
           );
         });
 
-        if (mountedRef.current) {
+        if (mountedRef.current && currentRequestId === requestIdRef.current) {
           if (result.error) {
             setError(result.error);
           } else {
@@ -119,12 +139,12 @@ export function useFetchOne(table, id, select = "*") {
           }
         }
       } catch (err) {
-        if (mountedRef.current) {
+        if (mountedRef.current && currentRequestId === requestIdRef.current) {
           setError(err.message || "Error fetching data");
           console.error(`Error fetching ${table} with id ${id}:`, err);
         }
       } finally {
-        if (mountedRef.current) {
+        if (mountedRef.current && currentRequestId === requestIdRef.current) {
           setLoading(false);
         }
       }
@@ -136,4 +156,14 @@ export function useFetchOne(table, id, select = "*") {
   }, [table, id, select]);
 
   return { data, loading, error };
+}
+
+/**
+ * Hook to clear cache after mutations
+ * Call clearTableCache(tableName) after insert/update/delete operations
+ */
+export function useCacheClear() {
+  return useCallback((table) => {
+    clearCache(table);
+  }, []);
 }

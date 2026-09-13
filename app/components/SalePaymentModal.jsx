@@ -39,17 +39,16 @@ export default function SalePaymentModal({
           </span>
         </p>
         <p className="text-sm text-gray-600 mt-1 italic">
-          {selectedSale.items
-            ?.map(
-              (it) =>
-                it.notes?.match(/Fabric:\s*([^(|\n]+)/)?.[1]?.trim() || "Item",
-            )
-            .join(", ")}
+          {selectedSale.items?.map((it) => it.fabric_name || "Item").join(", ")}
         </p>
         <p className="text-sm text-gray-600 mt-2">
           Remaining:{" "}
           <span className="font-semibold text-warning-600">
-            ₹{selectedSale.remaining_amount.toLocaleString("en-IN")}
+            ₹
+            {selectedSale.remaining_amount.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </span>
         </p>
       </div>

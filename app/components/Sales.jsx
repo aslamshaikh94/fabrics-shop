@@ -1,16 +1,18 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
   CreditCard,
-  Search,
   Calendar,
   Eye,
   Trash2,
   History,
   TrendingUp,
   Download,
+  FileUp,
+  X,
+  Columns,
 } from "lucide-react";
 import { exportCSV } from "../utils/export";
 import { validatePayment, hasErrors } from "../utils/validators";
@@ -19,10 +21,37 @@ import { useToast } from "./Toast";
 import SaleForm from "./SaleForm";
 import SalePaymentModal from "./SalePaymentModal";
 import SaleDetailsModal from "./SaleDetailsModal";
+import SalesImport from "./SalesImport";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName } from "../utils/formatters";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
+
+const ALL_SALE_COLUMNS = [
+  { key: "customer",  label: "Customer" },
+  { key: "date",      label: "Date" },
+  { key: "items",     label: "Items" },
+  { key: "mtrs",      label: "Mtrs" },
+  { key: "total",     label: "Total" },
+  { key: "paid",      label: "Paid" },
+  { key: "margin",    label: "Margin" },
+  { key: "discExtra", label: "Disc./Extra" },
+  { key: "remaining", label: "Remaining" },
+  { key: "type",      label: "Type" },
+  { key: "actions",   label: "Actions" },
+];
+
+const SALE_DEFAULT_VISIBLE = new Set(["customer", "date", "items", "mtrs", "total", "paid", "margin", "discExtra", "remaining", "type", "actions"]);
+
+function loadSaleVisibleCols() {
+  try {
+    const saved = localStorage.getItem("sales_visible_cols");
+    if (saved) return new Set(JSON.parse(saved));
+  } catch {}
+  return new Set(SALE_DEFAULT_VISIBLE);
+}
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
   credit: "bg-warning-100 text-warning-800",
@@ -50,52 +79,109 @@ export default function Sales() {
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [customRange, setCustomRange] = useState(false);
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmDeletePayment, setConfirmDeletePayment] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [visibleCols, setVisibleCols] = useState(loadSaleVisibleCols);
+  const colPickerRef = useRef(null);
 
   useEffect(() => {
-    fetchSales();
-    fetchCustomers();
-    fetchFabrics();
+    localStorage.setItem("sales_visible_cols", JSON.stringify([...visibleCols]));
+  }, [visibleCols]);
+
+  useEffect(() => {
+    if (!showColPicker) return;
+    function handleClick(e) {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target))
+        setShowColPicker(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showColPicker]);
+
+  function toggleCol(key) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const col = (key) => visibleCols.has(key);
+
+  useEffect(() => {
+    fetchAll();
   }, []);
 
-  async function fetchSales() {
+  async function fetchAll() {
     try {
-      const { data, error } = await supabase
-        .from("sales")
-        .select("*, customer:customers(*)")
-        .order("sale_date", { ascending: false });
-      if (error) throw error;
-      setSales(data || []);
+      const [salesRes, customersRes, fabricsRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("*")
+          .order("sale_date", { ascending: false })
+          .order("created_at", { ascending: false }),
+        supabase.from("customers").select("*").order("name"),
+        supabase.from("fabrics").select("*").order("name"),
+      ]);
+      if (salesRes.error) throw salesRes.error;
+      if (customersRes.error) throw customersRes.error;
+      if (fabricsRes.error) throw fabricsRes.error;
+      const customerMap = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c]),
+      );
+      const salesWithCustomer = (salesRes.data || []).map((s) => ({
+        ...s,
+        customer: customerMap[s.customer_id] || null,
+      }));
+      setSales(salesWithCustomer);
+      setCustomers(customersRes.data || []);
+      setFabrics(fabricsRes.data || []);
+      return salesWithCustomer;
     } catch (error) {
-      console.error("Error fetching sales:", error);
+      const message =
+        error?.message || JSON.stringify(error) || "Unknown error";
+      console.error("Error fetching sales data:", message, error);
+      toast(`Failed to load sales data: ${message}`, "error");
+      return [];
     } finally {
       setLoading(false);
     }
   }
 
-  async function fetchCustomers() {
+  async function fetchSales() {
     try {
-      const { data } = await supabase
-        .from("customers")
-        .select("*")
-        .order("name");
-      setCustomers(data || []);
+      const [salesRes, customersRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("*")
+          .order("sale_date", { ascending: false })
+          .order("created_at", { ascending: false }),
+        supabase.from("customers").select("*").order("name"),
+      ]);
+      if (salesRes.error) throw salesRes.error;
+      if (customersRes.error) throw customersRes.error;
+      const customerMap = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c]),
+      );
+      const salesWithCustomer = (salesRes.data || []).map((s) => ({
+        ...s,
+        customer: customerMap[s.customer_id] || null,
+      }));
+      setSales(salesWithCustomer);
+      setCustomers(customersRes.data || []);
+      return salesWithCustomer;
     } catch (error) {
-      console.error(error);
-    }
-  }
-
-  async function fetchFabrics() {
-    try {
-      const { data } = await supabase.from("fabrics").select("*").order("name");
-      setFabrics(data || []);
-    } catch (error) {
-      console.error(error);
+      console.error("Error fetching sales:", error?.message || error);
+      return [];
     }
   }
 
@@ -113,26 +199,39 @@ export default function Sales() {
       return;
     }
     try {
-      let remainingToPay = parseFloat(paymentData.amount);
-      const paymentInserts = [];
-      for (const item of selectedSale.items || []) {
-        if (remainingToPay <= 0) break;
-        if (item.remaining_amount <= 0) continue;
-        const pay = Math.min(remainingToPay, item.remaining_amount);
-        paymentInserts.push({
+      const totalPay = parseFloat(paymentData.amount);
+      const groupSubtotal = selectedSale.items.reduce(
+        (s, i) => s + (parseFloat(i.meters) || 0) * (parseFloat(i.price_per_meter) || 0), 0
+      );
+
+      // Insert one payment row per item proportionally (DB trigger needs sale_id)
+      // but tag them with a shared reference so they display as one payment
+      const sharedRef = paymentData.reference_number ||
+        `PAY-${Date.now()}`;
+
+      const paymentInserts = selectedSale.items.map((item, idx) => {
+        const itemSubtotal = (parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0);
+        const proportion = groupSubtotal > 0 ? itemSubtotal / groupSubtotal : 1 / selectedSale.items.length;
+        const amount = idx === selectedSale.items.length - 1
+          ? Math.round((totalPay - selectedSale.items.slice(0, -1).reduce((s, it, i) => {
+              const sub = (parseFloat(it.meters) || 0) * (parseFloat(it.price_per_meter) || 0);
+              const p = groupSubtotal > 0 ? sub / groupSubtotal : 1 / selectedSale.items.length;
+              return s + Math.round(p * totalPay * 100) / 100;
+            }, 0)) * 100) / 100
+          : Math.round(proportion * totalPay * 100) / 100;
+        return {
           sale_id: item.id,
-          amount: pay,
+          amount,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
-          reference_number: paymentData.reference_number,
+          reference_number: sharedRef,
           notes: paymentData.notes,
-        });
-        remainingToPay -= pay;
-      }
-      const { error } = await supabase
-        .from("sale_payments")
-        .insert(paymentInserts);
+        };
+      });
+
+      const { error } = await supabase.from("sale_payments").insert(paymentInserts);
       if (error) throw error;
+
       setShowPaymentForm(false);
       setPaymentData({ ...INITIAL_PAYMENT });
       fetchSales();
@@ -156,17 +255,49 @@ export default function Sales() {
     }
   }
 
+  async function handleDeletePayment(paymentIds) {
+    try {
+      const ids = Array.isArray(paymentIds) ? paymentIds : [paymentIds];
+      const { error } = await supabase
+        .from("sale_payments")
+        .delete()
+        .in("id", ids);
+      if (error) throw error;
+      toast("Payment deleted");
+      fetchPayments(selectedSale.items.map((i) => i.id));
+      fetchSales();
+    } catch (err) {
+      toast("Failed to delete payment", "error");
+    } finally {
+      setConfirmDeletePayment(null);
+    }
+  }
+
   async function handleDelete(deleteInfo) {
     try {
       if (deleteInfo.isGroup) {
-        await supabase
+        const { error: paymentsError } = await supabase
           .from("sale_payments")
           .delete()
           .in("sale_id", deleteInfo.saleIds);
-        await supabase.from("sales").delete().in("id", deleteInfo.saleIds);
+        if (paymentsError) throw paymentsError;
+        const { error: salesError } = await supabase
+          .from("sales")
+          .delete()
+          .in("id", deleteInfo.saleIds);
+        if (salesError) throw salesError;
         toast("Sales group deleted");
       } else {
-        await supabase.from("sales").delete().eq("id", deleteInfo);
+        const { error: paymentsError } = await supabase
+          .from("sale_payments")
+          .delete()
+          .eq("sale_id", deleteInfo);
+        if (paymentsError) throw paymentsError;
+        const { error: salesError } = await supabase
+          .from("sales")
+          .delete()
+          .eq("id", deleteInfo);
+        if (salesError) throw salesError;
         toast("Sale deleted");
       }
       fetchSales();
@@ -177,20 +308,68 @@ export default function Sales() {
     }
   }
 
+  function toLocalDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  // Compute effective dateFrom/dateTo based on the dateFilter preset
+  const effectiveDateRange = useMemo(() => {
+    if (customRange) {
+      return { dateFrom, dateTo };
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = toLocalDateStr(today);
+    switch (dateFilter) {
+      case "today":
+        return { dateFrom: todayStr, dateTo: todayStr };
+      case "yesterday": {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return {
+          dateFrom: toLocalDateStr(yesterday),
+          dateTo: toLocalDateStr(yesterday),
+        };
+      }
+      case "week": {
+        const week = new Date(today);
+        week.setDate(week.getDate() - 6);
+        return { dateFrom: toLocalDateStr(week), dateTo: todayStr };
+      }
+      case "month": {
+        const month = new Date(today);
+        month.setMonth(month.getMonth() - 1);
+        return { dateFrom: toLocalDateStr(month), dateTo: todayStr };
+      }
+      default:
+        return { dateFrom: "", dateTo: "" };
+    }
+  }, [dateFilter, customRange, dateFrom, dateTo]);
+
   const filteredSales = useMemo(
     () =>
       sales.filter((s) => {
+        const term = searchTerm.toLowerCase();
         const c = s.customer?.name?.toLowerCase() || "";
         const n = s.notes?.toLowerCase() || "";
+        const f = s.fabric_name?.toLowerCase() || "";
+        const cust = s.customer_name?.toLowerCase() || "";
+        const efFrom = effectiveDateRange.dateFrom;
+        const efTo = effectiveDateRange.dateTo;
         return (
-          (c.includes(searchTerm.toLowerCase()) ||
-            n.includes(searchTerm.toLowerCase())) &&
+          (c.includes(term) ||
+            n.includes(term) ||
+            f.includes(term) ||
+            cust.includes(term)) &&
           (filterType === "all" || s.payment_type === filterType) &&
-          (!dateFrom || s.sale_date >= dateFrom) &&
-          (!dateTo || s.sale_date <= dateTo)
+          (!efFrom || s.sale_date >= efFrom) &&
+          (!efTo || s.sale_date <= efTo)
         );
       }),
-    [sales, searchTerm, filterType, dateFrom, dateTo],
+    [sales, searchTerm, filterType, effectiveDateRange],
   );
 
   const groupedArray = useMemo(() => {
@@ -208,19 +387,105 @@ export default function Sales() {
           margin: 0,
           remaining_amount: 0,
           paid_amount: 0,
+          discount_amount: 0,
+          createdAt: sale.created_at || sale.sale_date,
           firstSaleId: sale.id,
         };
       acc[key].items.push(sale);
       acc[key].total_amount += sale.total_amount;
       acc[key].margin += sale.margin;
-      acc[key].remaining_amount += sale.remaining_amount;
       acc[key].paid_amount += sale.paid_amount;
+      // Sum all discounts from items
+      acc[key].discount_amount += sale.discount_amount || 0;
+      // Keep the latest created_at for the group
+      if (sale.created_at > acc[key].createdAt) {
+        acc[key].createdAt = sale.created_at;
+      }
       return acc;
     }, {});
-    return Object.values(groups).sort(
-      (a, b) => new Date(b.sale_date) - new Date(a.sale_date),
-    );
+
+    // Calculate group-level remaining and derive type from actual payment status
+    Object.values(groups).forEach((group) => {
+      group.remaining_amount = Math.max(
+        group.total_amount - group.discount_amount - group.paid_amount,
+        0,
+      );
+      // Derive payment type from actual payment status
+      const netTotal = group.total_amount - group.discount_amount;
+      if (group.paid_amount <= 0) {
+        group.payment_type = "credit";
+      } else if (group.paid_amount >= netTotal) {
+        group.payment_type = "cash";
+      } else {
+        group.payment_type = "partial";
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => {
+      const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
+      if (dateDiff !== 0) return dateDiff;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
   }, [filteredSales]);
+
+  const handleSaleUpdated = useCallback(async () => {
+    const fresh = await fetchSales();
+    setSelectedGroupForDetails((prev) => {
+      if (!prev) return prev;
+      const key = prev.id;
+      const items = fresh.filter((s) => (s.sale_group_id || s.id) === key);
+      if (items.length === 0) return prev;
+
+      const totalAmount = items.reduce((s, i) => s + i.total_amount, 0);
+      const paidAmount = items.reduce((s, i) => s + i.paid_amount, 0);
+      const discountAmount = items.reduce(
+        (s, i) => s + (i.discount_amount || 0),
+        0,
+      );
+      // Margin is already discount-adjusted by the DB trigger per item
+      const adjustedMargin = items.reduce((s, i) => s + i.margin, 0);
+
+      return {
+        ...prev,
+        customer_id: items[0].customer_id,
+        customer: items[0].customer,
+        sale_date: items[0].sale_date,
+        payment_type: items[0].payment_type,
+        items,
+        total_amount: totalAmount,
+        margin: adjustedMargin,
+        paid_amount: paidAmount,
+        discount_amount: discountAmount,
+        remaining_amount: Math.max(
+          totalAmount - discountAmount - paidAmount,
+          0,
+        ),
+      };
+    });
+  }, []);
+
+  const handleViewPayments = useCallback((group) => {
+    setSelectedSale(group);
+    fetchPayments(group.items.map((i) => i.id));
+  }, []);
+
+  const handleCloseDetails = useCallback(
+    () => setSelectedGroupForDetails(null),
+    [],
+  );
+  const handleOpenNewSale = useCallback(() => {
+    setEditingId(null);
+    setShowForm(true);
+  }, []);
+  const handleCloseSaleForm = useCallback(() => {
+    setShowForm(false);
+    setEditingId(null);
+  }, []);
+  const handleCloseImport = useCallback(() => setShowImport(false), []);
+  const handleClosePaymentForm = useCallback(
+    () => setShowPaymentForm(false),
+    [],
+  );
 
   const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
   const paginated = groupedArray.slice(
@@ -247,16 +512,62 @@ export default function Sales() {
           </p>
         </div>
         <div className="flex gap-2">
+          <div className="relative inline-flex" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker((v) => !v)}
+              className="btn btn-secondary"
+              title="Show/hide columns"
+            >
+              <Columns className="w-4 h-4" />
+            </button>
+            {showColPicker && (
+              <>
+                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
+                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
+                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
+                    {ALL_SALE_COLUMNS.map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
+                        <input
+                          type="checkbox"
+                          checked={visibleCols.has(key)}
+                          onChange={() => toggleCol(key)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setVisibleCols(new Set(SALE_DEFAULT_VISIBLE))}
+                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
           <button
             onClick={() =>
               exportCSV(
                 filteredSales.map((s) => ({
                   date: s.sale_date,
-                  customer: s.customer?.name || "Walk-in",
+                  customer: s.customer?.name || s.customer_name || "Walk-in",
+                  fabric_name: s.fabric_name || "",
                   notes: s.notes,
                   meters: s.meters,
                   price_per_meter: s.price_per_meter,
                   total: s.total_amount,
+                  discount: s.discount_amount || 0,
                   paid: s.paid_amount,
                   remaining: s.remaining_amount,
                   type: s.payment_type,
@@ -268,13 +579,7 @@ export default function Sales() {
           >
             <Download className="w-4 h-4" />
           </button>
-          <button
-            onClick={() => {
-              setEditingId(null);
-              setShowForm(true);
-            }}
-            className="btn btn-primary"
-          >
+          <button onClick={handleOpenNewSale} className="btn btn-primary">
             <Plus className="w-5 h-5 mr-2" /> New Sale
           </button>
         </div>
@@ -282,19 +587,17 @@ export default function Sales() {
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by customer or fabric..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search by customer or fabric..."
+        />
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => {
+            setFilterType(e.target.value);
+            setPage(1);
+          }}
           className="input w-full sm:w-40"
         >
           <option value="all">All Types</option>
@@ -302,44 +605,74 @@ export default function Sales() {
           <option value="credit">Credit</option>
           <option value="partial">Partial</option>
         </select>
-        <div className="flex gap-2 items-center">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className="input w-full sm:w-36"
-          />
-          <span className="text-gray-400">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className="input w-full sm:w-36"
-          />
-        </div>
+        <select
+          value={dateFilter}
+          onChange={(e) => {
+            const val = e.target.value;
+            setDateFilter(val);
+            setCustomRange(val === "custom");
+            setPage(1);
+          }}
+          className="input w-full sm:w-40"
+        >
+          <option value="all">All Dates</option>
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="week">Last 7 Days</option>
+          <option value="month">Last 30 Days</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {customRange && (
+          <div className="flex gap-2 items-center">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setPage(1);
+              }}
+              className="input w-full sm:w-36"
+            />
+            <span className="text-gray-400">-</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setPage(1);
+              }}
+              className="input w-full sm:w-36"
+            />
+          </div>
+        )}
       </div>
 
       <SaleForm
         open={showForm}
-        onClose={() => {
-          setShowForm(false);
-          setEditingId(null);
-        }}
+        onClose={handleCloseSaleForm}
         editingId={editingId}
-        onSaved={() => fetchSales()}
+        onSaved={() => {
+          fetchSales();
+          setPage(1);
+        }}
+        fabrics={fabrics}
+        customers={customers}
+      />
+
+      <SalesImport
+        open={showImport}
+        onClose={handleCloseImport}
+        onImported={() => {
+          fetchAll();
+          setPage(1);
+        }}
         fabrics={fabrics}
         customers={customers}
       />
 
       <SalePaymentModal
         open={showPaymentForm}
-        onClose={() => setShowPaymentForm(false)}
+        onClose={handleClosePaymentForm}
         selectedSale={selectedSale}
         onPaymentSubmit={handlePaymentSubmit}
       />
@@ -385,48 +718,82 @@ export default function Sales() {
                 <span className="text-sm">
                   Total:{" "}
                   <span className="font-semibold">
-                    ₹{selectedSale.total_amount.toLocaleString("en-IN")}
+                    ₹
+                    {selectedSale.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </span>
                 <span className="text-sm">
                   Margin:{" "}
                   <span className="font-semibold text-accent-600">
-                    ₹{selectedSale.margin.toLocaleString("en-IN")}
+                    ₹
+                    {selectedSale.margin.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </span>
               </div>
               <p className="text-sm mt-2">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
-                  ₹{selectedSale.remaining_amount.toLocaleString("en-IN")}
+                  ₹
+                  {selectedSale.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </p>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
-              {payments.map((p) => (
+              {Object.values(
+                payments.reduce((acc, p) => {
+                  const key = `${p.reference_number}|${p.payment_date}|${p.payment_method}`;
+                  if (!acc[key]) acc[key] = { ...p, amount: 0, ids: [] };
+                  acc[key].amount += p.amount;
+                  acc[key].ids.push(p.id);
+                  return acc;
+                }, {})
+              ).sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date))
+              .map((p) => (
                 <div key={p.id} className="bg-gray-50 rounded-lg p-3">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="font-semibold text-gray-900">
-                        ₹{p.amount.toLocaleString("en-IN")}
+                        ₹
+                        {p.amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </p>
                       <p className="text-sm text-gray-500">
-                        {new Date(p.payment_date).toLocaleDateString("en-IN", {
+                        {new Date(p.payment_date).toLocaleDateString("en-GB", {
                           day: "numeric",
                           month: "short",
-                          year: "numeric",
+                          year: "2-digit",
                         })}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <span className="badge bg-gray-200 text-gray-700">
-                        {p.payment_method.toUpperCase()}
-                      </span>
-                      {p.reference_number && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {p.reference_number}
-                        </p>
-                      )}
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <span className="badge bg-gray-200 text-gray-700">
+                          {p.payment_method.toUpperCase()}
+                        </span>
+                        {p.reference_number && !p.reference_number.startsWith("PAY-") && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {p.reference_number}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setConfirmDeletePayment(p.ids)}
+                        className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
+                        title="Delete payment"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -450,38 +817,17 @@ export default function Sales() {
           <table className="w-full" style={{ minWidth: "700px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {[
-                  "Customer",
-                  "Date",
-                  "Items",
-                  "Total Meters",
-                  "Total",
-                  "Paid",
-                  "Margin",
-                  "Remaining",
-                  "Type",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                      [
-                        "Total",
-                        "Paid",
-                        "Margin",
-                        "Remaining",
-                        "Items",
-                        "Total Meters",
-                      ].includes(h)
-                        ? "text-right"
-                        : h === "Type" || h === "Actions"
-                          ? "text-center"
-                          : "text-left"
-                    }`}
-                  >
-                    {h}
-                  </th>
-                ))}
+                {col("customer") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-left">Customer</th>}
+                {col("date")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-left">Date</th>}
+                {col("items")     && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Items</th>}
+                {col("mtrs")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Mtrs</th>}
+                {col("total")     && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Total</th>}
+                {col("paid")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Paid</th>}
+                {col("margin") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Margin</th>}
+                {col("discExtra") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Disc./Extra</th>}
+                {col("remaining") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Remaining</th>}
+                {col("type")      && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-center">Type</th>}
+                {col("actions") && <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -490,101 +836,136 @@ export default function Sales() {
                   key={group.id}
                   className="hover:bg-gray-50 transition-colors"
                 >
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">
-                      {formatCustomerName(group)}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-1 text-gray-600 text-sm">
-                      <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {formatDate(group.sale_date)}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700">
-                      {group.items.length}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-600 text-sm">
-                    {group.items
-                      .reduce((s, i) => s + (parseFloat(i.meters) || 0), 0)
-                      .toFixed(2)}
-                    m
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-sm">
-                    ₹{group.total_amount.toLocaleString("en-IN")}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span className="font-medium">
-                      ₹{group.paid_amount.toLocaleString("en-IN")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span className="text-accent-600 font-medium">
-                      ₹{group.margin.toLocaleString("en-IN")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm">
-                    <span
-                      className={
-                        group.remaining_amount > 0
-                          ? "text-warning-600 font-semibold"
-                          : "text-gray-500"
-                      }
-                    >
-                      ₹{group.remaining_amount.toLocaleString("en-IN")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <PaymentBadge type={group.payment_type} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1">
+                  {col("customer") && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-gray-900">
+                          {formatCustomerName(group)}
+                        </p>
+                        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded bg-gray-200 text-gray-500 text-[10px] font-bold shrink-0">
+                          {group.items
+                            .map((i) => i.fabric_name?.trim().charAt(0) || "")
+                            .filter(Boolean)
+                            .join("")
+                            .toUpperCase()
+                            .slice(0, 4)}
+                        </span>
+                      </div>
+                    </td>
+                  )}
+                  {col("date") && (
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="text-gray-600 text-sm">{formatDate(group.sale_date)}</span>
+                    </td>
+                  )}
+                  {col("items") && (
+                    <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => setSelectedGroupForDetails(group)}
-                        className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
-                        title="View details"
+                        className="inline-flex items-center justify-center min-w-6 px-2 py-1 rounded-full text-xs font-semibold bg-primary-100 text-primary-700 hover:bg-primary-200 hover:text-primary-800 transition-colors cursor-pointer"
+                        title="View items"
                       >
-                        <Eye className="w-4 h-4" />
+                        {group.items.length}
                       </button>
-                      <button
-                        onClick={() => {
-                          setSelectedSale(group);
-                          fetchPayments(group.items.map((i) => i.id));
-                        }}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
-                        title="View payments"
-                      >
-                        <History className="w-4 h-4" />
-                      </button>
-                      {group.remaining_amount > 0 && (
+                    </td>
+                  )}
+                  {col("mtrs") && (
+                    <td className="px-4 py-3 text-right text-gray-600 text-sm">
+                      {group.items.reduce((s, i) => s + (parseFloat(i.meters) || 0), 0).toFixed(1)}m
+                    </td>
+                  )}
+                  {col("total") && (
+                    <td className="px-4 py-3 text-right font-medium text-sm">
+                      ₹{group.total_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  )}
+                  {col("paid") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className="font-medium">
+                        ₹{group.paid_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                  )}
+                  {col("margin") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className="text-accent-600 font-medium">
+                        ₹{group.margin.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                  )}
+                  {col("discExtra") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      {(() => {
+                        const netTotal = group.total_amount - group.discount_amount;
+                        const extraPaid = group.paid_amount - netTotal;
+                        if (extraPaid > 0.005)
+                          return <span className="font-medium text-accent-600">+₹{extraPaid.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+                        if (group.discount_amount > 0)
+                          return <span className="font-medium text-primary-600">-₹{group.discount_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+                        return <span className="text-gray-300">—</span>;
+                      })()}
+                    </td>
+                  )}
+                  {col("remaining") && (
+                    <td className="px-4 py-3 text-right text-sm">
+                      <span className={group.remaining_amount > 0 ? "text-warning-600 font-semibold" : "text-gray-500"}>
+                        ₹{group.remaining_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                  )}
+                  {col("type") && (
+                    <td className="px-4 py-3 text-center">
+                      <PaymentBadge type={group.payment_type} />
+                    </td>
+                  )}
+                  {col("actions") && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setSelectedGroupForDetails(group)}
+                          className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-500 hover:text-blue-600"
+                          title="View details"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => {
                             setSelectedSale(group);
-                            setShowPaymentForm(true);
+                            fetchPayments(group.items.map((i) => i.id));
                           }}
-                          className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
-                          title="Receive payment"
+                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+                          title="View payments"
                         >
-                          <CreditCard className="w-4 h-4" />
+                          <History className="w-4 h-4" />
                         </button>
-                      )}
-                      <button
-                        onClick={() =>
-                          setConfirmDelete({
-                            isGroup: true,
-                            saleIds: group.items.map((i) => i.id),
-                            itemCount: group.items.length,
-                          })
-                        }
-                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
-                        title="Delete sale"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                        {group.remaining_amount > 0 && (
+                          <button
+                            onClick={() => {
+                              setSelectedSale(group);
+                              setShowPaymentForm(true);
+                            }}
+                            className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
+                            title="Receive payment"
+                          >
+                            <CreditCard className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() =>
+                            setConfirmDelete({
+                              isGroup: true,
+                              saleIds: group.items.map((i) => i.id),
+                              itemCount: group.items.length,
+                            })
+                          }
+                          className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
+                          title="Delete sale"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -602,16 +983,21 @@ export default function Sales() {
 
       <SaleDetailsModal
         open={!!selectedGroupForDetails}
-        onClose={() => setSelectedGroupForDetails(null)}
+        onClose={handleCloseDetails}
         group={selectedGroupForDetails}
         fabrics={fabrics}
         customers={customers}
-        onSaleUpdated={() => fetchSales()}
-        onViewPayments={(group) => {
-          setSelectedSale(group);
-          fetchPayments(group.items.map((i) => i.id));
-        }}
+        onSaleUpdated={handleSaleUpdated}
+        onViewPayments={handleViewPayments}
       />
+
+      {confirmDeletePayment && (
+        <ConfirmModal
+          message="This will permanently delete this payment. The sale's paid amount and remaining balance will be recalculated."
+          onConfirm={() => handleDeletePayment(confirmDeletePayment)}
+          onCancel={() => setConfirmDeletePayment(null)}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmModal
@@ -626,13 +1012,12 @@ export default function Sales() {
       )}
 
       {groupedArray.length === 0 && (
-        <div className="text-center py-16">
-          <TrendingUp className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">No sales found</p>
-          <p className="text-gray-300 text-sm mt-1">
-            Try adjusting your filters
-          </p>
-        </div>
+        <EmptyState
+          icon={TrendingUp}
+          title="No sales found"
+          searchTerm={searchTerm}
+          description="Try adjusting your filters"
+        />
       )}
     </div>
   );

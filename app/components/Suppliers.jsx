@@ -1,23 +1,25 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
   Pencil,
   Trash2,
   X,
-  Search,
   Phone,
   MapPin,
   BookOpen,
-  ChevronLeft,
-  ChevronRight,
   DollarSign,
+  Download,
 } from "lucide-react";
 import { validateSupplier, hasErrors } from "../utils/validators";
+import { exportCSV } from "../utils/export";
 import SupplierLedger from "./SupplierLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import Pagination from "./shared/Pagination";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 9;
 
@@ -120,11 +122,11 @@ export default function Suppliers() {
     setShowForm(true);
   }
 
-  const filteredSuppliers = suppliers.filter(
+  const filteredSuppliers = useMemo(() => suppliers.filter(
     (s) =>
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.phone.includes(searchTerm),
-  );
+  ), [suppliers, searchTerm]);
 
   const totalPages = Math.ceil(filteredSuppliers.length / PAGE_SIZE);
   const paginated = filteredSuppliers.slice(
@@ -148,29 +150,42 @@ export default function Suppliers() {
             Manage your wholesalers and vendors
           </p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-            setFormData({ name: "", phone: "", address: "", notes: "" });
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Supplier
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filteredSuppliers.map((s) => ({
+                  name: s.name,
+                  phone: s.phone || "",
+                  address: s.address || "",
+                  notes: s.notes || "",
+                })),
+                `suppliers-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData({ name: "", phone: "", address: "", notes: "" });
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Supplier
+          </button>
+        </div>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search suppliers..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input pl-10"
-        />
-      </div>
+      <SearchInput
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Search suppliers..."
+      />
 
       {showForm && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
@@ -325,29 +340,13 @@ export default function Suppliers() {
         ))}
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filteredSuppliers.length} suppliers — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filteredSuppliers.length}
+        label="suppliers"
+      />
 
       {ledgerSupplier && (
         <SupplierLedger
@@ -365,19 +364,16 @@ export default function Suppliers() {
       )}
 
       {filteredSuppliers.length === 0 && (
-        <div className="text-center py-16">
-          <DollarSign className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm
-              ? "No suppliers found matching your search"
-              : "No suppliers added yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm
+        <EmptyState
+          icon={DollarSign}
+          title="No suppliers added yet"
+          searchTerm={searchTerm}
+          description={
+            searchTerm
               ? "Try a different search term"
-              : "Click Add Supplier to get started"}
-          </p>
-        </div>
+              : "Click Add Supplier to get started"
+          }
+        />
       )}
     </div>
   );

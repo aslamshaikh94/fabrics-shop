@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Search,
@@ -40,10 +40,63 @@ export default function Payments() {
   const [editForm, setEditForm] = useState({});
 
   useEffect(() => {
-    fetchPayments();
-    fetchSupplierSummary();
-    fetchCustomerSummary();
+    fetchAll();
   }, []);
+
+  async function fetchAll() {
+    try {
+      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, purchasesRes] =
+        await Promise.all([
+          supabase.from("purchase_payments").select("*, purchase_id").order("payment_date", { ascending: false }),
+          supabase.from("sale_payments").select("*, sale_id").order("payment_date", { ascending: false }),
+          supabase.from("suppliers").select("id, name"),
+          supabase.from("customers").select("id, name"),
+          supabase.from("sales").select("id, customer_id, customer_name, total_amount, paid_amount, remaining_amount"),
+          supabase.from("purchases").select("id, supplier_id, total_amount, paid_amount, remaining_amount"),
+        ]);
+
+      const supplierMap = Object.fromEntries((suppliersRes.data || []).map((s) => [s.id, s.name]));
+      const customerMap = Object.fromEntries((customersRes.data || []).map((c) => [c.id, c.name]));
+      const purchaseSupplierMap = Object.fromEntries((purchasesRes.data || []).map((p) => [p.id, p.supplier_id]));
+      const saleInfoMap = Object.fromEntries((salesRes.data || []).map((s) => [s.id, { customer_id: s.customer_id, customer_name: s.customer_name }]));
+
+      setPurchasePayments((purchaseRes.data || []).map((p) => ({
+        ...p,
+        purchase: { suppliers: { name: supplierMap[purchaseSupplierMap[p.purchase_id]] || "Unknown" } },
+      })));
+      setSalePayments((saleRes.data || []).map((s) => {
+        const info = saleInfoMap[s.sale_id] || {};
+        const name = info.customer_name || (info.customer_id ? customerMap[info.customer_id] : null) || "Walk-in";
+        return { ...s, sale: { customers: { name } } };
+      }));
+
+      // Supplier summary
+      const supMap = {};
+      (purchasesRes.data || []).forEach((p) => {
+        const name = supplierMap[p.supplier_id] || "Unknown";
+        if (!supMap[name]) supMap[name] = { name, total: 0, paid: 0, pending: 0 };
+        supMap[name].total += p.total_amount || 0;
+        supMap[name].paid += p.paid_amount || 0;
+        supMap[name].pending += Math.max((p.total_amount || 0) - (p.paid_amount || 0), 0);
+      });
+      setSupplierSummary(Object.values(supMap).sort((a, b) => b.pending - a.pending));
+
+      // Customer summary
+      const custMap = {};
+      (salesRes.data || []).forEach((s) => {
+        const name = s.customer_name || (s.customer_id ? customerMap[s.customer_id] : null) || "Walk-in";
+        if (!custMap[name]) custMap[name] = { name, total: 0, paid: 0, pending: 0 };
+        custMap[name].total += s.total_amount || 0;
+        custMap[name].paid += s.paid_amount || 0;
+        custMap[name].pending += Math.max((s.total_amount || 0) - (s.paid_amount || 0), 0);
+      });
+      setCustomerSummary(Object.values(custMap).sort((a, b) => b.pending - a.pending));
+    } catch (error) {
+      console.error("Error fetching payments:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     setPage(1);
@@ -56,49 +109,29 @@ export default function Payments() {
   ]);
 
   async function handleEditPayment(e) {
-    e.preventDefault();
     try {
-      const table =
-        editingPayment.type === "received"
-          ? "sale_payments"
-          : "purchase_payments";
-      const { error } = await supabase
-        .from(table)
-        .update({
-          amount: parseFloat(editForm.amount),
-          payment_date: editForm.payment_date,
-          payment_method: editForm.payment_method,
-          reference_number: editForm.reference_number,
-          notes: editForm.notes,
-        })
-        .eq("id", editingPayment.id);
-      if (error) throw error;
-      setEditingPayment(null);
-      fetchPayments();
-      fetchSupplierSummary();
-      fetchCustomerSummary();
-      toast("Payment updated");
-    } catch (err) {
-      console.error("Error updating payment:", err);
-      toast("Failed to update payment", "error");
-    }
-  }
+      const [salesRes, customersRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("customer_id, total_amount, paid_amount, remaining_amount"),
+        supabase.from("customers").select("id, name"),
+      ]);
 
-  async function fetchCustomerSummary() {
-    try {
-      const { data } = await supabase
-        .from("sales")
-        .select(
-          "customer:customers(name), total_amount, paid_amount, remaining_amount",
-        );
-      if (!data) return;
+      const customerNames = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c.name]),
+      );
+
+      const data = salesRes.data || [];
       const map = {};
       data.forEach((s) => {
-        const name = s.customer?.name || "Walk-in";
+        const name = customerNames[s.customer_id] || "Walk-in";
         if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
         map[name].total += s.total_amount || 0;
         map[name].paid += s.paid_amount || 0;
-        map[name].pending += s.remaining_amount || 0;
+        map[name].pending += Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        );
       });
       setCustomerSummary(
         Object.values(map).sort((a, b) => b.pending - a.pending),
@@ -110,19 +143,28 @@ export default function Payments() {
 
   async function fetchSupplierSummary() {
     try {
-      const { data } = await supabase
-        .from("purchases")
-        .select(
-          "supplier:suppliers(name), total_amount, paid_amount, remaining_amount",
-        );
-      if (!data) return;
+      const [purchasesRes, suppliersRes] = await Promise.all([
+        supabase
+          .from("purchases")
+          .select("supplier_id, total_amount, paid_amount, remaining_amount"),
+        supabase.from("suppliers").select("id, name"),
+      ]);
+
+      const supplierNames = Object.fromEntries(
+        (suppliersRes.data || []).map((s) => [s.id, s.name]),
+      );
+
+      const data = purchasesRes.data || [];
       const map = {};
       data.forEach((p) => {
-        const name = p.supplier?.name || "Unknown";
+        const name = supplierNames[p.supplier_id] || "Unknown";
         if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
         map[name].total += p.total_amount || 0;
         map[name].paid += p.paid_amount || 0;
-        map[name].pending += p.remaining_amount || 0;
+        map[name].pending += Math.max(
+          (p.total_amount || 0) - (p.paid_amount || 0),
+          0,
+        );
       });
       setSupplierSummary(
         Object.values(map).sort((a, b) => b.pending - a.pending),
@@ -134,18 +176,89 @@ export default function Payments() {
 
   async function fetchPayments() {
     try {
-      const [purchaseRes, saleRes] = await Promise.all([
-        supabase
-          .from("purchase_payments")
-          .select("*, purchase:purchases(supplier_id, suppliers(name))")
-          .order("payment_date", { ascending: false }),
-        supabase
-          .from("sale_payments")
-          .select("*, sale:sales(customer_id, customers(name))")
-          .order("payment_date", { ascending: false }),
-      ]);
-      setPurchasePayments(purchaseRes.data || []);
-      setSalePayments(saleRes.data || []);
+      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes] =
+        await Promise.all([
+          supabase
+            .from("purchase_payments")
+            .select("*, purchase_id")
+            .order("payment_date", { ascending: false }),
+          supabase
+            .from("sale_payments")
+            .select("*, sale_id")
+            .order("payment_date", { ascending: false }),
+          supabase.from("purchases").select("id, supplier_id"),
+          supabase.from("customers").select("id, name"),
+          supabase.from("sales").select("id, customer_id, customer_name"),
+        ]);
+
+      const purchasePaymentsData = purchaseRes.data || [];
+      const salePaymentsData = saleRes.data || [];
+      const purchases = (suppliersRes.data || []).reduce((map, p) => {
+        map[p.id] = p.supplier_id;
+        return map;
+      }, {});
+      const sales = (salesRes.data || []).reduce((map, s) => {
+        map[s.id] = {
+          customer_id: s.customer_id,
+          customer_name: s.customer_name,
+        };
+        return map;
+      }, {});
+
+      // Build customer name lookup from the customers table
+      const customerNames = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c.name]),
+      );
+
+      // Get all unique supplier IDs
+      const supplierIds = [
+        ...new Set(
+          purchasePaymentsData
+            .map((p) => purchases[p.purchase_id])
+            .filter(Boolean),
+        ),
+      ];
+
+      // Fetch supplier names
+      const supplierNamesRes =
+        supplierIds.length > 0
+          ? await supabase
+              .from("suppliers")
+              .select("id, name")
+              .in("id", supplierIds)
+          : { data: [] };
+
+      const supplierNames = Object.fromEntries(
+        (supplierNamesRes.data || []).map((s) => [s.id, s.name]),
+      );
+
+      // Attach resolved names to payment records
+      const enrichedPurchasePayments = purchasePaymentsData.map((p) => ({
+        ...p,
+        purchase: {
+          suppliers: {
+            name: supplierNames[purchases[p.purchase_id]] || "Unknown",
+          },
+        },
+      }));
+      const enrichedSalePayments = salePaymentsData.map((s) => {
+        const saleInfo = sales[s.sale_id] || {};
+        // First try customer_name from the sale record itself (for walk-in sales with custom names)
+        const name = saleInfo.customer_name
+          ? saleInfo.customer_name
+          : saleInfo.customer_id
+            ? customerNames[saleInfo.customer_id] || "Walk-in"
+            : "Walk-in";
+        return {
+          ...s,
+          sale: {
+            customers: { name },
+          },
+        };
+      });
+
+      setPurchasePayments(enrichedPurchasePayments);
+      setSalePayments(enrichedSalePayments);
     } catch (error) {
       console.error("Error fetching payments:", error);
     } finally {
@@ -323,11 +436,19 @@ export default function Payments() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
-                        ₹{s.total.toLocaleString("en-IN")}
+                        ₹
+                        {s.total.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
                         <span className="font-semibold text-accent-600">
-                          ₹{s.paid.toLocaleString("en-IN")}
+                          ₹
+                          {s.paid.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
@@ -338,7 +459,11 @@ export default function Payments() {
                               : "text-gray-400"
                           }
                         >
-                          ₹{s.pending.toLocaleString("en-IN")}
+                          ₹
+                          {s.pending.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -378,19 +503,28 @@ export default function Payments() {
                       ₹
                       {supplierSummary
                         .reduce((s, r) => s + r.total, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
                       ₹
                       {supplierSummary
                         .reduce((s, r) => s + r.paid, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
                       ₹
                       {supplierSummary
                         .reduce((s, r) => s + r.pending, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                   </tr>
                 </tfoot>
@@ -454,10 +588,18 @@ export default function Payments() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
-                      ₹{c.total.toLocaleString("en-IN")}
+                      ₹
+                      {c.total.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-accent-600">
-                      ₹{c.paid.toLocaleString("en-IN")}
+                      ₹
+                      {c.paid.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm">
                       <span
@@ -467,7 +609,11 @@ export default function Payments() {
                             : "text-gray-400"
                         }
                       >
-                        ₹{c.pending.toLocaleString("en-IN")}
+                        ₹
+                        {c.pending.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     </td>
                   </tr>
@@ -483,19 +629,28 @@ export default function Payments() {
                       ₹
                       {customerSummary
                         .reduce((s, r) => s + r.total, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
                       ₹
                       {customerSummary
                         .reduce((s, r) => s + r.paid, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
                       ₹
                       {customerSummary
                         .reduce((s, r) => s + r.pending, 0)
-                        .toLocaleString("en-IN")}
+                        .toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                     </td>
                   </tr>
                 </tfoot>
@@ -518,7 +673,11 @@ export default function Payments() {
                 <div>
                   <p className="text-sm text-gray-500">Payments Made</p>
                   <p className="text-2xl font-bold text-red-600 mt-1">
-                    ₹{totalPaid.toLocaleString("en-IN")}
+                    ₹
+                    {totalPaid.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
                 <div className="bg-red-100 p-3 rounded-lg">
@@ -531,7 +690,11 @@ export default function Payments() {
                 <div>
                   <p className="text-sm text-gray-500">Payments Received</p>
                   <p className="text-2xl font-bold text-accent-600 mt-1">
-                    ₹{totalReceived.toLocaleString("en-IN")}
+                    ₹
+                    {totalReceived.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
                 <div className="bg-accent-100 p-3 rounded-lg">
@@ -546,7 +709,11 @@ export default function Payments() {
                   <p
                     className={`text-2xl font-bold mt-1 ${netFlow >= 0 ? "text-accent-600" : "text-red-600"}`}
                   >
-                    ₹{netFlow.toLocaleString("en-IN")}
+                    ₹
+                    {netFlow.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
                 <div
@@ -639,11 +806,11 @@ export default function Payments() {
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5" />
                             {new Date(payment.date).toLocaleDateString(
-                              "en-IN",
+                              "en-GB",
                               {
                                 day: "numeric",
                                 month: "short",
-                                year: "numeric",
+                                year: "2-digit",
                               },
                             )}
                           </span>
@@ -663,7 +830,10 @@ export default function Payments() {
                         className={`text-lg font-bold ${payment.type === "received" ? "text-accent-600" : "text-red-600"}`}
                       >
                         {payment.type === "received" ? "+" : "-"}₹
-                        {payment.amount.toLocaleString("en-IN")}
+                        {payment.amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </p>
                     </div>
                   </div>

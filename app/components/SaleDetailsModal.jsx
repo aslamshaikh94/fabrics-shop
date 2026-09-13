@@ -10,12 +10,15 @@ import {
   Save,
   XCircle,
   History,
+  Trash2,
 } from "lucide-react";
 import Modal from "./shared/Modal";
+import ConfirmModal from "./ConfirmModal";
 import FabricSelect from "./shared/FabricSelect";
 import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
+import { formatCustomerName } from "../utils/formatters";
 
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
@@ -51,6 +54,7 @@ const EMPTY_GROUP_FIELDS = {
   sale_date: "",
   payment_type: "cash",
   initial_payment: "",
+  discount_amount: "",
   invoice_file: null,
 };
 
@@ -74,7 +78,7 @@ export default function SaleDetailsModal({
     ...EMPTY_GROUP_FIELDS,
   });
   const [savingGroupFields, setSavingGroupFields] = useState(false);
-  const [customerTab, setCustomerTab] = useState("existing");
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
 
   if (!open || !group) return null;
 
@@ -89,15 +93,26 @@ export default function SaleDetailsModal({
     }
     setSavingEditItem(true);
     try {
+      const item = group.items.find((i) => i.id === itemId);
+      const m = parseFloat(editItemForm.meters) || 0;
+      const ppm = parseFloat(editItemForm.price_per_meter) || 0;
+      const cpm = parseFloat(editItemForm.cost_price_per_meter) || 0;
+      const discount = parseFloat(item?.discount_amount) || 0;
+      const newTotal = Math.round(m * ppm * 100) / 100;
+      const newMargin = Math.max(Math.round((m * (ppm - cpm) - discount) * 100) / 100, 0);
+      const newRemaining = Math.max(Math.round((newTotal - discount - (parseFloat(item?.paid_amount) || 0)) * 100) / 100, 0);
       await supabase
         .from("sales")
         .update({
           fabric_id: editItemForm.fabric_id || null,
-          meters: parseFloat(editItemForm.meters) || 0,
-          price_per_meter: parseFloat(editItemForm.price_per_meter) || 0,
-          cost_price_per_meter:
-            parseFloat(editItemForm.cost_price_per_meter) || 0,
+          meters: m,
+          price_per_meter: ppm,
+          cost_price_per_meter: cpm,
+          fabric_name: editItemForm.fabric_name,
           notes: `Fabric: ${editItemForm.fabric_name}`,
+          total_amount: newTotal,
+          margin: newMargin,
+          remaining_amount: newRemaining,
         })
         .eq("id", itemId);
       setEditingItemId(null);
@@ -127,47 +142,98 @@ export default function SaleDetailsModal({
         } = supabase.storage.from("sales-invoices").getPublicUrl(path);
         invoice_url = publicUrl;
       }
-      for (const saleId of saleIds) {
+      const discountAmount = parseFloat(editGroupFields.discount_amount) || 0;
+      const walkinName =
+        !editGroupFields.customer_id &&
+        editGroupFields.customer_name &&
+        editGroupFields.customer_name !== "Walk-in Customer"
+          ? editGroupFields.customer_name
+          : null;
+
+      // Auto-derive payment_type from initial_payment
+      const initialPay = parseFloat(editGroupFields.initial_payment) || 0;
+      const totalNet =
+        group.items.reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0) -
+        discountAmount;
+      const derivedPaymentType =
+        initialPay <= 0
+          ? "credit"
+          : initialPay >= totalNet
+            ? "cash"
+            : "partial";
+      editGroupFields.payment_type = derivedPaymentType;
+
+      // Apply discount ONLY to first item (stores group-level discount)
+      for (let idx = 0; idx < saleIds.length; idx++) {
+        const saleId = saleIds[idx];
+        const item = group.items[idx];
+        if (!item) continue;
+
+        const m = parseFloat(item.meters) || 0;
+        const ppm = parseFloat(item.price_per_meter) || 0;
+        const cpm = parseFloat(item.cost_price_per_meter) || 0;
+        const preDiscountTotal = Math.round(m * ppm * 100) / 100;
+
+        // Store discount only in first item, don't subtract from item remaining
+        const itemDiscount = idx === 0 ? discountAmount : 0;
+
+        let updatedNotes = item?.notes || "";
+        if (walkinName) {
+          // Replace or append walk-in name to notes
+          if (updatedNotes.match(/\(Name:[^)]+\)/)) {
+            updatedNotes = updatedNotes.replace(
+              /\(Name:[^)]+\)/,
+              `(Name: ${walkinName})`,
+            );
+          } else {
+            updatedNotes = updatedNotes
+              ? `${updatedNotes} (Name: ${walkinName})`
+              : `(Name: ${walkinName})`;
+          }
+        } else if (!editGroupFields.customer_id) {
+          // Remove walk-in name from notes if it was cleared
+          updatedNotes = updatedNotes.replace(/\s*\(Name:[^)]+\)/g, "");
+        }
+
         await supabase
           .from("sales")
           .update({
             customer_id: editGroupFields.customer_id || null,
+            customer_name: !editGroupFields.customer_id
+              ? editGroupFields.customer_name !== "Walk-in Customer"
+                ? editGroupFields.customer_name
+                : ""
+              : "",
             sale_date: editGroupFields.sale_date,
             payment_type: editGroupFields.payment_type,
             invoice_url,
+            discount_amount: itemDiscount,
+            total_amount: preDiscountTotal,
+            margin: Math.max(Math.round(m * (ppm - cpm) * 100) / 100, 0),
+            remaining_amount: Math.max(
+              preDiscountTotal - (parseFloat(item.paid_amount) || 0),
+              0,
+            ),
+            notes: updatedNotes,
           })
           .eq("id", saleId);
       }
       for (const item of group.items) {
         await supabase.from("sale_payments").delete().eq("sale_id", item.id);
       }
-      if (editGroupFields.payment_type === "cash") {
-        for (const item of group.items) {
-          await supabase.from("sale_payments").insert([
-            {
-              sale_id: item.id,
-              amount: item.meters * item.price_per_meter,
-              payment_date: editGroupFields.sale_date,
-              payment_method: "cash",
-            },
-          ]);
-        }
-      } else if (editGroupFields.payment_type === "partial") {
-        let remaining = parseFloat(editGroupFields.initial_payment) || 0;
-        for (const item of group.items) {
-          if (remaining <= 0) break;
-          const pay = Math.min(remaining, item.meters * item.price_per_meter);
-          if (pay > 0) {
-            await supabase.from("sale_payments").insert([
-              {
-                sale_id: item.id,
-                amount: pay,
-                payment_date: editGroupFields.sale_date,
-                payment_method: "cash",
-              },
-            ]);
-            remaining -= pay;
-          }
+      const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
+      if (totalPay > 0) {
+        const groupSubtotal = group.items.reduce((s, i) => s + (parseFloat(i.meters) || 0) * (parseFloat(i.price_per_meter) || 0), 0);
+        const paymentInserts = group.items.map((item) => ({
+          sale_id: item.id,
+          amount: Math.round(((parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0) / groupSubtotal) * totalPay * 100) / 100,
+          payment_date: editGroupFields.sale_date,
+          payment_method: "cash",
+        }));
+        const sumSoFar = paymentInserts.slice(0, -1).reduce((s, p) => s + p.amount, 0);
+        paymentInserts[paymentInserts.length - 1].amount = Math.round((totalPay - sumSoFar) * 100) / 100;
+        for (const p of paymentInserts) {
+          await supabase.from("sale_payments").insert([p]);
         }
       }
       onSaleUpdated();
@@ -178,6 +244,20 @@ export default function SaleDetailsModal({
       toast("Failed to update sale info", "error");
     } finally {
       setSavingGroupFields(false);
+    }
+  }
+
+  async function handleDeleteItem(itemId) {
+    try {
+      await supabase.from("sale_payments").delete().eq("sale_id", itemId);
+      const { error } = await supabase.from("sales").delete().eq("id", itemId);
+      if (error) throw error;
+      toast("Item deleted");
+      setConfirmDeleteItem(null);
+      onSaleUpdated();
+    } catch (err) {
+      toast("Failed to delete item", "error");
+      setConfirmDeleteItem(null);
     }
   }
 
@@ -203,6 +283,7 @@ export default function SaleDetailsModal({
           sale_date: group.sale_date,
           payment_type: group.payment_type,
           sale_group_id: group.id,
+          fabric_name: newItemForm.fabric_name,
           notes: `Fabric: ${newItemForm.fabric_name}`,
         },
       ]);
@@ -217,12 +298,9 @@ export default function SaleDetailsModal({
 
   const setEditForView = () => {
     // Extract walk-in name from notes if no customer_id
-    const walkInName =
-      !group.customer_id && group.items[0]?.notes
-        ? group.items[0].notes.match(/Name:\s*([^)]+)/)?.[1]?.trim() || ""
-        : "";
-    const isWalkin = !group.customer_id;
-    setCustomerTab(isWalkin ? "walkin" : "existing");
+    const walkInName = !group.customer_id
+      ? group.items[0]?.customer_name || ""
+      : "";
     setEditGroupFields({
       customer_id: group.customer_id || "",
       customer_name:
@@ -232,9 +310,8 @@ export default function SaleDetailsModal({
       sale_date: group.sale_date,
       payment_type: group.payment_type,
       initial_payment:
-        group.payment_type === "partial"
-          ? group.paid_amount?.toString() || ""
-          : "",
+        group.paid_amount > 0 ? group.paid_amount.toString() : "",
+      discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
     setShowEditSaleInfo(true);
@@ -249,11 +326,11 @@ export default function SaleDetailsModal({
               Sale Items
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {group.customer?.name || "Walk-in"} •{" "}
-              {new Date(group.sale_date).toLocaleDateString("en-IN", {
+              {formatCustomerName(group)} •{" "}
+              {new Date(group.sale_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
-                year: "numeric",
+                year: "2-digit",
               })}
             </p>
           </div>
@@ -283,7 +360,7 @@ export default function SaleDetailsModal({
               Customer
             </p>
             <p className="font-semibold text-gray-900">
-              {group.customer?.name || "Walk-in Customer"}
+              {formatCustomerName(group)}
             </p>
             {group.customer?.phone && (
               <p className="text-xs text-gray-500 mt-0.5">
@@ -302,7 +379,11 @@ export default function SaleDetailsModal({
               <span>
                 Total:{" "}
                 <span className="font-semibold">
-                  ₹{group.total_amount.toLocaleString("en-IN")}
+                  ₹
+                  {group.total_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </span>
               <span>
@@ -310,7 +391,11 @@ export default function SaleDetailsModal({
                 <span
                   className={`font-semibold ${group.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
                 >
-                  ₹{group.remaining_amount.toLocaleString("en-IN")}
+                  ₹
+                  {group.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </span>
             </div>
@@ -321,10 +406,10 @@ export default function SaleDetailsModal({
             </p>
             <p className="text-sm text-gray-900">
               <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5 text-gray-400" />
-              {new Date(group.sale_date).toLocaleDateString("en-IN", {
+              {new Date(group.sale_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
-                year: "numeric",
+                year: "2-digit",
               })}
             </p>
             {group.items[0]?.invoice_url ? (
@@ -366,160 +451,178 @@ export default function SaleDetailsModal({
             </button>
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {group.items.map((item, idx) => (
-              <div
-                key={item.id}
-                className="border border-gray-200 rounded-lg p-4 hover:shadow-sm bg-white"
-              >
-                {editingItemId === item.id ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-gray-500 uppercase font-bold">
-                        Editing Item {idx + 1}
-                      </p>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => setEditingItemId(null)}
-                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-600"
-                        >
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleEditItemSave(item.id)}
-                          disabled={savingEditItem}
-                          className="p-1.5 hover:bg-green-50 rounded-lg text-gray-400 hover:text-green-600"
-                        >
-                          <Save className="w-4 h-4" />
-                        </button>
+            {group.items.map((item, idx) => {
+              const m = parseFloat(item.meters) || 0;
+              const ppm = parseFloat(item.price_per_meter) || 0;
+              const cpm = parseFloat(item.cost_price_per_meter) || 0;
+              const computedTotal = m * ppm;
+              const computedMargin = Math.max(m * (ppm - cpm), 0);
+              return (
+                <div
+                  key={item.id}
+                  className="border border-gray-200 rounded-lg p-4 hover:shadow-sm bg-white"
+                >
+                  {editingItemId === item.id ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs text-gray-500 uppercase font-bold">
+                          Editing Item {idx + 1}
+                        </p>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setEditingItemId(null)}
+                            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-600"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEditItemSave(item.id)}
+                            disabled={savingEditItem}
+                            className="p-1.5 hover:bg-green-50 rounded-lg text-gray-400 hover:text-green-600"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <FabricSelect
+                        value={editItemForm}
+                        onChange={setEditItemForm}
+                        fabrics={fabrics}
+                        required
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Meters *
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editItemForm.meters}
+                            onChange={(e) =>
+                              setEditItemForm({
+                                ...editItemForm,
+                                meters: e.target.value,
+                              })
+                            }
+                            className="input"
+                            required
+                            onWheel={(e) => e.target.blur()}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-900 mb-1">
+                            Price ₹/m *
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editItemForm.price_per_meter}
+                            onChange={(e) =>
+                              setEditItemForm({
+                                ...editItemForm,
+                                price_per_meter: e.target.value,
+                              })
+                            }
+                            className="input"
+                            required
+                            onWheel={(e) => e.target.blur()}
+                          />
+                        </div>
                       </div>
                     </div>
-                    <FabricSelect
-                      value={editItemForm}
-                      onChange={setEditItemForm}
-                      fabrics={fabrics}
-                      required
-                    />
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Meters *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editItemForm.meters}
-                          onChange={(e) =>
-                            setEditItemForm({
-                              ...editItemForm,
-                              meters: e.target.value,
-                            })
-                          }
-                          className="input"
-                          required
-                          onWheel={(e) => e.target.blur()}
-                        />
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
+                            Item {idx + 1}
+                          </p>
+                          <p className="font-semibold text-gray-900">
+                            {item.fabric_name || "N/A"}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => {
+                              const n = item.fabric_name || "";
+                              setEditItemForm({
+                                fabric_id: item.fabric_id || "",
+                                fabric_name: n,
+                                meters: item.meters.toString(),
+                                price_per_meter:
+                                  item.price_per_meter.toString(),
+                                cost_price_per_meter:
+                                  item.cost_price_per_meter.toString(),
+                              });
+                              setEditingItemId(item.id);
+                            }}
+                            className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          {group.items.length > 1 && (
+                            <button
+                              onClick={() => setConfirmDeleteItem(item.id)}
+                              className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
+                              title="Delete item"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Price ₹/m *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editItemForm.price_per_meter}
-                          onChange={(e) =>
-                            setEditItemForm({
-                              ...editItemForm,
-                              price_per_meter: e.target.value,
-                            })
-                          }
-                          className="input"
-                          required
-                          onWheel={(e) => e.target.blur()}
-                        />
+                      <div className="grid grid-cols-5 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Meters</p>
+                          <p className="font-semibold">{item.meters}m</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Buy/M</p>
+                          <p className="font-semibold">
+                            ₹
+                            {item.cost_price_per_meter.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Price/M</p>
+                          <p className="font-semibold">
+                            ₹
+                            {item.price_per_meter.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Total</p>
+                          <p className="font-semibold">
+                            ₹
+                            {computedTotal.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Margin</p>
+                          <p className="font-semibold text-accent-600">
+                            ₹
+                            {computedMargin.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-900 mb-1">
-                          Cost ₹/m
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editItemForm.cost_price_per_meter}
-                          onChange={(e) =>
-                            setEditItemForm({
-                              ...editItemForm,
-                              cost_price_per_meter: e.target.value,
-                            })
-                          }
-                          className="input"
-                          onWheel={(e) => e.target.blur()}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">
-                          Item {idx + 1}
-                        </p>
-                        <p className="font-semibold text-gray-900">
-                          {item.notes
-                            ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
-                            ?.trim() || "N/A"}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const n =
-                            item.notes
-                              ?.match(/Fabric:\s*([^(|\n]+)/)?.[1]
-                              ?.trim() || "";
-                          setEditItemForm({
-                            fabric_id: item.fabric_id || "",
-                            fabric_name: n,
-                            meters: item.meters.toString(),
-                            price_per_meter: item.price_per_meter.toString(),
-                            cost_price_per_meter:
-                              item.cost_price_per_meter.toString(),
-                          });
-                          setEditingItemId(item.id);
-                        }}
-                        className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3 text-sm">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Meters</p>
-                        <p className="font-semibold">{item.meters}m</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Price/M</p>
-                        <p className="font-semibold">
-                          ₹{item.price_per_meter.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Total</p>
-                        <p className="font-semibold">
-                          ₹{item.total_amount.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Margin</p>
-                        <p className="font-semibold text-accent-600">
-                          ₹{item.margin.toLocaleString("en-IN")}
-                        </p>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -541,7 +644,11 @@ export default function SaleDetailsModal({
                 Total Amount
               </p>
               <p className="text-xl font-bold">
-                ₹{group.total_amount.toLocaleString("en-IN")}
+                ₹
+                {group.total_amount.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
             <div>
@@ -549,7 +656,11 @@ export default function SaleDetailsModal({
                 Total Margin
               </p>
               <p className="text-xl font-bold text-accent-600">
-                ₹{group.margin.toLocaleString("en-IN")}
+                ₹
+                {group.items.reduce((s, i) => s + Math.max((parseFloat(i.meters) || 0) * ((parseFloat(i.price_per_meter) || 0) - (parseFloat(i.cost_price_per_meter) || 0)), 0), 0).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
             <div>
@@ -559,7 +670,11 @@ export default function SaleDetailsModal({
               <p
                 className={`text-xl font-bold ${group.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
               >
-                ₹{group.remaining_amount.toLocaleString("en-IN")}
+                ₹
+                {group.remaining_amount.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
           </div>
@@ -589,64 +704,81 @@ export default function SaleDetailsModal({
             value={editGroupFields}
             onChange={setEditGroupFields}
             customers={customers}
-            customerTab={customerTab}
           />
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Payment
             </span>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Payment Type
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  ["cash", "Full Cash"],
-                  ["partial", "Partial"],
-                  ["credit", "Full Credit"],
-                ].map(([v, l]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() =>
-                      setEditGroupFields({
-                        ...editGroupFields,
-                        payment_type: v,
-                        initial_payment:
-                          v === "partial"
-                            ? editGroupFields.initial_payment
-                            : "",
-                      })
-                    }
-                    className={`py-2 rounded-xl text-sm font-medium border transition-all ${editGroupFields.payment_type === v ? "bg-primary-600 text-white border-primary-600" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
-                  >
-                    {l}
-                  </button>
-                ))}
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800 space-y-1">
+              <div className="flex justify-between">
+                <span>Total Sale Amount</span>
+                <span className="font-semibold">
+                  ₹
+                  {group.total_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between text-green-700">
+                <span>Already Paid (recorded)</span>
+                <span className="font-semibold">
+                  ₹
+                  {group.paid_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-blue-200 pt-1 text-warning-700">
+                <span>Outstanding</span>
+                <span className="font-semibold">
+                  ₹
+                  {group.remaining_amount.toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
             </div>
-            {editGroupFields.payment_type === "partial" && (
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Initial Payment
+                  Total Payment Amount
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   value={editGroupFields.initial_payment}
                   onChange={(e) =>
-                    setEditGroupFields({
-                      ...editGroupFields,
-                      initial_payment: e.target.value,
-                    })
+                    setEditGroupFields({ ...editGroupFields, initial_payment: e.target.value })
                   }
                   className="input bg-white"
-                  placeholder="Amount received now"
+                  placeholder="0 for credit"
                   onWheel={(e) => e.target.blur()}
                 />
               </div>
-            )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Discount (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editGroupFields.discount_amount}
+                  onChange={(e) =>
+                    setEditGroupFields({ ...editGroupFields, discount_amount: e.target.value })
+                  }
+                  className="input bg-white"
+                  placeholder="0"
+                  onWheel={(e) => e.target.blur()}
+                />
+              </div>
+            </div>
+
           </div>
+
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Details & Documents
@@ -689,7 +821,33 @@ export default function SaleDetailsModal({
               disabled={savingGroupFields}
               className="btn btn-primary flex-1"
             >
-              {savingGroupFields ? "Saving..." : "Save Changes"}
+              {savingGroupFields ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
             </button>
           </div>
         </div>
@@ -712,10 +870,10 @@ export default function SaleDetailsModal({
             </span>{" "}
             on{" "}
             <span className="font-semibold">
-              {new Date(group.sale_date).toLocaleDateString("en-IN", {
+              {new Date(group.sale_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
-                year: "numeric",
+                year: "2-digit",
               })}
             </span>
           </p>
@@ -764,24 +922,6 @@ export default function SaleDetailsModal({
               />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Cost/Meter ₹
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={newItemForm.cost_price_per_meter}
-              onChange={(e) =>
-                setNewItemForm({
-                  ...newItemForm,
-                  cost_price_per_meter: e.target.value,
-                })
-              }
-              className="input bg-white"
-              onWheel={(e) => e.target.blur()}
-            />
-          </div>
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -799,6 +939,13 @@ export default function SaleDetailsModal({
           </div>
         </form>
       </Modal>
+      {confirmDeleteItem && (
+        <ConfirmModal
+          message="This will permanently delete this item and its payments."
+          onConfirm={() => handleDeleteItem(confirmDeleteItem)}
+          onCancel={() => setConfirmDeleteItem(null)}
+        />
+      )}
     </>
   );
 }

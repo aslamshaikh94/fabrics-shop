@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
   TrendingUp,
@@ -7,46 +7,89 @@ import {
   Package,
   DollarSign,
   Users,
-  TriangleAlert as AlertTriangle,
-  CircleAlert as AlertCircle,
-  ShoppingBag,
   CreditCard,
   Receipt,
 } from "lucide-react";
+import { useShowAmount } from "./ShowAmountProvider";
 
 function pctChange(curr, prev) {
   if (!prev) return null;
   const diff = ((curr - prev) / prev) * 100;
-  return { value: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`, up: diff >= 0 };
+  return {
+    value: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`,
+    up: diff >= 0,
+    good: diff >= 0,
+  };
 }
 
+function fmtAmt(n, show) {
+  if (!show) return "₹•••";
+  return `₹${Number(n || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 export default function Dashboard() {
+  const { showAmount } = useShowAmount();
   const [stats, setStats] = useState({
     thisMonthSales: 0,
     thisMonthProfit: 0,
+    thisMonthCollected: 0,
+    thisMonthToCollect: 0,
     pendingPurchasePayments: 0,
     paidPurchasePayments: 0,
     pendingSalePayments: 0,
     totalFabrics: 0,
+    totalFabricMeters: 0,
+    totalFabricQuantity: 0,
     totalCustomers: 0,
     totalPurchases: 0,
     collectedAmount: 0,
+    reinvestedAmount: 0,
+    freshAmount: 0,
     inventoryValue: 0,
   });
   const [changes, setChanges] = useState({});
   const [recentSales, setRecentSales] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState("month");
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [periodStats, setPeriodStats] = useState({
+    sales: 0,
+    profit: 0,
+    collected: 0,
+    toCollect: 0,
+  });
+  const [availableYears, setAvailableYears] = useState([
+    new Date().getFullYear(),
+  ]);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  async function fetchStats() {
+  const fetchStats = useCallback(async () => {
     try {
       const now = new Date();
       const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+      const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
 
       const [
         salesRes,
@@ -55,81 +98,298 @@ export default function Dashboard() {
         customersRes,
         thisMoSales,
         prevMoSales,
+        thisMoPayments,
+        prevMoPayments,
+        thisMoToCollect,
+        prevMoToCollect,
         recentRes,
+        allCustomersRes,
+        yearsRes,
+        purchasePaymentsRes,
       ] = await Promise.all([
-        supabase.from("sales").select("total_amount, remaining_amount"),
+        supabase
+          .from("sales")
+          .select("total_amount, remaining_amount, paid_amount"),
         supabase
           .from("purchases")
           .select("total_amount, paid_amount, remaining_amount"),
         supabase
           .from("fabrics")
-          .select("available_meters, purchase_price_per_meter"),
+          .select("available_meters, purchase_price_per_meter, quantity"),
         supabase.from("customers").select("id", { count: "exact", head: true }),
         supabase
           .from("sales")
-          .select("total_amount, margin")
+          .select("total_amount, margin, discount_amount")
           .gte("sale_date", `${thisMonth}-01`),
         supabase
           .from("sales")
-          .select("total_amount, margin")
+          .select("total_amount, margin, discount_amount")
+          .gte("sale_date", `${prevMonth}-01`)
+          .lt("sale_date", `${thisMonth}-01`),
+        supabase
+          .from("sale_payments")
+          .select("amount")
+          .gte("payment_date", `${thisMonth}-01`)
+          .lt("payment_date", `${nextMonth}-01`),
+        supabase
+          .from("sale_payments")
+          .select("amount")
+          .gte("payment_date", `${prevMonth}-01`)
+          .lt("payment_date", `${thisMonth}-01`),
+        supabase
+          .from("sales")
+          .select("remaining_amount")
+          .gte("sale_date", `${thisMonth}-01`),
+        supabase
+          .from("sales")
+          .select("remaining_amount")
           .gte("sale_date", `${prevMonth}-01`)
           .lt("sale_date", `${thisMonth}-01`),
         supabase
           .from("sales")
           .select(
-            "id, sale_date, total_amount, notes, customer:customers(name)",
+            "id, sale_date, total_amount, notes, fabric_name, customer_id, customer_name, sale_group_id, created_at",
           )
           .order("sale_date", { ascending: false })
-          .limit(6),
+          .order("created_at", { ascending: false })
+          .limit(20),
+        supabase.from("customers").select("id, name"),
+        supabase.from("sales").select("sale_date").order("sale_date").limit(1),
+        supabase.from("purchase_payments").select("reinvested_amount"),
       ]);
+
+      // Build available years
+      if (yearsRes.data?.length) {
+        const firstYear = new Date(yearsRes.data[0].sale_date).getFullYear();
+        const currentYear = new Date().getFullYear();
+        const years = [];
+        for (let y = firstYear; y <= currentYear; y++) years.push(y);
+        setAvailableYears(years.reverse());
+      }
+
+      // Build customer name lookup
+      const customerNameMap = Object.fromEntries(
+        (allCustomersRes.data || []).map((c) => [c.id, c.name]),
+      );
 
       const invValue =
         fabricsRes.data?.reduce(
           (s, f) => s + (f.available_meters * f.purchase_price_per_meter || 0),
           0,
         ) || 0;
+      const totalMeters =
+        fabricsRes.data?.reduce((s, f) => s + (f.available_meters || 0), 0) ||
+        0;
+      const totalQuantity =
+        fabricsRes.data?.reduce((s, f) => {
+          const num = parseFloat((f.quantity || "").replace(/[^0-9.]/g, ""));
+          return s + (isNaN(num) ? 0 : num);
+        }, 0) || 0;
 
+      // Sales are stored pre-discount (total_amount = meters * price), so
+      // net sales = total_amount - discount_amount to stay consistent with margin.
       const currSales =
-        thisMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
+        thisMoSales.data?.reduce(
+          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          0,
+        ) || 0;
       const prevSales =
-        prevMoSales.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
+        prevMoSales.data?.reduce(
+          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          0,
+        ) || 0;
       const currProfit =
         thisMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
       const prevProfit =
         prevMoSales.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0;
-      const totalSalesAmount =
-        salesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) || 0;
+      // "Collected" = actual cash received during the month (payments by date)
+      const currCollected =
+        thisMoPayments.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0;
+      const prevCollected =
+        prevMoPayments.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0;
+      // "To collect" = outstanding balance of sales made in this month
+      const currToCollect =
+        thisMoToCollect.data?.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ) || 0;
+      const prevToCollect =
+        prevMoToCollect.data?.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ) || 0;
       const totalRemaining =
         salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0;
+      const totalPaidAmount =
+        salesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
 
       setStats({
         thisMonthSales: currSales,
         thisMonthProfit: currProfit,
+        thisMonthCollected: currCollected,
+        thisMonthToCollect: currToCollect,
         pendingSalePayments: totalRemaining,
         pendingPurchasePayments:
           purchasesRes.data?.reduce(
-            (s, r) => s + (r.remaining_amount || 0),
+            (s, r) =>
+              s + Math.max((r.total_amount || 0) - (r.paid_amount || 0), 0),
             0,
           ) || 0,
         paidPurchasePayments:
           purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
         totalFabrics: fabricsRes.data?.length || 0,
+        totalFabricMeters: totalMeters,
+        totalFabricQuantity: totalQuantity,
         inventoryValue: invValue,
         totalCustomers: customersRes.count || 0,
         totalPurchases:
           purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
           0,
-        collectedAmount: totalSalesAmount - totalRemaining,
+        collectedAmount: totalPaidAmount,
+        reinvestedAmount: (purchasePaymentsRes.data || []).reduce(
+          (s, r) => s + (r.reinvested_amount || 0),
+          0,
+        ),
+        freshAmount: Math.max(
+          purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) -
+            (purchasePaymentsRes.data || []).reduce(
+              (s, r) => s + (r.reinvested_amount || 0),
+              0,
+            ),
+          0,
+        ),
       });
+      const toCollectChange = pctChange(currToCollect, prevToCollect);
       setChanges({
         sales: pctChange(currSales, prevSales),
         profit: pctChange(currProfit, prevProfit),
+        collected: pctChange(currCollected, prevCollected),
+        // An increase in "to collect" is bad news (more unpaid), so flag it as red
+        toCollect:
+          toCollectChange && {
+            ...toCollectChange,
+            good: !toCollectChange.good,
+          },
       });
-      setRecentSales(recentRes.data || []);
+
+      // Set initial period stats to current month
+      setPeriodStats({
+        sales: currSales,
+        profit: currProfit,
+        collected: currCollected,
+        toCollect: currToCollect,
+      });
+
+      // Group recent sales
+      const rawSales = recentRes.data || [];
+      const groups = {};
+      rawSales.forEach((sale) => {
+        const key = sale.sale_group_id || sale.id;
+        if (!groups[key]) {
+          groups[key] = {
+            id: key,
+            sale_date: sale.sale_date,
+            customer_id: sale.customer_id,
+            customer_name:
+              customerNameMap[sale.customer_id] ||
+              sale.customer_name ||
+              "Walk-in",
+            firstFabricName: sale.fabric_name,
+            total_amount: 0,
+            createdAt: sale.created_at || sale.sale_date,
+            items: [],
+          };
+        }
+        groups[key].items.push(sale);
+        groups[key].total_amount += sale.total_amount || 0;
+        if (sale.fabric_name) groups[key].firstFabricName = sale.fabric_name;
+        if (sale.created_at > groups[key].createdAt) {
+          groups[key].createdAt = sale.created_at;
+        }
+      });
+
+      const groupedRecentSales = Object.values(groups)
+        .sort((a, b) => {
+          const dateDiff = new Date(b.sale_date) - new Date(a.sale_date);
+          if (dateDiff !== 0) return dateDiff;
+          return new Date(b.createdAt) - new Date(a.createdAt);
+        })
+        .slice(0, 6);
+
+      setRecentSales(groupedRecentSales);
     } catch (err) {
       console.error("Error fetching stats:", err);
+      setError("Failed to load dashboard data. Please refresh.");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  // Fetch period stats when selection changes
+  useEffect(() => {
+    if (loading) return;
+    fetchPeriodStats();
+  }, [selectedPeriod, selectedYear, selectedMonth]);
+
+  async function fetchPeriodStats() {
+    try {
+      let startDate, endDate;
+      const now = new Date();
+
+      if (selectedPeriod === "month") {
+        const monthStr = String(selectedMonth + 1).padStart(2, "0");
+        startDate = `${selectedYear}-${monthStr}-01`;
+        // Calculate last day of the month
+        const lastDay = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+        endDate = `${selectedYear}-${monthStr}-${lastDay}`;
+      } else if (selectedPeriod === "year") {
+        startDate = `${selectedYear}-01-01`;
+        endDate = `${selectedYear}-12-31`;
+      } else {
+        // all time
+        startDate = "2000-01-01";
+        endDate = "2099-12-31";
+      }
+
+      const [salesRes, toCollectRes, collectRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select("total_amount, margin, discount_amount")
+          .gte("sale_date", startDate)
+          .lte("sale_date", endDate),
+        supabase
+          .from("sales")
+          .select("remaining_amount")
+          .gte("sale_date", startDate)
+          .lte("sale_date", endDate),
+        supabase
+          .from("sale_payments")
+          .select("amount")
+          .gte("payment_date", startDate)
+          .lte("payment_date", endDate),
+      ]);
+
+      setPeriodStats({
+        sales:
+          salesRes.data?.reduce(
+            (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+            0,
+          ) || 0,
+        profit: salesRes.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0,
+        collected:
+          collectRes.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0,
+        toCollect:
+          toCollectRes.data?.reduce(
+            (s, r) => s + (r.remaining_amount || 0),
+            0,
+          ) || 0,
+      });
+    } catch (err) {
+      console.error("Error fetching period stats:", err);
     }
   }
 
@@ -141,8 +401,23 @@ export default function Dashboard() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-red-500">{error}</p>
+      </div>
+    );
+  }
+
   const now = new Date();
   const monthName = now.toLocaleString("en-IN", { month: "long" });
+
+  const periodLabel =
+    selectedPeriod === "month"
+      ? `${MONTHS[selectedMonth]} ${selectedYear}`
+      : selectedPeriod === "year"
+        ? `${selectedYear}`
+        : "All Time";
 
   return (
     <div className="space-y-5">
@@ -173,20 +448,22 @@ export default function Dashboard() {
             valueBg: "text-green-700",
           },
           {
-            title: "To Collect",
-            value: stats.pendingSalePayments,
-            icon: CreditCard,
-            iconBg: "bg-purple-500",
-            valueBg: "text-purple-600",
-            subtitle: "From customers",
-          },
-          {
-            title: "Collected Amount",
-            value: stats.collectedAmount,
+            title: `${monthName} Collected`,
+            value: stats.thisMonthCollected,
+            change: changes.collected,
             icon: Receipt,
             iconBg: "bg-green-500",
             valueBg: "text-green-600",
-            subtitle: "Total collected from sales",
+            subtitle: "Cash received this month",
+          },
+          {
+            title: `${monthName} To Collect`,
+            value: stats.thisMonthToCollect,
+            change: changes.toCollect,
+            icon: CreditCard,
+            iconBg: "bg-purple-500",
+            valueBg: "text-purple-600",
+            subtitle: "Pending from customers",
           },
         ].map((card) => {
           const Icon = card.icon;
@@ -201,11 +478,11 @@ export default function Dashboard() {
                 </div>
               </div>
               <p className={`text-xl font-bold ${card.valueBg}`}>
-                ₹{card.value.toLocaleString("en-IN")}
+                {fmtAmt(card.value, showAmount)}
               </p>
               {card.change && (
                 <p
-                  className={`text-xs mt-1 flex items-center gap-0.5 ${card.change.up ? "text-green-600" : "text-red-500"}`}
+                  className={`text-xs mt-1 flex items-center gap-0.5 ${card.change.good ? "text-green-600" : "text-red-500"}`}
                 >
                   {card.change.up ? (
                     <TrendingUp className="w-3 h-3" />
@@ -223,118 +500,273 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Inventory Value breakdown */}
-      <div className="card-hover p-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Current Stock Value (at Cost)
-          </p>
-          <div className="bg-primary-100 p-1.5 rounded-lg">
-            <Package className="w-4 h-4 text-primary-600" />
-          </div>
+      {/* Period selector */}
+      <div className="flex items-center gap-3">
+        <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
+          {[
+            ["month", "Month"],
+            ["year", "Year"],
+            ["all", "All Time"],
+          ].map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setSelectedPeriod(v)}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all ${selectedPeriod === v ? "bg-white shadow text-gray-900" : "text-gray-500"}`}
+            >
+              {l}
+            </button>
+          ))}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
-          <div>
-            <p className="text-xs text-gray-400">Base Cost</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">
-              ₹{stats.inventoryValue.toLocaleString("en-IN")}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">IGST (5%)</p>
-            <p className="text-lg font-bold text-gray-500 mt-0.5">
-              + ₹{(stats.inventoryValue * 0.05).toLocaleString("en-IN")}
-            </p>
-          </div>
-          <div className="col-span-2 sm:col-span-1 pt-3 sm:pt-0 border-t sm:border-0 border-gray-100">
-            <p className="text-xs text-primary-600 font-medium">
-              Total Value with GST
-            </p>
-            <p className="text-2xl font-black text-primary-700 mt-0.5">
-              ₹{(stats.inventoryValue * 1.05).toLocaleString("en-IN")}
-            </p>
-          </div>
-        </div>
+        {selectedPeriod !== "all" && (
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className="input w-24 text-xs"
+          >
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        )}
+        {selectedPeriod === "month" && (
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+            className="input w-24 text-xs"
+          >
+            {MONTHS.map((m, i) => (
+              <option key={i} value={i}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
-      {/* Supplier payment breakdown */}
-      <div className="card-hover p-4">
-        <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
-          Supplier Payments
-        </p>
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <p className="text-xs text-gray-400">Purchased</p>
-            <p className="text-sm font-bold text-gray-900 mt-0.5">
-              ₹{stats.totalPurchases.toLocaleString("en-IN")}
-            </p>
+      {/* Period stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          {
+            title: `${periodLabel} Sales`,
+            value: periodStats.sales,
+            icon: TrendingUp,
+            iconBg: "bg-blue-500",
+            valueBg: "text-gray-900",
+          },
+          {
+            title: `${periodLabel} Profit`,
+            value: periodStats.profit,
+            icon: DollarSign,
+            iconBg: "bg-green-500",
+            valueBg: "text-green-700",
+          },
+          {
+            title: `${periodLabel} Collected`,
+            value: periodStats.collected,
+            icon: Receipt,
+            iconBg: "bg-green-500",
+            valueBg: "text-green-600",
+          },
+          {
+            title: `${periodLabel} To Collect`,
+            value: periodStats.toCollect,
+            icon: CreditCard,
+            iconBg: "bg-purple-500",
+            valueBg: "text-purple-600",
+          },
+        ].map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.title} className="card-hover p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-medium text-gray-500 leading-tight">
+                  {card.title}
+                </p>
+                <div className={`${card.iconBg} p-1.5 rounded-lg`}>
+                  <Icon className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+              <p className={`text-xl font-bold ${card.valueBg}`}>
+                {fmtAmt(card.value, showAmount)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* All-time totals */}
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        Lifetime Summary
+      </div>
+
+      {/* Reinvestment & Supplier Payments row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Reinvestment widget */}
+        <div className="card-hover p-4">
+          <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
+            Collected vs Reinvested
+          </p>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <p className="text-xs text-gray-400">Total Collected</p>
+              <p className="text-sm font-bold text-blue-600 mt-0.5">
+                {fmtAmt(stats.collectedAmount, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Reinvested</p>
+              <p className="text-sm font-bold text-emerald-600 mt-0.5">
+                {fmtAmt(stats.reinvestedAmount, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Fresh Capital</p>
+              <p className="text-sm font-bold text-primary-600 mt-0.5">
+                {fmtAmt(stats.freshAmount, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Available to Reinvest</p>
+              <p
+                className={`text-sm font-bold mt-0.5 ${
+                  stats.collectedAmount - stats.reinvestedAmount >= 0
+                    ? "text-green-600"
+                    : "text-red-500"
+                }`}
+              >
+                {fmtAmt(
+                  Math.max(stats.collectedAmount - stats.reinvestedAmount, 0),
+                  showAmount,
+                )}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-400">Paid</p>
-            <p className="text-sm font-bold text-green-600 mt-0.5">
-              ₹{stats.paidPurchasePayments.toLocaleString("en-IN")}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">Pending</p>
-            <p className="text-sm font-bold text-orange-600 mt-0.5">
-              ₹{stats.pendingPurchasePayments.toLocaleString("en-IN")}
-            </p>
-          </div>
+          {stats.collectedAmount > 0 && (
+            <>
+              <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+                <div
+                  className="h-2.5 bg-emerald-500"
+                  style={{
+                    width: `${Math.min((stats.reinvestedAmount / stats.collectedAmount) * 100, 100)}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-1.5">
+                {Math.round(
+                  (stats.reinvestedAmount / stats.collectedAmount) * 100,
+                )}
+                % of collected amount reinvested
+              </p>
+            </>
+          )}
         </div>
-        <div className="mt-3 h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
-          <div
-            className="h-2.5 bg-green-500"
-            style={{
-              width:
-                stats.totalPurchases > 0
-                  ? `${(stats.paidPurchasePayments / stats.totalPurchases) * 100}%`
-                  : "0%",
-            }}
-          />
-          <div
-            className="h-2.5 bg-orange-400"
-            style={{
-              width:
-                stats.totalPurchases > 0
-                  ? `${(stats.pendingPurchasePayments / stats.totalPurchases) * 100}%`
-                  : "0%",
-            }}
-          />
-        </div>
-        <div className="flex items-center gap-3 mt-1.5">
-          <span className="flex items-center gap-1 text-xs text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
-            {stats.totalPurchases > 0
-              ? Math.round(
-                  (stats.paidPurchasePayments / stats.totalPurchases) * 100,
-                )
-              : 0}
-            % paid
-          </span>
-          <span className="flex items-center gap-1 text-xs text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>
-            {stats.totalPurchases > 0
-              ? Math.round(
-                  (stats.pendingPurchasePayments / stats.totalPurchases) * 100,
-                )
-              : 0}
-            % pending
-          </span>
+
+        {/* Supplier payment breakdown */}
+        <div className="card-hover p-4">
+          <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
+            Supplier Payments
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-xs text-gray-400">Purchased</p>
+              <p className="text-sm font-bold text-gray-900 mt-0.5">
+                {fmtAmt(stats.totalPurchases, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Paid</p>
+              <p className="text-sm font-bold text-green-600 mt-0.5">
+                {fmtAmt(stats.paidPurchasePayments, showAmount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Pending</p>
+              <p className="text-sm font-bold text-orange-600 mt-0.5">
+                {fmtAmt(stats.pendingPurchasePayments, showAmount)}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+            <div
+              className="h-2.5 bg-green-500"
+              style={{
+                width:
+                  stats.totalPurchases > 0
+                    ? `${(stats.paidPurchasePayments / stats.totalPurchases) * 100}%`
+                    : "0%",
+              }}
+            />
+            <div
+              className="h-2.5 bg-orange-400"
+              style={{
+                width:
+                  stats.totalPurchases > 0
+                    ? `${(stats.pendingPurchasePayments / stats.totalPurchases) * 100}%`
+                    : "0%",
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-3 mt-1.5">
+            <span className="flex items-center gap-1 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+              {stats.totalPurchases > 0
+                ? Math.round(
+                    (stats.paidPurchasePayments / stats.totalPurchases) * 100,
+                  )
+                : 0}
+              % paid
+            </span>
+            <span className="flex items-center gap-1 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>
+              {stats.totalPurchases > 0
+                ? Math.round(
+                    (stats.pendingPurchasePayments / stats.totalPurchases) *
+                      100,
+                  )
+                : 0}
+              % pending
+            </span>
+          </div>
         </div>
       </div>
 
       {/* Inventory, Customers */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card p-4 flex items-center gap-3">
           <div className="bg-primary-100 p-3 rounded-xl shrink-0">
             <Package className="w-6 h-6 text-primary-600" />
           </div>
           <div>
-            <p className="text-xs text-gray-500">Fabric Types</p>
+            <p className="text-xs text-gray-500">Total Fabrics</p>
             <p className="text-2xl font-bold text-gray-900">
               {stats.totalFabrics}
             </p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="bg-blue-100 p-3 rounded-xl shrink-0">
+            <Package className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Total Quantity</p>
+            <p className="text-2xl font-bold text-blue-700">
+              {stats.totalFabricQuantity}
+            </p>
+            <p className="text-xs text-blue-500 mt-0.5">units</p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="bg-indigo-100 p-3 rounded-xl shrink-0">
+            <Package className="w-6 h-6 text-indigo-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Total Stock</p>
+            <p className="text-2xl font-bold text-indigo-700">
+              {stats.totalFabricMeters.toFixed(2)}
+            </p>
+            <p className="text-xs text-indigo-500 mt-0.5">meters</p>
           </div>
         </div>
         <div className="card p-4 flex items-center gap-3">
@@ -363,28 +795,30 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {recentSales.map((sale) => (
+            {recentSales.map((group) => (
               <div
-                key={sale.id}
+                key={group.id}
                 className="px-4 py-3 flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
                   <p className="font-medium text-gray-900 text-sm truncate">
-                    {sale.customer?.name || "Walk-in"}
+                    {group.customer_name}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
-                    {sale.notes?.split("|")[0]?.replace("Fabric:", "").trim() ||
-                      "—"}
+                    {group.firstFabricName || "—"}
+                    {group.items.length > 1 &&
+                      ` (+${group.items.length - 1} more)`}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-semibold text-gray-900 text-sm">
-                    ₹{sale.total_amount.toLocaleString("en-IN")}
+                    {fmtAmt(group.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
-                    {new Date(sale.sale_date).toLocaleDateString("en-IN", {
+                    {new Date(group.sale_date).toLocaleDateString("en-GB", {
                       day: "numeric",
                       month: "short",
+                      year: "2-digit",
                     })}
                   </p>
                 </div>

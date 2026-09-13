@@ -13,9 +13,11 @@
     "@zxing/library": "^0.21.3",
     "lucide-react": "^0.468.0",
     "next": "^15.3.3",
+    "pdfjs-dist": "^4.9.155",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.18",

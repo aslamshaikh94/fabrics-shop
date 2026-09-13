@@ -1,19 +1,23 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
   Trash2,
   X,
-  Search,
   Calendar,
   Pencil,
   Paperclip,
   FileText,
   ExternalLink,
   Receipt,
+  Download,
+  FileUp,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
+import { exportCSV } from "../utils/export";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -21,6 +25,9 @@ import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import ImageViewer from "./shared/ImageViewer";
+import ExpensesImport from "./ExpensesImport";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
 
@@ -63,6 +70,13 @@ export default function Expenses() {
   const [uploading, setUploading] = useState(false);
   const [proofError, setProofError] = useState("");
   const [viewProofUrl, setViewProofUrl] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const [togglingClear, setTogglingClear] = useState(null);
+  const handleCloseImport = () => setShowImport(false);
+  const handleImported = () => {
+    setShowImport(false);
+    fetchExpenses();
+  };
 
   useEffect(() => {
     fetchExpenses();
@@ -181,6 +195,26 @@ export default function Expenses() {
     setShowForm(true);
   }
 
+  async function handleToggleClear(expense) {
+    setTogglingClear(expense.id);
+    try {
+      const updates = expense.cleared
+        ? { cleared: false, cleared_at: null }
+        : { cleared: true, cleared_at: new Date().toISOString() };
+      const { error } = await supabase
+        .from("expenses")
+        .update(updates)
+        .eq("id", expense.id);
+      if (error) throw error;
+      toast(expense.cleared ? "Marked as unpaid" : "Marked as reimbursed ✓");
+      fetchExpenses();
+    } catch (err) {
+      toast("Failed to update", "error");
+    } finally {
+      setTogglingClear(null);
+    }
+  }
+
   async function handleDelete(id) {
     try {
       const { error } = await supabase.from("expenses").delete().eq("id", id);
@@ -195,7 +229,7 @@ export default function Expenses() {
     }
   }
 
-  const filtered = expenses.filter((e) => {
+  const filtered = useMemo(() => expenses.filter((e) => {
     const matchSearch =
       e.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       e.notes?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -204,13 +238,16 @@ export default function Expenses() {
     const matchesFrom = !dateFrom || e.expense_date >= dateFrom;
     const matchesTo = !dateTo || e.expense_date <= dateTo;
     return matchSearch && matchCat && matchMonth && matchesFrom && matchesTo;
-  });
+  }), [expenses, searchTerm, filterCategory, filterMonth, dateFrom, dateTo]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const totalFiltered = filtered.reduce((s, e) => s + (e.amount || 0), 0);
-  const totalAll = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalFiltered = useMemo(() => filtered.reduce((s, e) => s + (e.amount || 0), 0), [filtered]);
+  const totalAll = useMemo(() => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
+  const totalUncleared = useMemo(() => expenses
+    .filter((e) => !e.cleared)
+    .reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
 
   const categoryColors = {
     Rent: "bg-blue-100 text-blue-800",
@@ -237,49 +274,90 @@ export default function Expenses() {
           <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
           <p className="text-gray-500 mt-1">Track shop operating expenses</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingId(null);
-            setFormData(emptyForm);
-            setPaymentProofFile(null);
-            setProofError("");
-            setShowForm(true);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Expense
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() =>
+              exportCSV(
+                filtered.map((e) => ({
+                  title: e.title,
+                  category: e.category,
+                  amount: e.amount,
+                  date: e.expense_date,
+                  paid_by: e.paid_by || "",
+                  notes: e.notes || "",
+                })),
+                `expenses-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setFormData(emptyForm);
+              setPaymentProofFile(null);
+              setProofError("");
+              setShowForm(true);
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Expense
+          </button>
+        </div>
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <p className="text-sm text-gray-500">Total Expenses (All Time)</p>
           <p className="text-2xl font-bold text-red-600 mt-1">
-            ₹{totalAll.toLocaleString("en-IN")}
+            ₹
+            {totalAll.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm text-gray-500">Pending Reimbursement</p>
+          <p className="text-2xl font-bold text-orange-600 mt-1">
+            ₹
+            {totalUncleared.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Filtered Total</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">
-            ₹{totalFiltered.toLocaleString("en-IN")}
+            ₹
+            {totalFiltered.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search expenses..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search expenses..."
+          className="min-w-[180px]"
+        />
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
@@ -307,6 +385,12 @@ export default function Expenses() {
           resetPage={() => setPage(1)}
         />
       </div>
+
+      <ExpensesImport
+        open={showImport}
+        onClose={handleCloseImport}
+        onImported={handleImported}
+      />
 
       {/* Add/Edit Expense Modal */}
       <Modal
@@ -496,11 +580,35 @@ export default function Expenses() {
               disabled={uploading}
               className="btn btn-primary flex-1"
             >
-              {uploading
-                ? "Saving..."
-                : editingId
-                  ? "Update Expense"
-                  : "Add Expense"}
+              {uploading ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : editingId ? (
+                "Update Expense"
+              ) : (
+                "Add Expense"
+              )}
             </button>
           </div>
         </form>
@@ -509,7 +617,7 @@ export default function Expenses() {
       {/* Expenses List */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full" style={{ minWidth: "580px" }}>
+          <table className="w-full" style={{ minWidth: "620px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -528,6 +636,9 @@ export default function Expenses() {
                   Proof
                 </th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Reimbursed
+                </th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Action
                 </th>
               </tr>
@@ -536,7 +647,7 @@ export default function Expenses() {
               {paginated.map((expense) => (
                 <tr
                   key={expense.id}
-                  className="hover:bg-gray-50 transition-colors"
+                  className={`hover:bg-gray-50 transition-colors ${expense.cleared ? "opacity-60" : ""}`}
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">{expense.title}</p>
@@ -562,13 +673,17 @@ export default function Expenses() {
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
                       {new Date(expense.expense_date).toLocaleDateString(
-                        "en-IN",
-                        { day: "numeric", month: "short", year: "numeric" },
+                        "en-GB",
+                        { day: "numeric", month: "short", year: "2-digit" },
                       )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-red-600 text-sm">
-                    ₹{expense.amount.toLocaleString("en-IN")}
+                    ₹
+                    {expense.amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {expense.payment_proof_url ? (
@@ -585,6 +700,43 @@ export default function Expenses() {
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={() => handleToggleClear(expense)}
+                        disabled={togglingClear === expense.id}
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
+                          expense.cleared
+                            ? "bg-green-100 text-green-700 hover:bg-green-200"
+                            : "bg-gray-100 text-gray-500 hover:bg-orange-100 hover:text-orange-600"
+                        }`}
+                        title={
+                          expense.cleared
+                            ? "Mark as unpaid"
+                            : "Mark as reimbursed"
+                        }
+                      >
+                        {expense.cleared ? (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        ) : (
+                          <Circle className="w-3.5 h-3.5" />
+                        )}
+                        {expense.cleared ? "Paid" : "Clear"}
+                      </button>
+                      {expense.cleared && expense.cleared_at && (
+                        <span className="text-[10px] text-gray-400">
+                          {new Date(expense.cleared_at).toLocaleDateString(
+                            "en-GB",
+                            {
+                              day: "numeric",
+                              month: "short",
+                              year: "2-digit",
+                            },
+                          )}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
@@ -626,19 +778,20 @@ export default function Expenses() {
       )}
 
       {filtered.length === 0 && (
-        <div className="text-center py-16">
-          <Receipt className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm || filterCategory !== "all" || filterMonth
-              ? "No expenses match your filters"
-              : "No expenses recorded yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm || filterCategory !== "all" || filterMonth
+        <EmptyState
+          icon={Receipt}
+          title="No expenses recorded yet"
+          searchTerm={
+            searchTerm || filterCategory !== "all" || filterMonth
+              ? "filtered"
+              : ""
+          }
+          description={
+            searchTerm || filterCategory !== "all" || filterMonth
               ? "Try adjusting your filters"
-              : "Click Add Expense to get started"}
-          </p>
-        </div>
+              : "Click Add Expense to get started"
+          }
+        />
       )}
 
       <ImageViewer

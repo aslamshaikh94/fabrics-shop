@@ -1,36 +1,77 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
   Pencil,
   Trash2,
   X,
-  Search,
   Package,
   TriangleAlert as AlertTriangle,
   ScanLine,
-  ChevronLeft,
-  ChevronRight,
+  Download,
+  FileUp,
+  Trash,
+  Columns,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
+import { exportCSV } from "../utils/export";
 import { formatDate } from "../utils/formatters";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
+import FabricsImport from "./FabricsImport";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 10;
+
+const ALL_COLUMNS = [
+  { key: "qty",        label: "Qty" },
+  { key: "supplier",   label: "Supplier" },
+  { key: "dateAdded",  label: "Date Added" },
+  { key: "total",      label: "Total" },
+  { key: "buyPrice",   label: "Buy ₹/m" },
+  { key: "sellPrice",  label: "Sell ₹/m" },
+  { key: "totalPrice", label: "Total Price" },
+  { key: "available",  label: "Available" },
+  { key: "barcode",    label: "Barcode" },
+];
+
+const DEFAULT_VISIBLE = new Set(["qty", "supplier", "dateAdded", "total", "buyPrice", "totalPrice", "available"]);
+
+function loadVisibleCols() {
+  try {
+    const saved = localStorage.getItem("fabrics_visible_cols");
+    if (saved) return new Set(JSON.parse(saved));
+  } catch {}
+  return new Set(DEFAULT_VISIBLE);
+}
 
 const emptyRow = {
   name: "",
   total_meters: "",
   purchase_price_per_meter: "",
+  selling_price_per_meter: "",
   quantity: "",
   barcode: "",
 };
 const emptyForm = { supplier_id: "", purchase_number: "" };
+
+function NavigateToPurchaseButton({ purchaseNumber, onNavigate }) {
+  const handleClick = useCallback(() => onNavigate(purchaseNumber), [purchaseNumber, onNavigate]);
+  return (
+    <button
+      onClick={handleClick}
+      className="p-2 hover:bg-blue-100 rounded-lg text-gray-500 hover:text-blue-600"
+      title={"View " + purchaseNumber}
+    >
+      <span className="text-xs font-mono">🛒</span>
+    </button>
+  );
+}
 
 export default function Fabrics() {
   const [fabrics, setFabrics] = useState([]);
@@ -44,33 +85,72 @@ export default function Fabrics() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const toast = useToast();
   const [formData, setFormData] = useState(emptyForm);
   const [existingPurchaseInfo, setExistingPurchaseInfo] = useState(null);
   const [linkingPurchase, setLinkingPurchase] = useState(false);
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
+  const colPickerRef = useRef(null);
+  const purchaseLookupTimer = useRef(null);
 
   useEffect(() => {
-    fetchFabrics();
-    fetchSuppliers();
+    localStorage.setItem("fabrics_visible_cols", JSON.stringify([...visibleCols]));
+  }, [visibleCols]);
+
+  useEffect(() => {
+    if (!showColPicker) return;
+    function handleClick(e) {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target)) {
+        setShowColPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showColPicker]);
+
+  function toggleCol(key) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const col = (key) => visibleCols.has(key);
+
+  useEffect(() => {
+    fetchAll();
   }, []);
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm, filterSupplier, dateFrom, dateTo]);
-
-  async function fetchFabrics() {
+  async function fetchAll() {
     try {
-      const { data, error } = await supabase
-        .from("fabrics")
-        .select("*, supplier:suppliers(*)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      const [fabricsRes, suppliersRes] = await Promise.all([
+        supabase
+          .from("fabrics")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        supabase.from("suppliers").select("*").order("name"),
+      ]);
+      if (fabricsRes.error) throw fabricsRes.error;
+      if (suppliersRes.error) throw suppliersRes.error;
+      setSuppliers(suppliersRes.data || []);
 
-      // Fetch purchase numbers for fabrics that have purchase_id
-      const fabricsWithPurchase = (data || []).filter((f) => f.purchase_id);
-      const purchaseIds = fabricsWithPurchase.map((f) => f.purchase_id);
+      const supplierMap = Object.fromEntries(
+        (suppliersRes.data || []).map((c) => [c.id, c]),
+      );
+
+      const purchaseIds = (fabricsRes.data || [])
+        .filter((f) => f.purchase_id)
+        .map((f) => f.purchase_id);
+
       let purchaseMap = {};
       if (purchaseIds.length > 0) {
         const { data: purchases } = await supabase
@@ -84,18 +164,24 @@ export default function Fabrics() {
         }
       }
 
-      const enriched = (data || []).map((f) => ({
-        ...f,
-        purchase: f.purchase_id
-          ? { purchase_number: purchaseMap[f.purchase_id] || null }
-          : null,
-      }));
-      setFabrics(enriched);
+      setFabrics(
+        (fabricsRes.data || []).map((f) => ({
+          ...f,
+          supplier: supplierMap[f.supplier_id] || null,
+          purchase: f.purchase_id
+            ? { purchase_number: purchaseMap[f.purchase_id] || null }
+            : null,
+        })),
+      );
     } catch (err) {
-      console.error("Error fetching fabrics:", err);
+      console.error("Error fetching fabrics data:", err);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function fetchFabrics() {
+    await fetchAll();
   }
 
   async function fetchSuppliers() {
@@ -109,6 +195,42 @@ export default function Fabrics() {
       console.error("Error fetching suppliers:", err);
     }
   }
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  }, [searchTerm, filterSupplier, dateFrom, dateTo]);
+
+  const handlePurchaseNumberChange = useCallback((e) => {
+    const val = e.target.value;
+    setFormData((prev) => ({ ...prev, purchase_number: val }));
+    clearTimeout(purchaseLookupTimer.current);
+    if (!val.trim()) {
+      setExistingPurchaseInfo(null);
+      return;
+    }
+    purchaseLookupTimer.current = setTimeout(async () => {
+      const { data: purchase } = await supabase
+        .from("purchases")
+        .select("id, purchase_number, total_amount, supplier_id")
+        .eq("purchase_number", val.trim())
+        .single();
+      if (purchase) {
+        const { data: supplier } = await supabase
+          .from("suppliers")
+          .select("name")
+          .eq("id", purchase.supplier_id)
+          .single();
+        setExistingPurchaseInfo({
+          ...purchase,
+          supplier: supplier || null,
+        });
+      } else {
+        setExistingPurchaseInfo(null);
+      }
+    }, 400);
+  }, []);
 
   function updateRow(idx, field, value) {
     setRows((prev) =>
@@ -132,6 +254,7 @@ export default function Fabrics() {
         const payload = {
           name: r.name,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
+          selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
           total_meters: newTotal,
           available_meters: newAvailable,
           supplier_id: formData.supplier_id || null,
@@ -226,6 +349,49 @@ export default function Fabrics() {
     }
   }
 
+  const handleNavigateToPurchase = useCallback((purchaseNumber) => {
+    localStorage.setItem("prefill_purchase_number", purchaseNumber);
+    window.dispatchEvent(new CustomEvent("navigate", { detail: { page: "purchases" } }));
+  }, []);
+
+  const handlePageChange = useCallback((p) => {
+    setPage(p);
+    setSelectedIds(new Set());
+  }, []);
+
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === paginated.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(paginated.map((f) => f.id)));
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      const { error } = await supabase.from("fabrics").delete().in("id", ids);
+      if (error) throw error;
+      toast(`${ids.length} fabric${ids.length > 1 ? "s" : ""} deleted`);
+      setSelectedIds(new Set());
+      setConfirmBulkDelete(false);
+      fetchFabrics();
+    } catch (err) {
+      toast("Failed to delete fabrics", "error");
+      setConfirmBulkDelete(false);
+    }
+  }
+
   async function handleDelete(id) {
     try {
       const { error } = await supabase.from("fabrics").delete().eq("id", id);
@@ -246,6 +412,7 @@ export default function Fabrics() {
       {
         name: fabric.name,
         purchase_price_per_meter: fabric.purchase_price_per_meter.toString(),
+        selling_price_per_meter: (fabric.selling_price_per_meter || "").toString(),
         total_meters: fabric.total_meters.toString(),
         quantity: fabric.quantity || "",
         barcode: fabric.barcode || "",
@@ -256,9 +423,12 @@ export default function Fabrics() {
   }
 
   const filtered = fabrics.filter((f) => {
-    const matchesSearch = f.name
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
+    const q = searchTerm.toLowerCase().trim();
+    const matchesSearch = !q ||
+      f.name.toLowerCase().includes(q) ||
+      (f.supplier?.name || "").toLowerCase().includes(q) ||
+      (f.barcode || "").toLowerCase().includes(q) ||
+      String(f.selling_price_per_meter || "").includes(q);
     const matchesSupplier =
       filterSupplier === "all" || f.supplier_id === filterSupplier;
     const matchesFrom = !dateFrom || (f.created_at && f.created_at >= dateFrom);
@@ -270,7 +440,7 @@ export default function Fabrics() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const lowStock = fabrics.filter((f) => f.available_meters < 10);
+  const lowStock = fabrics.filter((f) => f.available_meters < 2);
 
   if (loading) {
     return (
@@ -287,18 +457,94 @@ export default function Fabrics() {
           <h1 className="text-2xl font-bold text-gray-900">Fabrics</h1>
           <p className="text-gray-500 mt-1">Manage your fabric inventory</p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-            setFormData(emptyForm);
-            setRows([{ ...emptyRow }]);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Fabric
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setSelectMode(!selectMode);
+              if (selectMode) setSelectedIds(new Set());
+            }}
+            className={`btn ${selectMode ? "btn-primary" : "btn-ghost"}`}
+            title={selectMode ? "Exit selection mode" : "Select fabrics"}
+          >
+            <Trash className="w-4 h-4" />
+          </button>
+          <div className="relative inline-flex" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker((v) => !v)}
+              className="btn btn-secondary"
+              title="Show/hide columns"
+            >
+              <Columns className="w-4 h-4" />
+            </button>
+            {showColPicker && (
+              <>
+                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
+                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
+                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
+                    {ALL_COLUMNS.map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
+                        <input
+                          type="checkbox"
+                          checked={visibleCols.has(key)}
+                          onChange={() => toggleCol(key)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setVisibleCols(new Set(DEFAULT_VISIBLE))}
+                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => setShowImport(true)}
+            className="btn btn-secondary"
+            title="Import from Excel/CSV"
+          >
+            <FileUp className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() =>
+              exportCSV(
+                filtered.map((f) => ({
+                  name: f.name,
+                  barcode: f.barcode || "",
+                  quantity: f.quantity || "",
+                  supplier: f.supplier?.name || "",
+                  total_meters: f.total_meters,
+                  available_meters: f.available_meters,
+                  buy_price_per_meter: f.purchase_price_per_meter,
+                  total_price: f.total_meters * f.purchase_price_per_meter,
+                })),
+                `fabrics-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData(emptyForm);
+              setRows([{ ...emptyRow }]);
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Fabric
+          </button>
+        </div>
       </div>
 
       {lowStock.length > 0 && (
@@ -309,7 +555,10 @@ export default function Fabrics() {
               <p className="font-medium text-warning-800">Low Stock Alert</p>
               <p className="text-sm text-warning-700 mt-1">
                 {lowStock
-                  .map((f) => `${f.name} (${f.available_meters}m)`)
+                  .map(
+                    (f) =>
+                      `${f.name} (${(f.available_meters || 0).toFixed(2)}m)`,
+                  )
                   .join(", ")}
               </p>
             </div>
@@ -318,16 +567,11 @@ export default function Fabrics() {
       )}
 
       <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search fabrics..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search by name, supplier, barcode, sell price..."
+        />
         <select
           value={filterSupplier}
           onChange={(e) => setFilterSupplier(e.target.value)}
@@ -349,6 +593,13 @@ export default function Fabrics() {
           resetPage={() => setPage(1)}
         />
       </div>
+
+      <FabricsImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => fetchAll()}
+        suppliers={suppliers}
+      />
 
       <Modal
         open={showForm}
@@ -388,27 +639,7 @@ export default function Fabrics() {
                   type="text"
                   className="input flex-1"
                   value={formData.purchase_number}
-                  onChange={async (e) => {
-                    const val = e.target.value;
-                    setFormData({ ...formData, purchase_number: val });
-                    if (!val.trim()) {
-                      setExistingPurchaseInfo(null);
-                      return;
-                    }
-                    // Look up purchase by number
-                    const { data } = await supabase
-                      .from("purchases")
-                      .select(
-                        "id, purchase_number, total_amount, supplier:suppliers(name)",
-                      )
-                      .eq("purchase_number", val.trim())
-                      .single();
-                    if (data) {
-                      setExistingPurchaseInfo(data);
-                    } else {
-                      setExistingPurchaseInfo(null);
-                    }
-                  }}
+                  onChange={handlePurchaseNumberChange}
                   placeholder="Enter purchase number (e.g. PUR-00001)"
                 />
               </div>
@@ -419,7 +650,10 @@ export default function Fabrics() {
                   </p>
                   <p className="text-xs text-green-600 mt-0.5">
                     Supplier: {existingPurchaseInfo.supplier?.name} — ₹
-                    {existingPurchaseInfo.total_amount.toLocaleString("en-IN")}
+                    {existingPurchaseInfo.total_amount.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
               )}
@@ -551,26 +785,44 @@ export default function Fabrics() {
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-900 mb-1">
-                      Barcode
-                    </label>
-                    <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-900 mb-1">
+                        Sell ₹/m
+                      </label>
                       <input
-                        className="input bg-white flex-1"
-                        value={row.barcode}
+                        type="number"
+                        step="0.01"
+                        className="input bg-white"
+                        value={row.selling_price_per_meter}
                         onChange={(e) =>
-                          updateRow(currentIdx, "barcode", e.target.value)
+                          updateRow(currentIdx, "selling_price_per_meter", e.target.value)
                         }
-                        placeholder="Scan or type barcode"
+                        placeholder="0"
+                        onWheel={(e) => e.target.blur()}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setScanningRowIdx(currentIdx)}
-                        className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 hover:text-primary-600 transition-colors"
-                      >
-                        <ScanLine className="w-4 h-4" />
-                      </button>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-900 mb-1">
+                        Barcode
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          className="input bg-white flex-1"
+                          value={row.barcode}
+                          onChange={(e) =>
+                            updateRow(currentIdx, "barcode", e.target.value)
+                          }
+                          placeholder="Scan or type"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setScanningRowIdx(currentIdx)}
+                          className="px-3 bg-white border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 hover:text-primary-600 transition-colors"
+                        >
+                          <ScanLine className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -617,127 +869,108 @@ export default function Fabrics() {
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Name
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Barcode
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Quantity
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Supplier
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Purchase #
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                Date Added
-              </th>
-              <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                Available
-              </th>
-              <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                Total
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
-                Buy ₹/m
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
-                Total Price
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
-                Actions
-              </th>
+              {selectMode && (
+                <th className="px-4 py-3 text-left w-10">
+                  <input
+                    type="checkbox"
+                    checked={
+                      paginated.length > 0 &&
+                      selectedIds.size === paginated.length
+                    }
+                    onChange={toggleSelectAll}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                </th>
+              )}
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Name</th>
+              {col("barcode")   && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Barcode</th>}
+              {col("qty")       && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Qty</th>}
+              {col("supplier")  && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Supplier</th>}
+              {col("dateAdded") && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date Added</th>}
+              {col("total")     && <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Total</th>}
+              {col("buyPrice")  && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Buy ₹/m</th>}
+              {col("sellPrice") && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Sell ₹/m</th>}
+              {col("totalPrice")&& <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Total Price</th>}
+              {col("available") && <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Available</th>}
+              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Actions</th>
             </tr>
           </thead>
           <tbody>
             {paginated.map((fabric) => (
               <tr
                 key={fabric.id}
-                className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${selectedIds.has(fabric.id) ? "bg-primary-50" : ""}`}
               >
+                {selectMode && (
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(fabric.id)}
+                      onChange={() => toggleSelect(fabric.id)}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-3">
                   <p className="font-medium text-gray-900">{fabric.name}</p>
                 </td>
-                <td className="px-4 py-3">
-                  <p className="text-sm text-gray-600 font-mono">
-                    {fabric.barcode || "—"}
-                  </p>
-                </td>
-                <td className="px-4 py-3">
-                  <p className="text-sm text-gray-600">
-                    {fabric.quantity || "—"}
-                  </p>
-                </td>
-                <td className="px-4 py-3">
-                  <p className="text-sm text-gray-600">
-                    {fabric.supplier?.name || "—"}
-                  </p>
-                </td>
-                <td className="px-4 py-3">
-                  <p className="text-xs text-gray-600 font-mono">
-                    {fabric.purchase?.purchase_number || "—"}
-                  </p>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <p className="text-sm text-gray-600">
-                    {fabric.created_at ? formatDate(fabric.created_at) : "—"}
-                  </p>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <p
-                    className={`font-semibold text-sm ${
-                      fabric.available_meters < 10
-                        ? "text-red-600"
-                        : "text-gray-900"
-                    }`}
-                  >
-                    {fabric.available_meters}m
-                    {fabric.available_meters < 10 && (
-                      <span className="ml-1">⚠️</span>
-                    )}
-                  </p>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <p className="text-sm text-gray-900">
-                    {fabric.total_meters}m
-                  </p>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <p className="text-sm text-gray-900">
-                    ₹{fabric.purchase_price_per_meter}
-                  </p>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <p className="text-sm font-medium text-gray-900">
-                    ₹
-                    {(
-                      fabric.total_meters * fabric.purchase_price_per_meter
-                    ).toLocaleString("en-IN")}
-                  </p>
-                </td>
+                {col("barcode") && (
+                  <td className="px-4 py-3">
+                    <p className="text-sm text-gray-600 font-mono">{fabric.barcode || "—"}</p>
+                  </td>
+                )}
+                {col("qty") && (
+                  <td className="px-4 py-3">
+                    <p className="text-sm text-gray-600">{fabric.quantity || "—"}</p>
+                  </td>
+                )}
+                {col("supplier") && (
+                  <td className="px-4 py-3">
+                    <p className="text-sm text-gray-600">{fabric.supplier?.name || "—"}</p>
+                  </td>
+                )}
+                {col("dateAdded") && (
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <p className="text-sm text-gray-600">{fabric.created_at ? formatDate(fabric.created_at) : "—"}</p>
+                  </td>
+                )}
+                {col("total") && (
+                  <td className="px-4 py-3 text-center">
+                    <p className="text-sm text-gray-900">{(fabric.total_meters || 0).toFixed(2)}m</p>
+                  </td>
+                )}
+                {col("buyPrice") && (
+                  <td className="px-4 py-3 text-right">
+                    <p className="text-sm text-gray-900">₹{(fabric.purchase_price_per_meter || 0).toFixed(2)}</p>
+                  </td>
+                )}
+                {col("sellPrice") && (
+                  <td className="px-4 py-3 text-right">
+                    <p className="text-sm text-gray-900">₹{(fabric.selling_price_per_meter || 0).toFixed(2)}</p>
+                  </td>
+                )}
+                {col("totalPrice") && (
+                  <td className="px-4 py-3 text-right">
+                    <p className="text-sm font-medium text-gray-900">
+                      ₹{((fabric.total_meters || 0) * (fabric.purchase_price_per_meter || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </td>
+                )}
+                {col("available") && (
+                  <td className="px-4 py-3 text-center">
+                    <p className={`font-semibold text-sm ${fabric.available_meters < 2 ? "text-red-600" : "text-gray-900"}`}>
+                      {(fabric.available_meters || 0).toFixed(2)}m
+                      {fabric.available_meters < 2 && <span className="ml-1">⚠️</span>}
+                    </p>
+                  </td>
+                )}
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
                     {fabric.purchase?.purchase_number && (
-                      <button
-                        onClick={() => {
-                          localStorage.setItem(
-                            "prefill_purchase_number",
-                            fabric.purchase.purchase_number,
-                          );
-                          window.dispatchEvent(
-                            new CustomEvent("navigate", {
-                              detail: { page: "purchases" },
-                            }),
-                          );
-                        }}
-                        className="p-2 hover:bg-blue-100 rounded-lg text-gray-500 hover:text-blue-600"
-                        title={"View " + fabric.purchase.purchase_number}
-                      >
-                        <span className="text-xs font-mono">🛒</span>
-                      </button>
+                      <NavigateToPurchaseButton
+                        purchaseNumber={fabric.purchase.purchase_number}
+                        onNavigate={handleNavigateToPurchase}
+                      />
                     )}
                     <button
                       onClick={() => handleEdit(fabric)}
@@ -761,13 +994,47 @@ export default function Fabrics() {
         </table>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl px-4 py-3">
+          <span className="text-sm text-primary-700">
+            <strong>{selectedIds.size}</strong> fabric
+            {selectedIds.size > 1 ? "s" : ""} selected
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="btn btn-secondary text-sm"
+            >
+              Clear Selection
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              className="btn text-sm"
+              style={{ backgroundColor: "#dc2626", color: "white" }}
+            >
+              <Trash className="w-4 h-4 mr-1" />
+              Delete Selected
+            </button>
+          </div>
+        </div>
+      )}
+
       <Pagination
         currentPage={page}
         totalPages={totalPages}
-        onPageChange={setPage}
+        onPageChange={handlePageChange}
         totalItems={filtered.length}
         label="fabrics"
       />
+
+      {confirmBulkDelete && (
+        <ConfirmModal
+          message={`This will permanently delete ${selectedIds.size} fabric${selectedIds.size > 1 ? "s" : ""}.`}
+          onConfirm={handleBulkDelete}
+          onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmModal
@@ -778,19 +1045,16 @@ export default function Fabrics() {
       )}
 
       {filtered.length === 0 && (
-        <div className="text-center py-16">
-          <Package className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm
-              ? "No fabrics found matching your search"
-              : "No fabrics added yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm
+        <EmptyState
+          icon={Package}
+          title="No fabrics added yet"
+          searchTerm={searchTerm}
+          description={
+            searchTerm
               ? "Try a different search term"
-              : "Click Add Fabric to get started"}
-          </p>
-        </div>
+              : "Click Add Fabric to get started"
+          }
+        />
       )}
     </div>
   );

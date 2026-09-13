@@ -1,7 +1,12 @@
 "use client";
+import { useCallback } from "react";
 import { AlertCircle } from "lucide-react";
 
 export default function Error({ error, reset }) {
+  const handleGoHome = useCallback(() => {
+    window.location.href = "/";
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
@@ -32,13 +37,13 @@ export default function Error({ error, reset }) {
 
           <div className="flex gap-3">
             <button
-              onClick={() => reset()}
+              onClick={reset}
               className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
             >
               Try again
             </button>
             <button
-              onClick={() => (window.location.href = "/")}
+              onClick={handleGoHome}
               className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-900 font-medium py-2 px-4 rounded-lg transition-colors"
             >
               Go Home

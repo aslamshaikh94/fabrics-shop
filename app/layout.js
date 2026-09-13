@@ -1,9 +1,10 @@
-import './globals.css';
-import { ToastProvider } from './components/Toast';
+import "./globals.css";
+import { ToastProvider } from "./components/Toast";
+import { ShowAmountProvider } from "./components/ShowAmountProvider";
 
 export const metadata = {
-  title: 'CRMS',
-  description: 'Customer Relationship Management System',
+  title: "CRMS",
+  description: "Customer Relationship Management System",
 };
 
 export default function RootLayout({ children }) {
@@ -11,7 +12,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         <ToastProvider>
-          {children}
+          <ShowAmountProvider>{children}</ShowAmountProvider>
         </ToastProvider>
       </body>
     </html>

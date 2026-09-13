@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -20,9 +20,14 @@ import {
   LogOut,
   Zap,
   ChevronRight,
+  Handshake,
+  Eye,
+  EyeOff,
+  Database,
 } from "lucide-react";
 import { getSupabase } from "../lib/supabase";
 import { useAuth } from "./AuthGuard";
+import { useShowAmount } from "./ShowAmountProvider";
 
 const ALL_NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -40,7 +45,9 @@ const ALL_NAV = [
   { id: "fabrics", label: "Fabrics", icon: Package, adminOnly: true },
   { id: "suppliers", label: "Suppliers", icon: DollarSign, adminOnly: true },
   { id: "customers", label: "Customers", icon: Users },
+  { id: "partners", label: "Partners", icon: Handshake, adminOnly: true },
   { id: "reports", label: "Reports", icon: BarChart2 },
+  { id: "backup", label: "Backup & Restore", icon: Database, adminOnly: true },
 ];
 
 const BOTTOM_NAV = [
@@ -56,6 +63,11 @@ export default function Shell({ children }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, setDark] = useState(false);
+  const { showAmount, setShowAmount } = useShowAmount();
+
+  const handleSignOut = useCallback(() => getSupabase().auth.signOut(), []);
+  const toggleShowAmount = useCallback(() => setShowAmount((v) => !v), [setShowAmount]);
+  const toggleDark = useCallback(() => setDark((d) => !d), []);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
@@ -102,10 +114,12 @@ export default function Shell({ children }) {
           "suppliers",
           "customers",
           "expenses",
+          "partners",
         ].includes(n.id),
       ),
     },
     { label: "Insights", items: navItems.filter((n) => n.id === "reports") },
+    { label: "System", items: navItems.filter((n) => n.id === "backup") },
   ];
 
   return (
@@ -213,7 +227,18 @@ export default function Shell({ children }) {
 
         <div className="px-3 pb-4 pt-2 border-t border-gray-100 dark:border-gray-700/50 space-y-0.5">
           <button
-            onClick={() => setDark((d) => !d)}
+            onClick={toggleShowAmount}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all text-sm"
+          >
+            {showAmount ? (
+              <Eye className="w-[18px] h-[18px]" />
+            ) : (
+              <EyeOff className="w-[18px] h-[18px]" />
+            )}
+            <span>{showAmount ? "Hide Amounts" : "Show Amounts"}</span>
+          </button>
+          <button
+            onClick={toggleDark}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all text-sm"
           >
             {dark ? (
@@ -224,7 +249,7 @@ export default function Shell({ children }) {
             <span>{dark ? "Light Mode" : "Dark Mode"}</span>
           </button>
           <button
-            onClick={() => getSupabase().auth.signOut()}
+            onClick={handleSignOut}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-sm"
           >
             <LogOut className="w-[18px] h-[18px]" />

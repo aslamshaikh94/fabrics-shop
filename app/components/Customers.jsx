@@ -1,30 +1,53 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
   Pencil,
   Trash2,
-  X,
-  Search,
   Phone,
   MapPin,
   BookOpen,
   MessageCircle,
+  Users,
+  Download,
+  Columns,
   ChevronLeft,
   ChevronRight,
-  Users,
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
+import Modal from "./shared/Modal";
 import { useToast } from "./Toast";
+import { exportCSV } from "../utils/export";
+import Pagination from "./shared/Pagination";
+import EmptyState from "./shared/EmptyState";
+import { SearchInput } from "./shared/FormField";
 
 const PAGE_SIZE = 9;
+
+const ALL_COLUMNS = [
+  { key: "name",    label: "Name" },
+  { key: "phone",   label: "Phone" },
+  { key: "address", label: "Address" },
+  { key: "notes",   label: "Notes" },
+  { key: "balance", label: "Balance" },
+  { key: "actions", label: "Actions" },
+];
+
+const DEFAULT_VISIBLE = new Set(["name", "phone", "address", "notes", "balance", "actions"]);
+
+function loadVisibleCols() {
+  try {
+    const saved = localStorage.getItem("customers_visible_cols");
+    if (saved) return new Set(JSON.parse(saved));
+  } catch {}
+  return new Set(DEFAULT_VISIBLE);
+}
 
 export default function Customers() {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
-  const [customerDues, setCustomerDues] = useState({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -38,32 +61,46 @@ export default function Customers() {
   });
   const [ledgerCustomer, setLedgerCustomer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
+  const colPickerRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "customers_visible_cols",
+      JSON.stringify([...visibleCols]),
+    );
+  }, [visibleCols]);
+
+  useEffect(() => {
+    if (!showColPicker) return;
+    function handleClick(e) {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target)) {
+        setShowColPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showColPicker]);
+
+  function toggleCol(key) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const col = (key) => visibleCols.has(key);
 
   useEffect(() => {
     fetchCustomers();
-    fetchCustomerDues();
   }, []);
 
   useEffect(() => {
     setPage(1);
   }, [searchTerm]);
-
-  async function fetchCustomerDues() {
-    try {
-      const { data } = await supabase
-        .from("sales")
-        .select("customer_id, remaining_amount")
-        .gt("remaining_amount", 0);
-      const map = {};
-      (data || []).forEach((s) => {
-        if (s.customer_id)
-          map[s.customer_id] = (map[s.customer_id] || 0) + s.remaining_amount;
-      });
-      setCustomerDues(map);
-    } catch (err) {
-      console.error(err);
-    }
-  }
 
   async function fetchCustomers() {
     try {
@@ -131,8 +168,8 @@ export default function Customers() {
   }
 
   function handleWhatsApp(customer) {
-    const due = customerDues[customer.id] || 0;
-    const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString("en-IN")}. Please clear at your earliest convenience. Thank you!`;
+    const due = customer.current_balance || 0;
+    const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Please clear at your earliest convenience. Thank you!`;
     const phone = customer.phone?.replace(/\D/g, "");
     const url = phone
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`
@@ -153,19 +190,24 @@ export default function Customers() {
 
   // Only search in phone if searchTerm looks like a phone number (digits/min length)
   const isPhoneSearch = /^[\d\s\-+]{2,}$/.test(searchTerm.trim());
-  const filteredCustomers = customers.filter((c) => {
-    const nameMatch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
-    if (isPhoneSearch) {
-      // For phone search, match digits only and require at least 3 consecutive matching digits
-      const searchDigits = searchTerm.replace(/\D/g, "");
-      const phoneDigits = (c.phone || "").replace(/\D/g, "");
-      return (
-        nameMatch ||
-        (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
-      );
-    }
-    return nameMatch;
-  });
+  const filteredCustomers = useMemo(
+    () =>
+      customers.filter((c) => {
+        const nameMatch = c.name
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase());
+        if (isPhoneSearch) {
+          const searchDigits = searchTerm.replace(/\D/g, "");
+          const phoneDigits = (c.phone || "").replace(/\D/g, "");
+          return (
+            nameMatch ||
+            (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
+          );
+        }
+        return nameMatch;
+      }),
+    [customers, searchTerm, isPhoneSearch],
+  );
 
   const totalPages = Math.ceil(filteredCustomers.length / PAGE_SIZE);
   const paginated = filteredCustomers.slice(
@@ -187,213 +229,314 @@ export default function Customers() {
           <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
           <p className="text-gray-500 mt-1">Manage your customer base</p>
         </div>
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-            setFormData({
-              name: "",
-              phone: "",
-              address: "",
-              notes: "",
-            });
-          }}
-          className="btn btn-primary"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Customer
-        </button>
-      </div>
-
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search customers..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input pl-10"
-        />
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Customer" : "Add Customer"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Customer name"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone
-                </label>
-                <input
-                  type="text"
-                  value={formData.phone}
-                  onChange={(e) =>
-                    setFormData({ ...formData, phone: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Phone number"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address
-                </label>
-                <input
-                  type="text"
-                  value={formData.address}
-                  onChange={(e) =>
-                    setFormData({ ...formData, address: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Address"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={3}
-                  placeholder="Additional notes"
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update" : "Add"} Customer
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredCustomers.map((customer) => (
-          <div key={customer.id} className="card-hover p-5">
-            <div className="flex items-start justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">{customer.name}</h3>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setLedgerCustomer(customer)}
-                  className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600"
-                  title="View Ledger"
-                >
-                  <BookOpen className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleEdit(customer)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-                {customerDues[customer.id] > 0 && (
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              exportCSV(
+                filteredCustomers.map((c) => ({
+                  name: c.name,
+                  phone: c.phone || "",
+                  address: c.address || "",
+                  dues: c.current_balance || 0,
+                  notes: c.notes || "",
+                })),
+                `customers-${new Date().toISOString().slice(0, 10)}.csv`,
+              )
+            }
+            className="btn btn-secondary"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <div className="relative inline-flex" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker((v) => !v)}
+              className="btn btn-secondary"
+              title="Show/hide columns"
+            >
+              <Columns className="w-4 h-4" />
+            </button>
+            {showColPicker && (
+              <>
+                <div className="fixed inset-0 z-20 sm:hidden" onClick={() => setShowColPicker(false)} />
+                <div className="fixed bottom-0 left-0 right-0 z-30 sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1 bg-white border border-gray-200 rounded-t-2xl sm:rounded-xl shadow-xl sm:shadow-lg p-4 sm:p-3 sm:w-44">
+                  <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-3 sm:hidden cursor-pointer" onClick={() => setShowColPicker(false)} />
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Columns</p>
+                  <div className="grid grid-cols-2 gap-1 sm:block sm:space-y-1">
+                    {ALL_COLUMNS.map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer py-1 sm:py-0.5 hover:text-primary-600">
+                        <input
+                          type="checkbox"
+                          checked={visibleCols.has(key)}
+                          onChange={() => toggleCol(key)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
                   <button
-                    onClick={() => handleWhatsApp(customer)}
-                    className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
-                    title="Send WhatsApp reminder"
+                    onClick={() => setVisibleCols(new Set(DEFAULT_VISIBLE))}
+                    className="mt-3 text-xs text-primary-600 hover:underline w-full text-left"
                   >
-                    <MessageCircle className="w-4 h-4" />
+                    Reset to default
                   </button>
-                )}
-                <button
-                  onClick={() => setConfirmDelete(customer.id)}
-                  className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm text-gray-600">
-              {customer.phone && (
-                <div className="flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-gray-400" />
-                  <span>{customer.phone}</span>
                 </div>
-              )}
-              {customer.address && (
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-gray-400" />
-                  <span>{customer.address}</span>
-                </div>
-              )}
-            </div>
-            {customerDues[customer.id] > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className="text-sm text-warning-600 font-semibold">
-                  Due: ₹{customerDues[customer.id].toLocaleString("en-IN")}
-                </p>
-              </div>
-            )}
-            {customer.notes && (
-              <p className="text-gray-500 italic text-xs mt-2">
-                {customer.notes}
-              </p>
+              </>
             )}
           </div>
-        ))}
+          <button
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData({
+                name: "",
+                phone: "",
+                address: "",
+                notes: "",
+              });
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Customer
+          </button>
+        </div>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-gray-500">
-            {filteredCustomers.length} customers — page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
+      <SearchInput
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Search customers..."
+      />
+
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editingId ? "Edit Customer" : "Add Customer"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Name *
+            </label>
+            <input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) =>
+                setFormData({ ...formData, name: e.target.value })
+              }
+              className="input"
+              placeholder="Customer name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone
+            </label>
+            <input
+              type="text"
+              value={formData.phone}
+              onChange={(e) =>
+                setFormData({ ...formData, phone: e.target.value })
+              }
+              className="input"
+              placeholder="Phone number"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Address
+            </label>
+            <input
+              type="text"
+              value={formData.address}
+              onChange={(e) =>
+                setFormData({ ...formData, address: e.target.value })
+              }
+              className="input"
+              placeholder="Address"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Notes
+            </label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) =>
+                setFormData({ ...formData, notes: e.target.value })
+              }
+              className="input"
+              rows={3}
+              placeholder="Additional notes"
+            />
+          </div>
+          <div className="flex gap-3 pt-4">
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="btn btn-secondary flex-1"
             >
-              <ChevronLeft className="w-4 h-4" />
+              Cancel
             </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="btn btn-secondary px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              <ChevronRight className="w-4 h-4" />
+            <button type="submit" className="btn btn-primary flex-1">
+              {editingId ? "Update" : "Add"} Customer
             </button>
           </div>
+        </form>
+      </Modal>
+
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50">
+                {col("name") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Name
+                  </th>
+                )}
+                {col("phone") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Phone
+                  </th>
+                )}
+                {col("address") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Address
+                  </th>
+                )}
+                {col("notes") && (
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                    Notes
+                  </th>
+                )}
+                {col("balance") && (
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600">
+                    Balance
+                  </th>
+                )}
+                {col("actions") && (
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600">
+                    Actions
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filteredCustomers.map((customer) => (
+                <tr
+                  key={customer.id}
+                  className="hover:bg-gray-50 transition-colors"
+                >
+                  {col("name") && (
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-gray-900">
+                        {customer.name}
+                      </span>
+                    </td>
+                  )}
+                  {col("phone") && (
+                    <td className="px-4 py-3">
+                      {customer.phone ? (
+                        <span className="flex items-center gap-1.5 text-gray-600">
+                          <Phone className="w-3.5 h-3.5 text-gray-400" />
+                          {customer.phone}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                  )}
+                  {col("address") && (
+                    <td className="px-4 py-3">
+                      {customer.address ? (
+                        <span className="flex items-center gap-1.5 text-gray-600">
+                          <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          <span className="truncate max-w-[180px] block">
+                            {customer.address}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                  )}
+                  {col("notes") && (
+                    <td className="px-4 py-3">
+                      {customer.notes ? (
+                        <span className="text-gray-500 italic text-xs">
+                          {customer.notes}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                  )}
+                  {col("balance") && (
+                    <td className="px-4 py-3 text-right">
+                      <span
+                        className={`font-semibold ${
+                          customer.current_balance > 0
+                            ? "text-warning-600"
+                            : "text-accent-600"
+                        }`}
+                      >
+                        {customer.current_balance > 0
+                          ? `₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : "Cleared ✓"}
+                      </span>
+                    </td>
+                  )}
+                  {col("actions") && (
+                    <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => setLedgerCustomer(customer)}
+                        className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600"
+                        title="View Ledger"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleEdit(customer)}
+                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      {customer.current_balance > 0 && (
+                        <button
+                          onClick={() => handleWhatsApp(customer)}
+                          className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
+                          title="Send WhatsApp reminder"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setConfirmDelete(customer.id)}
+                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
+
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={filteredCustomers.length}
+        label="customers"
+      />
 
       {ledgerCustomer && (
         <CustomerLedger
@@ -411,19 +554,16 @@ export default function Customers() {
       )}
 
       {filteredCustomers.length === 0 && (
-        <div className="text-center py-16">
-          <Users className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-          <p className="text-gray-400 font-medium">
-            {searchTerm
-              ? "No customers found matching your search"
-              : "No customers added yet"}
-          </p>
-          <p className="text-gray-300 text-sm mt-1">
-            {searchTerm
+        <EmptyState
+          icon={Users}
+          title="No customers added yet"
+          searchTerm={searchTerm}
+          description={
+            searchTerm
               ? "Try a different search term"
-              : "Click Add Customer to get started"}
-          </p>
-        </div>
+              : "Click Add Customer to get started"
+          }
+        />
       )}
     </div>
   );
