@@ -9,20 +9,16 @@ import {
   Package,
   TriangleAlert as AlertTriangle,
   ScanLine,
-  Download,
-  FileUp,
   Trash,
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
-import { exportCSV } from "../utils/export";
 import { formatDate } from "../utils/formatters";
 import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
-import FabricsImport from "./FabricsImport";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
@@ -94,7 +90,6 @@ export default function Fabrics() {
   const [linkingPurchase, setLinkingPurchase] = useState(false);
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
-  const [showImport, setShowImport] = useState(false);
   const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
   const purchaseLookupTimer = useRef(null);
 
@@ -462,33 +457,6 @@ export default function Fabrics() {
             onReset={() => setVisibleCols(new Set(DEFAULT_VISIBLE))}
           />
           <button
-            onClick={() => setShowImport(true)}
-            className="btn btn-secondary"
-            title="Import from Excel/CSV"
-          >
-            <FileUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() =>
-              exportCSV(
-                filtered.map((f) => ({
-                  name: f.name,
-                  barcode: f.barcode || "",
-                  quantity: f.quantity || "",
-                  supplier: f.supplier?.name || "",
-                  total_meters: f.total_meters,
-                  available_meters: f.available_meters,
-                  buy_price_per_meter: f.purchase_price_per_meter,
-                  total_price: f.total_meters * f.purchase_price_per_meter,
-                })),
-                `fabrics-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-          <button
             onClick={() => {
               setShowForm(true);
               setEditingId(null);
@@ -549,13 +517,6 @@ export default function Fabrics() {
           resetPage={() => setPage(1)}
         />
       </div>
-
-      <FabricsImport
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={() => fetchAll()}
-        suppliers={suppliers}
-      />
 
       <Modal
         open={showForm}

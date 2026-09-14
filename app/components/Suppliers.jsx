@@ -10,10 +10,8 @@ import {
   MapPin,
   BookOpen,
   DollarSign,
-  Download,
 } from "lucide-react";
 import { validateSupplier, hasErrors } from "../utils/validators";
-import { exportCSV } from "../utils/export";
 import SupplierLedger from "./SupplierLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
@@ -151,22 +149,6 @@ export default function Suppliers() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() =>
-              exportCSV(
-                filteredSuppliers.map((s) => ({
-                  name: s.name,
-                  phone: s.phone || "",
-                  address: s.address || "",
-                  notes: s.notes || "",
-                })),
-                `suppliers-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
           <button
             onClick={() => {
               setShowForm(true);

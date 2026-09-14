@@ -9,7 +9,6 @@ import {
   ArrowUpRight,
   ShoppingBag,
   Users,
-  Download,
   Pencil,
   X,
   ChevronLeft,
@@ -18,7 +17,6 @@ import {
 } from "lucide-react";
 
 import { useToast } from "./Toast";
-import { exportCSV } from "../utils/export";
 
 const PAGE_SIZE = 10;
 
@@ -398,18 +396,6 @@ export default function Payments() {
         <div className="card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-medium text-gray-700">All Suppliers</p>
-            <button
-              onClick={() =>
-                exportCSV(
-                  supplierSummary,
-                  `supplier-summary-${new Date().toISOString().slice(0, 10)}.csv`,
-                )
-              }
-              className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export
-            </button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full" style={{ minWidth: "480px" }}>
@@ -558,18 +544,6 @@ export default function Payments() {
         <div className="card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-medium text-gray-700">All Customers</p>
-            <button
-              onClick={() =>
-                exportCSV(
-                  customerSummary,
-                  `customer-summary-${new Date().toISOString().slice(0, 10)}.csv`,
-                )
-              }
-              className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export
-            </button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full" style={{ minWidth: "480px" }}>
