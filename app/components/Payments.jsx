@@ -51,7 +51,7 @@ export default function Payments() {
           supabase.from("sale_payments").select("*, sale_id").order("payment_date", { ascending: false }),
           supabase.from("suppliers").select("id, name"),
           supabase.from("customers").select("id, name"),
-          supabase.from("sales").select("id, customer_id, customer_name, total_amount, paid_amount, remaining_amount"),
+          supabase.from("sales").select("id, sale_group_id, customer_id, customer_name, total_amount, paid_amount, remaining_amount"),
           supabase.from("purchases").select("id, supplier_id, total_amount, paid_amount, remaining_amount"),
         ]);
 
@@ -59,13 +59,19 @@ export default function Payments() {
       const customerMap = Object.fromEntries((customersRes.data || []).map((c) => [c.id, c.name]));
       const purchaseSupplierMap = Object.fromEntries((purchasesRes.data || []).map((p) => [p.id, p.supplier_id]));
       const saleInfoMap = Object.fromEntries((salesRes.data || []).map((s) => [s.id, { customer_id: s.customer_id, customer_name: s.customer_name }]));
+      const saleGroupMap = {};
+      (salesRes.data || []).forEach((s) => {
+        if (s.sale_group_id && !saleGroupMap[s.sale_group_id]) {
+          saleGroupMap[s.sale_group_id] = { customer_id: s.customer_id, customer_name: s.customer_name };
+        }
+      });
 
       setPurchasePayments((purchaseRes.data || []).map((p) => ({
         ...p,
         purchase: { suppliers: { name: supplierMap[purchaseSupplierMap[p.purchase_id]] || "Unknown" } },
       })));
       setSalePayments((saleRes.data || []).map((s) => {
-        const info = saleInfoMap[s.sale_id] || {};
+        const info = saleInfoMap[s.sale_id] || saleGroupMap[s.sale_group_id] || {};
         const name = info.customer_name || (info.customer_id ? customerMap[info.customer_id] : null) || "Walk-in";
         return { ...s, sale: { customers: { name } } };
       }));
@@ -188,7 +194,7 @@ export default function Payments() {
             .order("payment_date", { ascending: false }),
           supabase.from("purchases").select("id, supplier_id"),
           supabase.from("customers").select("id, name"),
-          supabase.from("sales").select("id, customer_id, customer_name"),
+          supabase.from("sales").select("id, sale_group_id, customer_id, customer_name"),
         ]);
 
       const purchasePaymentsData = purchaseRes.data || [];
@@ -204,6 +210,15 @@ export default function Payments() {
         };
         return map;
       }, {});
+      const salesByGroup = {};
+      (salesRes.data || []).forEach((s) => {
+        if (s.sale_group_id && !salesByGroup[s.sale_group_id]) {
+          salesByGroup[s.sale_group_id] = {
+            customer_id: s.customer_id,
+            customer_name: s.customer_name,
+          };
+        }
+      });
 
       // Build customer name lookup from the customers table
       const customerNames = Object.fromEntries(
@@ -242,7 +257,7 @@ export default function Payments() {
         },
       }));
       const enrichedSalePayments = salePaymentsData.map((s) => {
-        const saleInfo = sales[s.sale_id] || {};
+        const saleInfo = sales[s.sale_id] || salesByGroup[s.sale_group_id] || {};
         // First try customer_name from the sale record itself (for walk-in sales with custom names)
         const name = saleInfo.customer_name
           ? saleInfo.customer_name

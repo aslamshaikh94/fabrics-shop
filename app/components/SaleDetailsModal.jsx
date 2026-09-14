@@ -218,23 +218,19 @@ export default function SaleDetailsModal({
           })
           .eq("id", saleId);
       }
+      const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
       for (const item of group.items) {
         await supabase.from("sale_payments").delete().eq("sale_id", item.id);
       }
-      const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
+      // Also delete group-level payments
+      await supabase.from("sale_payments").delete().eq("sale_group_id", group.id);
       if (totalPay > 0) {
-        const groupSubtotal = group.items.reduce((s, i) => s + (parseFloat(i.meters) || 0) * (parseFloat(i.price_per_meter) || 0), 0);
-        const paymentInserts = group.items.map((item) => ({
-          sale_id: item.id,
-          amount: Math.round(((parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0) / groupSubtotal) * totalPay * 100) / 100,
+        await supabase.from("sale_payments").insert([{
+          sale_group_id: group.id,
+          amount: totalPay,
           payment_date: editGroupFields.sale_date,
           payment_method: "cash",
-        }));
-        const sumSoFar = paymentInserts.slice(0, -1).reduce((s, p) => s + p.amount, 0);
-        paymentInserts[paymentInserts.length - 1].amount = Math.round((totalPay - sumSoFar) * 100) / 100;
-        for (const p of paymentInserts) {
-          await supabase.from("sale_payments").insert([p]);
-        }
+        }]);
       }
       onSaleUpdated();
       setShowEditSaleInfo(false);
@@ -309,8 +305,7 @@ export default function SaleDetailsModal({
         (group.customer_id ? "" : "Walk-in Customer"),
       sale_date: group.sale_date,
       payment_type: group.payment_type,
-      initial_payment:
-        group.paid_amount > 0 ? group.paid_amount.toString() : "",
+      initial_payment: group.paid_amount > 0 ? (Math.round(group.paid_amount * 100) / 100).toString() : "",
       discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });

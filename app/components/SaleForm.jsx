@@ -343,6 +343,12 @@ export default function SaleForm({
           .delete()
           .eq("sale_id", editingId);
         if (deletePayErr) throw deletePayErr;
+        // Also delete any group-level payments for this sale
+        const { data: saleData } = await supabase.from("sales").select("sale_group_id").eq("id", editingId).single();
+        const saleGroupId = saleData?.sale_group_id;
+        if (saleGroupId) {
+          await supabase.from("sale_payments").delete().eq("sale_group_id", saleGroupId);
+        }
 
         const salePayload = {
           customer_id: customerId || null,
@@ -368,7 +374,7 @@ export default function SaleForm({
             .from("sale_payments")
             .insert([
               {
-                sale_id: editingId,
+                sale_group_id: saleGroupId,
                 amount: netTotal,
                 payment_date: formData.sale_date,
                 payment_method: "cash",
@@ -380,7 +386,7 @@ export default function SaleForm({
             .from("sale_payments")
             .insert([
               {
-                sale_id: editingId,
+                sale_group_id: saleGroupId,
                 amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
                 payment_method: "cash",
@@ -431,17 +437,12 @@ export default function SaleForm({
         if (saleRows && saleRows.length > 0) {
           const totalPay = paymentType === "cash" ? netTotal : Math.min(initialPayment, netTotal);
           if (totalPay > 0) {
-            // Distribute payment proportionally across items
-            const paymentInserts = saleRows.map((row) => ({
-              sale_id: row.id,
-              amount: Math.round((row.meters * row.price_per_meter / subtotal) * totalPay * 100) / 100,
+            const { error: payErr } = await supabase.from("sale_payments").insert([{
+              sale_group_id: saleGroupId,
+              amount: totalPay,
               payment_date: formData.sale_date,
               payment_method: "cash",
-            }));
-            // Fix rounding: adjust last item so sum equals totalPay exactly
-            const sumSoFar = paymentInserts.slice(0, -1).reduce((s, p) => s + p.amount, 0);
-            paymentInserts[paymentInserts.length - 1].amount = Math.round((totalPay - sumSoFar) * 100) / 100;
-            const { error: payErr } = await supabase.from("sale_payments").insert(paymentInserts);
+            }]);
             if (payErr) throw payErr;
           }
         }
