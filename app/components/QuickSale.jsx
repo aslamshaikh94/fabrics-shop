@@ -186,24 +186,26 @@ export default function QuickSale() {
 
       if (error) throw error;
 
-      // Create sale_payments for cash sales — account for discount
-      if (saleRows && saleRows.length > 0) {
-        if (paymentType === "cash") {
-          const paymentInserts = saleRows.map((row, idx) => {
-            const fullAmount = row.meters * row.price_per_meter;
-            // Subtract discount from the first item's payment
-            const amount =
-              idx === 0 ? Math.max(fullAmount - discountValue, 0) : fullAmount;
-            return {
-              sale_id: row.id,
-              amount,
-              payment_date: new Date().toISOString().split("T")[0],
-              payment_method: "cash",
-            };
-          });
+      // Create one payment for cash sales — attached to the sale group, discount accounted
+      if (saleRows && saleRows.length > 0 && paymentType === "cash") {
+        const totalPay = Math.max(
+          saleRows.reduce(
+            (s, row) => s + row.meters * row.price_per_meter,
+            0,
+          ) - discountValue,
+          0,
+        );
+        if (totalPay > 0) {
           const { error: payErr } = await supabase
             .from("sale_payments")
-            .insert(paymentInserts);
+            .insert([
+              {
+                sale_group_id: saleGroupId,
+                amount: totalPay,
+                payment_date: new Date().toISOString().split("T")[0],
+                payment_method: "cash",
+              },
+            ]);
           if (payErr) throw payErr;
         }
       }

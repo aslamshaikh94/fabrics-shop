@@ -306,7 +306,7 @@ export default function SalesImport({
           // Try to find existing sale by customer + fabric_name + sale_date + meters
           const { data: existingSales } = await supabase
             .from("sales")
-            .select("id")
+            .select("id, sale_group_id")
             .match({
               customer_id: customerId,
               fabric_name: fabricName,
@@ -317,6 +317,7 @@ export default function SalesImport({
           if (existingSales && existingSales.length > 0) {
             // Update existing record
             const existingId = existingSales[0].id;
+            const existingGroupId = existingSales[0].sale_group_id;
             const { error: updateErr } = await supabase
               .from("sales")
               .update({
@@ -331,15 +332,19 @@ export default function SalesImport({
               .eq("id", existingId);
             if (updateErr) throw updateErr;
 
-            // Delete old payments and recreate
+            // Delete old payments and recreate (attached to the sale group)
             await supabase
               .from("sale_payments")
               .delete()
               .eq("sale_id", existingId);
-            if (paidAmount > 0) {
+            await supabase
+              .from("sale_payments")
+              .delete()
+              .eq("sale_group_id", existingGroupId);
+            if (paidAmount > 0 && existingGroupId) {
               await supabase.from("sale_payments").insert([
                 {
-                  sale_id: existingId,
+                  sale_group_id: existingGroupId,
                   amount: paidAmount,
                   payment_date: saleDate,
                   payment_method: "cash",
@@ -376,11 +381,11 @@ export default function SalesImport({
               continue;
             }
 
-            // Create payments
-            if (paidAmount > 0 && insertedSales?.[0]) {
+            // Create payments (attached to the sale group)
+            if (paidAmount > 0 && insertedSales?.[0]?.sale_group_id) {
               await supabase.from("sale_payments").insert([
                 {
-                  sale_id: insertedSales[0].id,
+                  sale_group_id: insertedSales[0].sale_group_id,
                   amount: paidAmount,
                   payment_date: saleDate,
                   payment_method: "cash",

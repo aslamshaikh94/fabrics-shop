@@ -27,8 +27,11 @@ export default function CustomerLedger({ customer, onClose }) {
       ]);
       const allSales = salesRes.data || [];
       const saleIds = allSales.map((s) => s.id);
-      const relatedPayments = (paymentsRes.data || []).filter((p) =>
-        saleIds.includes(p.sale_id),
+      const saleGroupIds = new Set(
+        allSales.map((s) => s.sale_group_id).filter(Boolean),
+      );
+      const relatedPayments = (paymentsRes.data || []).filter(
+        (p) => saleIds.includes(p.sale_id) || saleGroupIds.has(p.sale_group_id),
       );
       setSales(allSales);
       setPayments(relatedPayments);

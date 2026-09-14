@@ -7,7 +7,6 @@ import {
   Calendar,
   Eye,
   Trash2,
-  History,
   TrendingUp,
   Download,
   FileUp,
@@ -18,7 +17,6 @@ import { validatePayment, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import SaleForm from "./SaleForm";
-import SalePaymentModal from "./SalePaymentModal";
 import SaleDetailsModal from "./SaleDetailsModal";
 import SalesImport from "./SalesImport";
 import ColumnPicker from "./shared/ColumnPicker";
@@ -52,6 +50,21 @@ function loadSaleVisibleCols() {
   } catch {}
   return new Set(SALE_DEFAULT_VISIBLE);
 }
+const PAYMENT_METHODS = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "check", label: "Check" },
+  { value: "other", label: "Other" },
+];
+
+const INITIAL_PAYMENT = {
+  amount: "",
+  payment_date: new Date().toISOString().split("T")[0],
+  payment_method: "cash",
+  reference_number: "",
+  notes: "",
+};
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
   credit: "bg-warning-100 text-warning-800",
@@ -74,8 +87,8 @@ export default function Sales() {
   const [fabrics, setFabrics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
+  const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
   const [payments, setPayments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
@@ -173,12 +186,7 @@ export default function Sales() {
     }
   }
 
-  async function handlePaymentSubmit(
-    e,
-    paymentData,
-    setPaymentData,
-    INITIAL_PAYMENT,
-  ) {
+  async function handlePaymentSubmit(e) {
     e.preventDefault();
     if (!selectedSale) return;
     const errors = validatePayment(paymentData);
@@ -187,72 +195,89 @@ export default function Sales() {
       return;
     }
     try {
-      const totalPay = parseFloat(paymentData.amount);
-      const groupSubtotal = selectedSale.items.reduce(
-        (s, i) => s + (parseFloat(i.meters) || 0) * (parseFloat(i.price_per_meter) || 0), 0
-      );
-
-      // Insert one payment row per item proportionally (DB trigger needs sale_id)
-      // but tag them with a shared reference so they display as one payment
-      const sharedRef = paymentData.reference_number ||
-        `PAY-${Date.now()}`;
-
-      const paymentInserts = selectedSale.items.map((item, idx) => {
-        const itemSubtotal = (parseFloat(item.meters) || 0) * (parseFloat(item.price_per_meter) || 0);
-        const proportion = groupSubtotal > 0 ? itemSubtotal / groupSubtotal : 1 / selectedSale.items.length;
-        const amount = idx === selectedSale.items.length - 1
-          ? Math.round((totalPay - selectedSale.items.slice(0, -1).reduce((s, it, i) => {
-              const sub = (parseFloat(it.meters) || 0) * (parseFloat(it.price_per_meter) || 0);
-              const p = groupSubtotal > 0 ? sub / groupSubtotal : 1 / selectedSale.items.length;
-              return s + Math.round(p * totalPay * 100) / 100;
-            }, 0)) * 100) / 100
-          : Math.round(proportion * totalPay * 100) / 100;
-        return {
-          sale_id: item.id,
-          amount,
-          payment_date: paymentData.payment_date,
-          payment_method: paymentData.payment_method,
-          reference_number: sharedRef,
-          notes: paymentData.notes,
-        };
-      });
-
-      const { error } = await supabase.from("sale_payments").insert(paymentInserts);
+      const { error } = await supabase.from("sale_payments").insert([{
+        sale_group_id: selectedSale.id,
+        amount: parseFloat(paymentData.amount),
+        payment_date: paymentData.payment_date,
+        payment_method: paymentData.payment_method,
+        reference_number: paymentData.reference_number?.trim() || "",
+        notes: paymentData.notes,
+      }]);
       if (error) throw error;
-
-      setShowPaymentForm(false);
       setPaymentData({ ...INITIAL_PAYMENT });
+      adjustSelectedSaleBalances(parseFloat(paymentData.amount) || 0);
       fetchSales();
-      fetchPayments(selectedSale.items.map((i) => i.id));
+      fetchPayments(selectedSale);
       toast("Payment recorded");
     } catch (error) {
       toast("Failed to save payment", "error");
     }
   }
 
-  async function fetchPayments(saleIds) {
+  async function fetchPayments(group) {
     try {
+      const saleIds = group.items.map((i) => i.id);
       const { data } = await supabase
         .from("sale_payments")
         .select("*")
-        .in("sale_id", Array.isArray(saleIds) ? saleIds : [saleIds])
+        .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: false });
-      setPayments(data || []);
+      // Deduplicate: group payments (sale_group_id set) take priority, exclude old per-item rows that are already covered
+      const groupRows = (data || []).filter((p) => p.sale_group_id === group.id);
+      const legacyRows = (data || []).filter((p) => !p.sale_group_id);
+      // Group legacy rows by created_at second to show as single entries
+      const legacyGrouped = Object.values(legacyRows.reduce((acc, p) => {
+        const key = p.created_at?.slice(0, 19) || p.id;
+        if (!acc[key]) acc[key] = { ...p, amount: 0 };
+        acc[key].amount = Math.round((acc[key].amount + p.amount) * 100) / 100;
+        return acc;
+      }, {}));
+      setPayments([...groupRows, ...legacyGrouped].sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date)));
     } catch (error) {
       console.error(error);
     }
   }
 
-  async function handleDeletePayment(paymentIds) {
+  // Keep the Payment History summary (Total/Paid/Remaining) in sync after adding/removing a payment
+  function adjustSelectedSaleBalances(delta) {
+    setSelectedSale((prev) => {
+      if (!prev) return prev;
+      const netTotal = Number(prev.total_amount) - (Number(prev.discount_amount) || 0);
+      const newPaid = Math.max(
+        Math.round(((Number(prev.paid_amount) || 0) + delta) * 100) / 100,
+        0,
+      );
+      const newRemaining = Math.max(netTotal - newPaid, 0);
+      return {
+        ...prev,
+        paid_amount: newPaid,
+        remaining_amount: newRemaining,
+        payment_type:
+          newPaid <= 0
+            ? "credit"
+            : newPaid >= netTotal
+              ? "cash"
+              : "partial",
+      };
+    });
+  }
+
+  async function handleDeletePayment(payment) {
     try {
-      const ids = Array.isArray(paymentIds) ? paymentIds : [paymentIds];
-      const { error } = await supabase
-        .from("sale_payments")
-        .delete()
-        .in("id", ids);
-      if (error) throw error;
+      if (payment.sale_group_id) {
+        await supabase.from("sale_payments").delete().eq("id", payment.id);
+      } else {
+        // Legacy: delete all rows in same batch by created_at second
+        const batchKey = payment.created_at?.slice(0, 19);
+        const saleIds = selectedSale.items.map((i) => i.id);
+        await supabase.from("sale_payments").delete()
+          .in("sale_id", saleIds)
+          .gte("created_at", batchKey)
+          .lt("created_at", batchKey + "Z");
+      }
       toast("Payment deleted");
-      fetchPayments(selectedSale.items.map((i) => i.id));
+      adjustSelectedSaleBalances(-(payment.amount || 0));
+      fetchPayments(selectedSale);
       fetchSales();
     } catch (err) {
       toast("Failed to delete payment", "error");
@@ -269,6 +294,8 @@ export default function Sales() {
           .delete()
           .in("sale_id", deleteInfo.saleIds);
         if (paymentsError) throw paymentsError;
+        // Also delete group-level payments
+        await supabase.from("sale_payments").delete().eq("sale_group_id", deleteInfo.groupId);
         const { error: salesError } = await supabase
           .from("sales")
           .delete()
@@ -454,7 +481,8 @@ export default function Sales() {
 
   const handleViewPayments = useCallback((group) => {
     setSelectedSale(group);
-    fetchPayments(group.items.map((i) => i.id));
+    setPaymentData({ ...INITIAL_PAYMENT });
+    fetchPayments(group);
   }, []);
 
   const handleCloseDetails = useCallback(
@@ -470,10 +498,6 @@ export default function Sales() {
     setEditingId(null);
   }, []);
   const handleCloseImport = useCallback(() => setShowImport(false), []);
-  const handleClosePaymentForm = useCallback(
-    () => setShowPaymentForm(false),
-    [],
-  );
 
   const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
   const paginated = groupedArray.slice(
@@ -627,15 +651,8 @@ export default function Sales() {
         customers={customers}
       />
 
-      <SalePaymentModal
-        open={showPaymentForm}
-        onClose={handleClosePaymentForm}
-        selectedSale={selectedSale}
-        onPaymentSubmit={handlePaymentSubmit}
-      />
-
-      {/* Payment History Modal */}
-      {!!selectedSale && !showPaymentForm && payments.length > 0 && (
+      {/* Payment History + Receive Payment Modal */}
+      {!!selectedSale && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto p-2 sm:p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8 animate-modal-in shadow-xl border border-gray-200">
             <div className="flex items-center justify-between mb-4">
@@ -704,33 +721,21 @@ export default function Sales() {
                 </span>
               </p>
             </div>
-            <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
-              {Object.values(
-                payments.reduce((acc, p) => {
-                  const key = `${p.reference_number}|${p.payment_date}|${p.payment_method}`;
-                  if (!acc[key]) acc[key] = { ...p, amount: 0, ids: [] };
-                  acc[key].amount += p.amount;
-                  acc[key].ids.push(p.id);
-                  return acc;
-                }, {})
-              ).sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date))
-              .map((p) => (
+            {payments.length === 0 && (
+              <p className="text-sm text-gray-400 italic text-center py-4">
+                No payments recorded yet
+              </p>
+            )}
+            <div className="space-y-2 max-h-60 overflow-y-auto scrollbar-thin">
+              {payments.map((p) => (
                 <div key={p.id} className="bg-gray-50 rounded-lg p-3">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="font-semibold text-gray-900">
-                        ₹
-                        {p.amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        ₹{p.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                       <p className="text-sm text-gray-500">
-                        {new Date(p.payment_date).toLocaleDateString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          year: "2-digit",
-                        })}
+                        {new Date(p.payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -738,14 +743,12 @@ export default function Sales() {
                         <span className="badge bg-gray-200 text-gray-700">
                           {p.payment_method.toUpperCase()}
                         </span>
-                        {p.reference_number && !p.reference_number.startsWith("PAY-") && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {p.reference_number}
-                          </p>
+                        {p.reference_number && (
+                          <p className="text-xs text-gray-500 mt-1">{p.reference_number}</p>
                         )}
                       </div>
                       <button
-                        onClick={() => setConfirmDeletePayment(p.ids)}
+                        onClick={() => setConfirmDeletePayment(p)}
                         className="p-1.5 hover:bg-red-100 rounded-lg text-gray-400 hover:text-red-600 transition-colors"
                         title="Delete payment"
                       >
@@ -756,13 +759,111 @@ export default function Sales() {
                 </div>
               ))}
             </div>
-            {selectedSale.remaining_amount > 0 && (
-              <button
-                onClick={() => setShowPaymentForm(true)}
-                className="btn btn-accent w-full mt-4"
+            {selectedSale.remaining_amount > 0 ? (
+              <form
+                onSubmit={handlePaymentSubmit}
+                className="mt-4 border-t border-gray-200 pt-4"
               >
-                <CreditCard className="w-5 h-5 mr-2" /> Receive Payment
-              </button>
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5 mb-3">
+                  <CreditCard className="w-4 h-4 text-accent-600" />
+                  Receive Payment
+                </h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Amount *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      max={selectedSale.remaining_amount}
+                      value={paymentData.amount}
+                      onChange={(e) =>
+                        setPaymentData({ ...paymentData, amount: e.target.value })
+                      }
+                      className="input"
+                      placeholder="0.00"
+                      onWheel={(e) => e.target.blur()}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Payment Date
+                    </label>
+                    <input
+                      type="date"
+                      value={paymentData.payment_date}
+                      onChange={(e) =>
+                        setPaymentData({
+                          ...paymentData,
+                          payment_date: e.target.value,
+                        })
+                      }
+                      className="input w-full"
+                    />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={paymentData.payment_method}
+                    onChange={(e) =>
+                      setPaymentData({
+                        ...paymentData,
+                        payment_method: e.target.value,
+                      })
+                    }
+                    className="input"
+                  >
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Reference Number
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentData.reference_number}
+                    onChange={(e) =>
+                      setPaymentData({
+                        ...paymentData,
+                        reference_number: e.target.value,
+                      })
+                    }
+                    className="input"
+                    placeholder="Transaction ID / Check No."
+                  />
+                </div>
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Notes
+                  </label>
+                  <textarea
+                    value={paymentData.notes}
+                    onChange={(e) =>
+                      setPaymentData({ ...paymentData, notes: e.target.value })
+                    }
+                    className="input"
+                    rows={2}
+                    placeholder="Optional remarks"
+                  />
+                </div>
+                <button type="submit" className="btn btn-accent w-full mt-3">
+                  <CreditCard className="w-5 h-5 mr-2" /> Receive Payment
+                </button>
+              </form>
+            ) : (
+              <p className="mt-4 text-sm text-accent-600 font-semibold flex items-center justify-center gap-1">
+                ✓ Fully Paid
+              </p>
             )}
           </div>
         </div>
@@ -886,31 +987,17 @@ export default function Sales() {
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => {
-                            setSelectedSale(group);
-                            fetchPayments(group.items.map((i) => i.id));
-                          }}
-                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+                          onClick={() => handleViewPayments(group)}
+                          className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
                           title="View payments"
                         >
-                          <History className="w-4 h-4" />
+                          <CreditCard className="w-4 h-4" />
                         </button>
-                        {group.remaining_amount > 0 && (
-                          <button
-                            onClick={() => {
-                              setSelectedSale(group);
-                              setShowPaymentForm(true);
-                            }}
-                            className="p-1.5 hover:bg-accent-50 rounded-lg text-gray-500 hover:text-accent-600"
-                            title="Receive payment"
-                          >
-                            <CreditCard className="w-4 h-4" />
-                          </button>
-                        )}
                         <button
                           onClick={() =>
                             setConfirmDelete({
                               isGroup: true,
+                              groupId: group.id,
                               saleIds: group.items.map((i) => i.id),
                               itemCount: group.items.length,
                             })
