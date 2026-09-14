@@ -11,13 +11,10 @@ import {
   FileText,
   ExternalLink,
   Receipt,
-  Download,
-  FileUp,
   CheckCircle2,
   Circle,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
-import { exportCSV } from "../utils/export";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -25,7 +22,6 @@ import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import ImageViewer from "./shared/ImageViewer";
-import ExpensesImport from "./ExpensesImport";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
@@ -70,13 +66,7 @@ export default function Expenses() {
   const [uploading, setUploading] = useState(false);
   const [proofError, setProofError] = useState("");
   const [viewProofUrl, setViewProofUrl] = useState(null);
-  const [showImport, setShowImport] = useState(false);
   const [togglingClear, setTogglingClear] = useState(null);
-  const handleCloseImport = () => setShowImport(false);
-  const handleImported = () => {
-    setShowImport(false);
-    fetchExpenses();
-  };
 
   useEffect(() => {
     fetchExpenses();
@@ -276,31 +266,6 @@ export default function Expenses() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowImport(true)}
-            className="btn btn-secondary"
-            title="Import from Excel/CSV"
-          >
-            <FileUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() =>
-              exportCSV(
-                filtered.map((e) => ({
-                  title: e.title,
-                  category: e.category,
-                  amount: e.amount,
-                  date: e.expense_date,
-                  paid_by: e.paid_by || "",
-                  notes: e.notes || "",
-                })),
-                `expenses-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-          <button
             onClick={() => {
               setEditingId(null);
               setFormData(emptyForm);
@@ -385,12 +350,6 @@ export default function Expenses() {
           resetPage={() => setPage(1)}
         />
       </div>
-
-      <ExpensesImport
-        open={showImport}
-        onClose={handleCloseImport}
-        onImported={handleImported}
-      />
 
       {/* Add/Edit Expense Modal */}
       <Modal

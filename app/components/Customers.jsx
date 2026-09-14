@@ -10,7 +10,6 @@ import {
   BookOpen,
   MessageCircle,
   Users,
-  Download,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -19,7 +18,6 @@ import ConfirmModal from "./ConfirmModal";
 import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import { useToast } from "./Toast";
-import { exportCSV } from "../utils/export";
 import Pagination from "./shared/Pagination";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
@@ -217,23 +215,6 @@ export default function Customers() {
           <p className="text-gray-500 mt-1">Manage your customer base</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() =>
-              exportCSV(
-                filteredCustomers.map((c) => ({
-                  name: c.name,
-                  phone: c.phone || "",
-                  address: c.address || "",
-                  dues: c.current_balance || 0,
-                  notes: c.notes || "",
-                })),
-                `customers-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
           <ColumnPicker
             columns={ALL_COLUMNS}
             visibleCols={visibleCols}

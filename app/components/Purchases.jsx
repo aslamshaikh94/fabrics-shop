@@ -11,7 +11,6 @@ import {
   Pencil,
   Paperclip,
   FileText,
-  Download,
   FileUp,
   ShoppingBag,
   ScanLine,
@@ -19,9 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import DateRangeFilter from "./DateRangeFilter";
-import PurchasesImport from "./PurchasesImport";
 import ColumnPicker from "./shared/ColumnPicker";
-import { exportCSV } from "../utils/export";
 import {
   validatePurchase,
   validatePayment,
@@ -159,7 +156,6 @@ export default function Purchases() {
   const [invoiceFile, setInvoiceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [invoiceError, setInvoiceError] = useState("");
-  const [showImport, setShowImport] = useState(false);
   const [viewInvoiceUrl, setViewInvoiceUrl] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [paymentErrors, setPaymentErrors] = useState({});
@@ -915,33 +911,6 @@ export default function Purchases() {
             onToggle={toggleCol}
             onReset={() => setVisibleCols(new Set(PURCHASE_DEFAULT_VISIBLE))}
           />
-          <button
-            onClick={() => setShowImport(true)}
-            className="btn btn-secondary"
-            title="Import from Excel/CSV"
-          >
-            <FileUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() =>
-              exportCSV(
-                filteredPurchases.map((p) => ({
-                  purchase_id: p.purchase_number || p.id,
-                  date: p.purchase_date,
-                  supplier: p.supplier?.name,
-                  total: p.total_amount,
-                  paid: p.paid_amount,
-                  remaining: p.remaining_amount,
-                  status: p.status,
-                  notes: p.notes,
-                })),
-                `purchases-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
           <button
             onClick={() => {
               resetForm();
@@ -2495,16 +2464,6 @@ export default function Purchases() {
           </p>
         </div>
       )}
-
-      <PurchasesImport
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={() => {
-          fetchAll();
-          setShowImport(false);
-        }}
-        suppliers={suppliers}
-      />
 
       <ImageViewer
         url={viewInvoiceUrl}

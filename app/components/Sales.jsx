@@ -8,17 +8,13 @@ import {
   Eye,
   Trash2,
   TrendingUp,
-  Download,
-  FileUp,
   X,
 } from "lucide-react";
-import { exportCSV } from "../utils/export";
 import { validatePayment, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import SaleForm from "./SaleForm";
 import SaleDetailsModal from "./SaleDetailsModal";
-import SalesImport from "./SalesImport";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName } from "../utils/formatters";
@@ -101,7 +97,6 @@ export default function Sales() {
   const [confirmDeletePayment, setConfirmDeletePayment] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
-  const [showImport, setShowImport] = useState(false);
   const [visibleCols, setVisibleCols] = useState(loadSaleVisibleCols);
 
   useEffect(() => {
@@ -497,7 +492,6 @@ export default function Sales() {
     setShowForm(false);
     setEditingId(null);
   }, []);
-  const handleCloseImport = useCallback(() => setShowImport(false), []);
 
   const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
   const paginated = groupedArray.slice(
@@ -530,36 +524,6 @@ export default function Sales() {
             onToggle={toggleCol}
             onReset={() => setVisibleCols(new Set(SALE_DEFAULT_VISIBLE))}
           />
-          <button
-            onClick={() => setShowImport(true)}
-            className="btn btn-secondary"
-            title="Import from Excel/CSV"
-          >
-            <FileUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() =>
-              exportCSV(
-                filteredSales.map((s) => ({
-                  date: s.sale_date,
-                  customer: s.customer?.name || s.customer_name || "Walk-in",
-                  fabric_name: s.fabric_name || "",
-                  notes: s.notes,
-                  meters: s.meters,
-                  price_per_meter: s.price_per_meter,
-                  total: s.total_amount,
-                  discount: s.discount_amount || 0,
-                  paid: s.paid_amount,
-                  remaining: s.remaining_amount,
-                  type: s.payment_type,
-                })),
-                `sales-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
           <button onClick={handleOpenNewSale} className="btn btn-primary">
             <Plus className="w-5 h-5 mr-2" /> New Sale
           </button>
@@ -634,17 +598,6 @@ export default function Sales() {
         editingId={editingId}
         onSaved={() => {
           fetchSales();
-          setPage(1);
-        }}
-        fabrics={fabrics}
-        customers={customers}
-      />
-
-      <SalesImport
-        open={showImport}
-        onClose={handleCloseImport}
-        onImported={() => {
-          fetchAll();
           setPage(1);
         }}
         fabrics={fabrics}

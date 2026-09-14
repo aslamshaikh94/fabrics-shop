@@ -7,11 +7,7 @@ import {
   Trash2,
   Calendar,
   Wallet,
-  Download,
-  FileUp,
 } from "lucide-react";
-import { exportCSV } from "../utils/export";
-import WithdrawalsImport from "./WithdrawalsImport";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -41,7 +37,6 @@ export default function Withdrawals() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [showImport, setShowImport] = useState(false);
   const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
@@ -156,29 +151,6 @@ export default function Withdrawals() {
           <p className="text-gray-500 mt-1">Track owner/partner withdrawals</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowImport(true)}
-            className="btn btn-secondary"
-            title="Import from Excel/CSV"
-          >
-            <FileUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() =>
-              exportCSV(
-                filtered.map((w) => ({
-                  amount: w.amount,
-                  date: w.withdrawal_date,
-                  withdrawn_by: w.withdrawn_by || "",
-                  reason: w.reason || "",
-                })),
-                `withdrawals-${new Date().toISOString().slice(0, 10)}.csv`,
-              )
-            }
-            className="btn btn-secondary"
-          >
-            <Download className="w-4 h-4" />
-          </button>
           <button
             onClick={() => {
               setEditingId(null);
@@ -407,14 +379,6 @@ export default function Withdrawals() {
         />
       )}
 
-      <WithdrawalsImport
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={() => {
-          fetchWithdrawals();
-          setShowImport(false);
-        }}
-      />
     </div>
   );
 }
