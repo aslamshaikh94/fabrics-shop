@@ -346,6 +346,9 @@ export async function restoreBackup(backup, options = {}) {
     skipTables = [],
     onProgress = () => {},
   } = options;
+  // Columns dropped from the restore payload because the live database is
+  // missing them (e.g. a migration not yet applied). Keyed `table.column`.
+  const droppedColumns = new Set();
 
   try {
     // Validate backup
@@ -483,10 +486,44 @@ export async function restoreBackup(backup, options = {}) {
 
         const batchSize = 100;
         for (let i = 0; i < records.length; i += batchSize) {
-          const batch = records.slice(i, i + batchSize);
-          const { error: insertError } = await supabase
+          let batch = records.slice(i, i + batchSize);
+          let { error: insertError } = await supabase
             .from(table.name)
             .insert(batch);
+
+          // Tolerate schema drift: if the live database is missing a column that
+          // exists in this backup, drop it from the remaining records and retry —
+          // rather than aborting the whole restore mid-way (post-clear) and
+          // leaving the database partially emptied.
+          while (
+            insertError &&
+            /Could not find the '([^']+)' column/.test(insertError.message || "")
+          ) {
+            const missingCol = insertError.message.match(
+              /Could not find the '([^']+)' column/,
+            )[1];
+            if (droppedColumns.has(`${table.name}.${missingCol}`)) {
+              break; // already dropped once for this table — don't loop forever
+            }
+            droppedColumns.add(`${table.name}.${missingCol}`);
+            console.warn(
+              `Restore: dropping missing column "${missingCol}" from ${table.name} (not in database schema). ` +
+                `Run pending migrations to keep this data.`,
+            );
+            onProgress({
+              step: currentStep,
+              total: totalSteps,
+              action: `Note: column "${missingCol}" does not exist in ${table.name} — skipped (run pending migrations).`,
+            });
+            records = records.map((r) => {
+              const { [missingCol]: _omitted, ...rest } = r;
+              return rest;
+            });
+            batch = records.slice(i, i + batchSize);
+            ({ error: insertError } = await supabase
+              .from(table.name)
+              .insert(batch));
+          }
 
           if (insertError) {
             throw new Error(
