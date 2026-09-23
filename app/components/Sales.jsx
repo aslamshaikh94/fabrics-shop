@@ -192,10 +192,26 @@ export default function Sales() {
       toast("Please select the partner whose account this credits", "error");
       return;
     }
+    // Hard cap: never record more than the outstanding amount (the HTML max
+    // attribute is only advisory — typed values can exceed it). This keeps a
+    // discounted sale from going into "extra paid (+)" by over-collection.
+    const amt = parseFloat(paymentData.amount) || 0;
+    const outstanding = parseFloat(selectedSale.remaining_amount) || 0;
+    if (amt > outstanding + 0.005) {
+      toast(
+        `Amount exceeds outstanding of ₹${outstanding.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        "error",
+      );
+      return;
+    }
+    if (amt <= 0) {
+      toast("Please enter a valid amount", "error");
+      return;
+    }
     try {
       const { error } = await supabase.from("sale_payments").insert([{
         sale_group_id: selectedSale.id,
-        amount: parseFloat(paymentData.amount),
+        amount: amt,
         payment_date: paymentData.payment_date,
         payment_method: paymentData.payment_method,
         partner_id:
@@ -674,6 +690,32 @@ export default function Sales() {
                   </span>
                 </span>
               </div>
+              {(selectedSale.discount_amount || 0) > 0 && (
+                <div className="flex justify-between mt-2 pt-2 border-t border-gray-200">
+                  <span className="text-sm">
+                    Discount:{" "}
+                    <span className="font-semibold text-red-600">
+                      -₹
+                      {selectedSale.discount_amount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </span>
+                  <span className="text-sm">
+                    Net (after discount):{" "}
+                    <span className="font-semibold">
+                      ₹
+                      {(
+                        selectedSale.total_amount - selectedSale.discount_amount
+                      ).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </span>
+                </div>
+              )}
               <p className="text-sm mt-2">
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
@@ -916,11 +958,26 @@ export default function Sales() {
                       {(() => {
                         const netTotal = group.total_amount - group.discount_amount;
                         const extraPaid = group.paid_amount - netTotal;
-                        if (extraPaid > 0.005)
-                          return <span className="font-medium text-accent-600">+₹{extraPaid.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
-                        if (group.discount_amount > 0)
-                          return <span className="font-medium text-primary-600">-₹{group.discount_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
-                        return <span className="text-gray-300">—</span>;
+                        const hasDiscount = group.discount_amount > 0;
+                        const hasExtra = extraPaid > 0.005;
+                        if (!hasDiscount && !hasExtra)
+                          return <span className="text-gray-300">—</span>;
+                        // Show the discount AND any over-collection together —
+                        // the plus must never hide the minus.
+                        return (
+                          <span className="flex items-center justify-end gap-1">
+                            {hasDiscount && (
+                              <span className="font-medium text-primary-600">
+                                -₹{group.discount_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            )}
+                            {hasExtra && (
+                              <span className="font-medium text-accent-600">
+                                +₹{extraPaid.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            )}
+                          </span>
+                        );
                       })()}
                     </td>
                   )}

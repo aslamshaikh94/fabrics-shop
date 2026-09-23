@@ -670,6 +670,99 @@ export default function Payments() {
   const yearOf = (d) => new Date(d).getFullYear();
   const byDateDesc = (a, b) => new Date(b.date) - new Date(a.date);
 
+  // ── Per-account summaries — every holder shown separately (overview cards) ──
+  const getHolderEntries = (name) => {
+    if (!name) return [];
+    return [
+      ...salePayments
+        .filter((p) => p.partner_name === name)
+        .map((p) => ({
+          key: `sale-${p.id}`,
+          date: p.payment_date,
+          description: p.sale?.customers?.name || "Walk-in",
+          type: "credit",
+          amount: p.amount,
+        })),
+      ...deposits
+        .filter((d) => d.partner_name === name)
+        .map((d) => ({
+          key: `deposit-${d.id}`,
+          date: d.deposit_date,
+          description: d.notes || "Cash deposit",
+          type: "credit",
+          amount: d.amount,
+        })),
+      ...withdrawals
+        .filter((w) => {
+          const p = matchPartner(w.withdrawn_by, partners);
+          return p && p.name === name;
+        })
+        .map((w) => ({
+          key: `withdrawal-${w.id}`,
+          date: w.withdrawal_date,
+          description: w.reason || "Withdrawal",
+          type: "debit",
+          amount: w.amount,
+        })),
+      ...purchasePayments
+        .filter(
+          (pp) =>
+            pp.partner_id &&
+            (pp.reinvested_amount || 0) > 0 &&
+            partners.some((p) => p.id === pp.partner_id && p.name === name),
+        )
+        .map((pp) => ({
+          key: `purchase-${pp.id}`,
+          date: pp.payment_date,
+          description: `Paid to ${pp.purchase?.suppliers?.name || "Supplier"} (reinvested)`,
+          type: "debit",
+          amount: pp.reinvested_amount,
+        })),
+    ];
+  };
+  const holderSummaries = holderNames.map((name) => {
+    const entries = getHolderEntries(name);
+    const partner = partners.find((p) => p.name === name) || null;
+    const manualOpening = Number(partner?.opening_balance || 0);
+    const manualOpeningDate = partner?.opening_balance_date || "";
+    const openingApplies =
+      Boolean(manualOpeningDate) && currentPartnerYear >= yearOf(manualOpeningDate);
+    const statementStart = openingApplies ? manualOpeningDate : "";
+    const afterStart = (e) => !statementStart || e.date >= statementStart;
+    const opening = r2(
+      (openingApplies ? manualOpening : 0) +
+        entries
+          .filter((e) => yearOf(e.date) < currentPartnerYear && afterStart(e))
+          .reduce((s, e) => s + (e.type === "credit" ? e.amount : -e.amount), 0),
+    );
+    const yearEntries = entries.filter(
+      (e) => yearOf(e.date) === currentPartnerYear && afterStart(e),
+    );
+    const credit = r2(
+      yearEntries.filter((e) => e.type === "credit").reduce((s, e) => s + (e.amount || 0), 0),
+    );
+    const debit = r2(
+      yearEntries.filter((e) => e.type === "debit").reduce((s, e) => s + (e.amount || 0), 0),
+    );
+    return {
+      name,
+      opening,
+      credit,
+      debit,
+      closing: r2(opening + credit - debit),
+      count: yearEntries.length,
+      recent: [...yearEntries].sort(byDateDesc).slice(0, 5),
+    };
+  });
+  const openStatement = (name) => {
+    setTrackerPartner(name);
+    setTimeout(() => {
+      document
+        .getElementById("account-statement")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
+
   const holderTransfersAll = effectiveHolder
     ? salePayments
         .filter((p) => p.partner_name === effectiveHolder)
@@ -838,49 +931,6 @@ export default function Payments() {
   });
   const hasMonthActivity = holderMonthRows.some((r) => r.credit || r.debit);
 
-  // ── Per-holder yearly credit / debit / net (every holder, so other accounts can
-  //    be compared and switched to without leaving the statement) ──
-  // Each holder's own opening-balance snapshot is respected: transactions dated
-  // before `opening_balance_date` are already inside that snapshot, so counting
-  // them here as credit/debit would double-count the same money.
-  const holderOpeningDate = {};
-  partners.forEach((p) => {
-    if (p.opening_balance_date) holderOpeningDate[p.name] = p.opening_balance_date;
-  });
-  const holderYearTotals = {};
-  const bumpHolderYear = (name, date, amount, type) => {
-    if (!name) return;
-    const cutoff = holderOpeningDate[name];
-    if (cutoff && date < cutoff) return;
-    const key = `${name}|${yearOf(date)}`;
-    if (!holderYearTotals[key]) {
-      holderYearTotals[key] = { credit: 0, debit: 0 };
-    }
-    if (type === "credit") holderYearTotals[key].credit += amount || 0;
-    else holderYearTotals[key].debit += amount || 0;
-  };
-  salePayments.forEach((p) =>
-    bumpHolderYear(p.partner_name, p.payment_date, p.amount, "credit"),
-  );
-  deposits.forEach((d) =>
-    bumpHolderYear(d.partner_name, d.deposit_date, d.amount, "credit"),
-  );
-  withdrawals.forEach((w) =>
-    bumpHolderYear(matchPartner(w.withdrawn_by, partners)?.name, w.withdrawal_date, w.amount, "debit"),
-  );
-  purchasePayments.forEach((pp) => {
-    if (!pp.partner_id || !((pp.reinvested_amount || 0) > 0)) return;
-    bumpHolderYear(
-      partners.find((p) => p.id === pp.partner_id)?.name,
-      pp.payment_date,
-      pp.reinvested_amount,
-      "debit",
-    );
-  });
-  const holderYearRows = holderNames.map((name) => {
-    const t = holderYearTotals[`${name}|${currentPartnerYear}`] || { credit: 0, debit: 0 };
-    return { name, credit: r2(t.credit), debit: r2(t.debit), net: r2(t.credit - t.debit) };
-  });
 
   // ── Credit / debit composition for the selected holder + year ──
   const creditSources = [
@@ -1550,72 +1600,119 @@ export default function Payments() {
                 ))}
               </div>
 
-              {/* All accounts — compare every holder and switch between statements */}
-              {holderYearRows.some((r) => r.credit || r.debit) && (
-                <div className="card overflow-hidden">
-                  <div className="px-4 py-3 border-b border-gray-100">
-                    <p className="text-sm font-medium text-gray-700">
-                      All accounts — {currentPartnerYear}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Tap an account to open its statement
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Account holder
-                          </th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Credit (in)
-                          </th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Debit (out)
-                          </th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Net
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {holderYearRows
-                          .filter((r) => r.credit || r.debit)
-                          .map((r) => (
-                            <tr
-                              key={r.name}
-                              onClick={() => setTrackerPartner(r.name)}
-                              className={`cursor-pointer hover:bg-gray-50 ${
-                                r.name === effectiveHolder ? "bg-primary-50/60" : ""
-                              }`}
-                              title={`Open ${r.name}'s statement`}
+              {/* All accounts — every holder shown separately with full detail */}
+              {holderSummaries.some((r) => r.credit || r.debit || r.opening || r.count) && (
+                <div>
+                  <p className="text-sm font-medium text-gray-700">
+                    All accounts — {currentPartnerYear}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5 mb-3">
+                    Each account holder shown separately with their own balance and recent activity
+                  </p>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {holderSummaries
+                      .filter((r) => r.credit || r.debit || r.opening || r.count)
+                      .map((r) => (
+                        <div
+                          key={r.name}
+                          className={`card overflow-hidden ${
+                            r.name === effectiveHolder ? "ring-2 ring-primary-500/60" : ""
+                          }`}
+                        >
+                          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 text-sm font-bold flex items-center justify-center shrink-0">
+                                {r.name.charAt(0).toUpperCase()}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-gray-800 truncate">
+                                  {r.name}
+                                  {r.name === effectiveHolder && (
+                                    <span className="ml-2 text-xs text-primary-600 font-normal">
+                                      viewing
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  {r.count} transaction{r.count === 1 ? "" : "s"} this year
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openStatement(r.name)}
+                              className="btn btn-secondary px-3 py-1.5 text-xs shrink-0"
                             >
-                              <td className="px-4 py-2.5 text-sm font-medium text-gray-800">
-                                {r.name}
-                                {r.name === effectiveHolder && (
-                                  <span className="ml-2 text-xs text-primary-600 font-normal">
-                                    viewing
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5 text-right text-sm text-green-700">
-                                {r.credit ? `+${fmtAmt(r.credit)}` : "—"}
-                              </td>
-                              <td className="px-4 py-2.5 text-right text-sm text-red-600">
-                                {r.debit ? `−${fmtAmt(r.debit)}` : "—"}
-                              </td>
-                              <td
-                                className={`px-4 py-2.5 text-right text-sm font-semibold ${
-                                  r.net >= 0 ? "text-gray-700" : "text-red-600"
+                              Open statement
+                            </button>
+                          </div>
+
+                          {/* Per-account summary: opening / credit / debit / balance */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 py-3 bg-gray-50/60">
+                            <div>
+                              <p className="text-[11px] text-gray-500">Opening</p>
+                              <p className="text-sm font-semibold text-gray-700">
+                                {fmtAmt(r.opening)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-gray-500">Credit (in)</p>
+                              <p className="text-sm font-semibold text-green-700">
+                                +{fmtAmt(r.credit)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-gray-500">Debit (out)</p>
+                              <p className="text-sm font-semibold text-red-600">
+                                −{fmtAmt(r.debit)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-gray-500">Balance</p>
+                              <p
+                                className={`text-sm font-bold ${
+                                  r.closing >= 0 ? "text-blue-700" : "text-red-600"
                                 }`}
                               >
-                                {fmtAmt(r.net)}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
+                                {fmtAmt(r.closing)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Recent activity (latest 5) */}
+                          {r.recent.length > 0 && (
+                            <ul className="divide-y divide-gray-100">
+                              {r.recent.map((e) => (
+                                <li
+                                  key={`${r.name}-${e.key}`}
+                                  className="px-4 py-2 flex items-center justify-between gap-3"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-sm text-gray-800 truncate">
+                                      {e.description}
+                                    </p>
+                                    <p className="text-xs text-gray-400">
+                                      {new Date(e.date).toLocaleDateString("en-GB", {
+                                        day: "numeric",
+                                        month: "short",
+                                        year: "2-digit",
+                                      })}
+                                    </p>
+                                  </div>
+                                  <span
+                                    className={`text-sm font-bold shrink-0 ${
+                                      e.type === "credit" ? "text-green-700" : "text-red-600"
+                                    }`}
+                                  >
+                                    {e.type === "credit" ? "+" : "−"}
+                                    {fmtAmt(e.amount)}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ))}
                   </div>
                 </div>
               )}
@@ -1677,7 +1774,7 @@ export default function Payments() {
               )}
 
               {/* Account statement — every credit & debit with running balance */}
-              <div className="card overflow-hidden">
+              <div className="card overflow-hidden" id="account-statement">
                 <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-gray-700">

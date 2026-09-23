@@ -212,9 +212,14 @@ export default function SaleDetailsModal({
             invoice_url,
             discount_amount: itemDiscount,
             total_amount: preDiscountTotal,
-            margin: Math.max(Math.round(m * (ppm - cpm) * 100) / 100, 0),
+            // Gross profit nets this row's discount (027 rule)
+            margin: Math.max(
+              Math.round((m * (ppm - cpm) - itemDiscount) * 100) / 100,
+              0,
+            ),
+            // Remaining nets this row's discount too (matches the DB trigger)
             remaining_amount: Math.max(
-              preDiscountTotal - (parseFloat(item.paid_amount) || 0),
+              preDiscountTotal - itemDiscount - (parseFloat(item.paid_amount) || 0),
               0,
             ),
             notes: updatedNotes,
@@ -231,16 +236,28 @@ export default function SaleDetailsModal({
         setSavingGroupFields(false);
         return;
       }
-      for (const item of group.items) {
-        await supabase.from("sale_payments").delete().eq("sale_id", item.id);
+      // Only the INITIAL payment record is replaced here — payments collected
+      // later on this sale are preserved (previously ALL payments were wiped).
+      const { data: payRows } = await supabase
+        .from("sale_payments")
+        .select("id, amount, payment_date, created_at")
+        .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
+        .order("payment_date", { ascending: true })
+        .order("created_at", { ascending: true });
+      const firstPay = payRows && payRows.length > 0 ? payRows[0] : null;
+      if (firstPay) {
+        await supabase.from("sale_payments").delete().eq("id", firstPay.id);
       }
-      // Also delete group-level payments
-      await supabase.from("sale_payments").delete().eq("sale_group_id", group.id);
       if (totalPay > 0) {
         await supabase.from("sale_payments").insert([{
           sale_group_id: group.id,
           amount: totalPay,
-          payment_date: editGroupFields.sale_date,
+          // Keep a later collection on its own date (credit sales); otherwise the
+          // initial payment follows the sale date (including date corrections).
+          payment_date:
+            firstPay && firstPay.payment_date !== group.sale_date
+              ? firstPay.payment_date
+              : editGroupFields.sale_date,
           payment_method: editGroupFields.payment_method,
           partner_id:
             editGroupFields.payment_method === "upi"
@@ -308,11 +325,33 @@ export default function SaleDetailsModal({
     }
   }
 
-  const setEditForView = () => {
+  const setEditForView = async () => {
     // Extract walk-in name from notes if no customer_id
     const walkInName = !group.customer_id
       ? group.items[0]?.customer_name || ""
       : "";
+    // Auto-populate payment details from the INITIAL (earliest) payment record —
+    // NOT from paid_amount, which also includes payments collected later.
+    const saleIds = group.items.map((i) => i.id);
+    let firstPay = null;
+    try {
+      const { data } = await supabase
+        .from("sale_payments")
+        .select("amount, payment_method, partner_id, payment_date, created_at")
+        .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
+        .order("payment_date", { ascending: true })
+        .order("created_at", { ascending: true });
+      firstPay = data && data.length > 0 ? data[0] : null;
+    } catch (err) {
+      firstPay = null;
+    }
+    // Fallback for legacy rows: if no payment record exists at all but the sale
+    // shows something paid, best-effort show that total instead of an empty field.
+    const initialAmount = firstPay
+      ? firstPay.amount
+      : group.paid_amount > 0
+        ? group.paid_amount
+        : null;
     setEditGroupFields({
       customer_id: group.customer_id || "",
       customer_name:
@@ -321,9 +360,14 @@ export default function SaleDetailsModal({
         (group.customer_id ? "" : "Walk-in Customer"),
       sale_date: group.sale_date,
       payment_type: group.payment_type,
-      initial_payment: group.paid_amount > 0 ? (Math.round(group.paid_amount * 100) / 100).toString() : "",
-      payment_method: "cash",
-      partner_id: "",
+      initial_payment:
+        initialAmount != null
+          ? (Math.round(initialAmount * 100) / 100).toString()
+          : "",
+      payment_method: ["cash", "upi"].includes(firstPay?.payment_method)
+        ? firstPay.payment_method
+        : "cash",
+      partner_id: firstPay?.partner_id || "",
       discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
@@ -757,7 +801,7 @@ export default function SaleDetailsModal({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Total Payment Amount
+                  Initial Payment Amount
                 </label>
                 <input
                   type="number"
