@@ -42,6 +42,8 @@ function makeEmptyForm() {
     sale_date: new Date().toISOString().split("T")[0],
     payment_type: "cash",
     initial_payment: "",
+    payment_method: "cash",
+    partner_id: "",
     discount_amount: "",
     invoice_file: null,
   };
@@ -55,6 +57,7 @@ export default function SaleForm({
   fabrics: allFabrics,
   customers: allCustomers,
   customerDues,
+  partners: partnersList = [],
 }) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
@@ -283,6 +286,15 @@ export default function SaleForm({
             ? "cash"
             : "partial";
 
+      if (
+        initialPayment > 0 &&
+        formData.payment_method === "upi" &&
+        !formData.partner_id
+      ) {
+        toast("Please select the partner whose account this credits", "error");
+        return;
+      }
+
       // Auto-create customer for walk-in with a name
       let customerId = formData.customer_id;
       if (!customerId && formData.customer_name?.trim()) {
@@ -377,7 +389,9 @@ export default function SaleForm({
                 sale_group_id: saleGroupId,
                 amount: netTotal,
                 payment_date: formData.sale_date,
-                payment_method: "cash",
+                payment_method: formData.payment_method,
+                partner_id:
+                  formData.payment_method === "upi" ? formData.partner_id : null,
               },
             ]);
           if (payErr) throw payErr;
@@ -389,7 +403,9 @@ export default function SaleForm({
                 sale_group_id: saleGroupId,
                 amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
-                payment_method: "cash",
+                payment_method: formData.payment_method,
+                partner_id:
+                  formData.payment_method === "upi" ? formData.partner_id : null,
               },
             ]);
           if (payErr) throw payErr;
@@ -441,7 +457,9 @@ export default function SaleForm({
               sale_group_id: saleGroupId,
               amount: totalPay,
               payment_date: formData.sale_date,
-              payment_method: "cash",
+              payment_method: formData.payment_method,
+              partner_id:
+                formData.payment_method === "upi" ? formData.partner_id : null,
             }]);
             if (payErr) throw payErr;
           }
@@ -491,6 +509,8 @@ export default function SaleForm({
       sale_date: sale.sale_date,
       payment_type: sale.payment_type,
       initial_payment: sale.paid_amount > 0 ? sale.paid_amount.toString() : "",
+      payment_method: "cash",
+      partner_id: "",
       discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
@@ -502,6 +522,24 @@ export default function SaleForm({
   const netTotal = calculateNetTotal();
   const subtotal = parseFloat(calculateSubtotal());
   const discountValue = parseFloat(formData.discount_amount) || 0;
+
+  // Pressing Enter in a field moves focus to the next field instead of submitting
+  function handleFormKeyDown(e) {
+    if (e.key !== "Enter") return;
+    const tag = e.target.tagName;
+    if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return;
+    e.preventDefault();
+    // Auto-close any open search dropdowns
+    setShowCustomerDropdown(false);
+    setActiveFabricDropdown(null);
+    const fields = Array.from(
+      e.currentTarget.querySelectorAll("input, select, textarea"),
+    );
+    const idx = fields.indexOf(e.target);
+    if (idx !== -1 && idx + 1 < fields.length) {
+      fields[idx + 1].focus();
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
@@ -518,7 +556,7 @@ export default function SaleForm({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} className="space-y-4">
           {/* Customer Section */}
           <div className="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -528,6 +566,7 @@ export default function SaleForm({
               <div className="relative">
                 <input
                   type="text"
+                  enterKeyHint="next"
                   value={showCustomerDropdown ? customerSearch : formData.customer_name || ""}
                   onChange={(e) => {
                     setCustomerSearch(e.target.value);
@@ -665,6 +704,7 @@ export default function SaleForm({
                       <div className="relative flex-1">
                         <input
                           type="text"
+                          enterKeyHint="next"
                           value={
                             activeFabricDropdown === currentIdx
                               ? fabricSearch
@@ -807,6 +847,7 @@ export default function SaleForm({
                         type="number"
                         step="0.01"
                         min="0.01"
+                        enterKeyHint="next"
                         value={item.meters}
                         onChange={(e) => {
                           updateItem(currentIdx, { meters: e.target.value });
@@ -831,6 +872,7 @@ export default function SaleForm({
                       <input
                         type="number"
                         step="0.01"
+                        enterKeyHint="next"
                         value={item.price_per_meter}
                         onChange={(e) => {
                           updateItem(currentIdx, {
@@ -877,6 +919,7 @@ export default function SaleForm({
                 <input
                   type="number"
                   step="0.01"
+                  enterKeyHint="next"
                   value={formData.initial_payment}
                   onChange={(e) => setFormData({ ...formData, initial_payment: e.target.value })}
                   className="input bg-white"
@@ -890,6 +933,7 @@ export default function SaleForm({
                   type="number"
                   min="0"
                   step="0.01"
+                  enterKeyHint="next"
                   value={formData.discount_amount}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -901,6 +945,39 @@ export default function SaleForm({
                   onWheel={(e) => e.target.blur()}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method</label>
+                <select
+                  value={formData.payment_method}
+                  onChange={(e) =>
+                    setFormData({ ...formData, payment_method: e.target.value })
+                  }
+                  className="input bg-white"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                </select>
+              </div>
+              {formData.payment_method === "upi" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Account Holder (Partner) *</label>
+                  <select
+                    value={formData.partner_id}
+                    onChange={(e) =>
+                      setFormData({ ...formData, partner_id: e.target.value })
+                    }
+                    className="input bg-white"
+                    required
+                  >
+                    <option value="">— Select partner —</option>
+                    {partnersList.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 

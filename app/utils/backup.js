@@ -69,6 +69,7 @@ const TABLE_COLUMNS = {
   purchase_payments: [
     "id",
     "purchase_id",
+    "partner_id",
     "amount",
     "payment_date",
     "payment_method",
@@ -103,6 +104,8 @@ const TABLE_COLUMNS = {
   sale_payments: [
     "id",
     "sale_id",
+    "sale_group_id",
+    "partner_id",
     "amount",
     "payment_date",
     "payment_method",
@@ -132,11 +135,22 @@ const TABLE_COLUMNS = {
     "created_at",
     "updated_at",
   ],
+  cash_deposits: [
+    "id",
+    "partner_id",
+    "amount",
+    "deposit_date",
+    "method",
+    "notes",
+    "created_at",
+  ],
   partners: [
     "id",
     "name",
     "share_percentage",
     "is_active",
+    "opening_balance",
+    "opening_balance_date",
     "created_at",
     "updated_at",
   ],
@@ -178,6 +192,7 @@ export async function exportBackup() {
       salePayments,
       expenses,
       withdrawals,
+      cashDeposits,
       partners,
     ] = await Promise.all([
       supabase.from("suppliers").select("*").order("created_at"),
@@ -190,6 +205,7 @@ export async function exportBackup() {
       supabase.from("sale_payments").select("*").order("created_at"),
       supabase.from("expenses").select("*").order("created_at"),
       supabase.from("withdrawals").select("*").order("created_at"),
+      supabase.from("cash_deposits").select("*").order("created_at"),
       supabase.from("partners").select("*").order("created_at"),
     ]);
 
@@ -205,6 +221,7 @@ export async function exportBackup() {
       salePayments.error,
       expenses.error,
       withdrawals.error,
+      cashDeposits.error,
       partners.error,
     ].filter(Boolean);
 
@@ -230,6 +247,7 @@ export async function exportBackup() {
         sale_payments: salePayments.data || [],
         expenses: expenses.data || [],
         withdrawals: withdrawals.data || [],
+        cash_deposits: cashDeposits.data || [],
         partners: partners.data || [],
       },
       stats: {
@@ -243,6 +261,7 @@ export async function exportBackup() {
         sale_payments: salePayments.data?.length || 0,
         expenses: expenses.data?.length || 0,
         withdrawals: withdrawals.data?.length || 0,
+        cash_deposits: cashDeposits.data?.length || 0,
         partners: partners.data?.length || 0,
       },
     };
@@ -361,6 +380,7 @@ export async function restoreBackup(backup, options = {}) {
       { name: "partners", data: backup.data.partners },
       { name: "expenses", data: backup.data.expenses },
       { name: "withdrawals", data: backup.data.withdrawals },
+      { name: "cash_deposits", data: backup.data.cash_deposits },
       // 6. fabrics (FK: supplier_id → suppliers)
       { name: "fabrics", data: backup.data.fabrics },
       // 7. purchases (FK: supplier_id → suppliers, fabric_id → fabrics)
@@ -385,6 +405,7 @@ export async function restoreBackup(backup, options = {}) {
       "fabrics",
       "withdrawals",
       "expenses",
+      "cash_deposits",
       "partners",
       "customers",
       "suppliers",

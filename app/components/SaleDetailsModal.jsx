@@ -54,6 +54,8 @@ const EMPTY_GROUP_FIELDS = {
   sale_date: "",
   payment_type: "cash",
   initial_payment: "",
+  payment_method: "cash",
+  partner_id: "",
   discount_amount: "",
   invoice_file: null,
 };
@@ -64,6 +66,7 @@ export default function SaleDetailsModal({
   group,
   fabrics,
   customers,
+  partners: partnersList = [],
   onSaleUpdated,
   onViewPayments,
 }) {
@@ -219,6 +222,15 @@ export default function SaleDetailsModal({
           .eq("id", saleId);
       }
       const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
+      if (
+        totalPay > 0 &&
+        editGroupFields.payment_method === "upi" &&
+        !editGroupFields.partner_id
+      ) {
+        toast("Please select the partner whose account this credits", "error");
+        setSavingGroupFields(false);
+        return;
+      }
       for (const item of group.items) {
         await supabase.from("sale_payments").delete().eq("sale_id", item.id);
       }
@@ -229,7 +241,11 @@ export default function SaleDetailsModal({
           sale_group_id: group.id,
           amount: totalPay,
           payment_date: editGroupFields.sale_date,
-          payment_method: "cash",
+          payment_method: editGroupFields.payment_method,
+          partner_id:
+            editGroupFields.payment_method === "upi"
+              ? editGroupFields.partner_id
+              : null,
         }]);
       }
       onSaleUpdated();
@@ -306,6 +322,8 @@ export default function SaleDetailsModal({
       sale_date: group.sale_date,
       payment_type: group.payment_type,
       initial_payment: group.paid_amount > 0 ? (Math.round(group.paid_amount * 100) / 100).toString() : "",
+      payment_method: "cash",
+      partner_id: "",
       discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
@@ -770,6 +788,49 @@ export default function SaleDetailsModal({
                   onWheel={(e) => e.target.blur()}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={editGroupFields.payment_method}
+                  onChange={(e) =>
+                    setEditGroupFields({
+                      ...editGroupFields,
+                      payment_method: e.target.value,
+                    })
+                  }
+                  className="input bg-white"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                </select>
+              </div>
+              {editGroupFields.payment_method === "upi" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Account Holder (Partner) *
+                  </label>
+                  <select
+                    value={editGroupFields.partner_id}
+                    onChange={(e) =>
+                      setEditGroupFields({
+                        ...editGroupFields,
+                        partner_id: e.target.value,
+                      })
+                    }
+                    className="input bg-white"
+                    required
+                  >
+                    <option value="">— Select partner —</option>
+                    {partnersList.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
           </div>
