@@ -70,9 +70,8 @@ const INITIAL_PAYMENT = {
   amount: "",
   payment_date: new Date().toISOString().split("T")[0],
   payment_method: "cash",
-  reference_number: "",
   reinvested_amount: "",
-  notes: "",
+  partner_id: "",
 };
 
 const PAYMENT_METHODS = [
@@ -161,6 +160,7 @@ export default function Purchases() {
   const [paymentErrors, setPaymentErrors] = useState({});
   const [formData, setFormData] = useState({ ...INITIAL_FORM });
   const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
+  const [partners, setPartners] = useState([]);
   const [visibleCols, setVisibleCols] = useState(loadPurchaseVisibleCols);
 
   useEffect(() => {
@@ -207,17 +207,19 @@ export default function Purchases() {
 
   async function fetchAll() {
     try {
-      const [purchasesRes, suppliersRes, fabricsRes] = await Promise.all([
+      const [purchasesRes, suppliersRes, fabricsRes, partnersRes] = await Promise.all([
         supabase
           .from("purchases")
           .select("*")
           .order("purchase_date", { ascending: false }),
         supabase.from("suppliers").select("*").order("name"),
         supabase.from("fabrics").select("*").order("name"),
+        supabase.from("partners").select("id, name").eq("is_active", true).order("name"),
       ]);
       if (purchasesRes.error) throw purchasesRes.error;
       if (suppliersRes.error) throw suppliersRes.error;
       if (fabricsRes.error) throw fabricsRes.error;
+      setPartners(partnersRes.data || []);
       const supplierMap = Object.fromEntries(
         (suppliersRes.data || []).map((c) => [c.id, c]),
       );
@@ -377,9 +379,8 @@ export default function Purchases() {
           amount: paymentAmount,
           payment_date: paymentData.payment_date,
           payment_method: paymentData.payment_method,
-          reference_number: paymentData.reference_number,
           reinvested_amount: reinvestedAmount,
-          notes: paymentData.notes,
+          partner_id: paymentData.partner_id || null,
         },
       ]);
       if (error) throw error;
@@ -407,9 +408,8 @@ export default function Purchases() {
           amount: editPaymentAmount,
           payment_date: editPaymentForm.payment_date,
           payment_method: editPaymentForm.payment_method,
-          reference_number: editPaymentForm.reference_number,
           reinvested_amount: editReinvestedAmount,
-          notes: editPaymentForm.notes,
+          partner_id: editPaymentForm.partner_id || null,
         })
         .eq("id", editingPayment.id);
       if (error) throw error;
@@ -1226,33 +1226,26 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reference Number
+                  Paid From Account (Partner)
                 </label>
-                <input
-                  type="text"
-                  value={paymentData.reference_number}
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Reinvested portion will be debited from this account
+                </p>
+                <select
+                  value={paymentData.partner_id}
                   onChange={(e) =>
                     setPaymentData({
                       ...paymentData,
-                      reference_number: e.target.value,
+                      partner_id: e.target.value,
                     })
                   }
                   className="input"
-                  placeholder="Transaction ID / Check No."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={paymentData.notes}
-                  onChange={(e) =>
-                    setPaymentData({ ...paymentData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                />
+                >
+                  <option value="">— No account —</option>
+                  {partners.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex gap-3 pt-4">
                 <button
@@ -2002,6 +1995,11 @@ export default function Purchases() {
                             <span className="badge bg-gray-200 text-gray-700">
                               {payment.payment_method.toUpperCase()}
                             </span>
+                            {payment.partner_id && (
+                              <span className="badge bg-blue-100 text-blue-700">
+                                {partners.find((p) => p.id === payment.partner_id)?.name || "Account"}
+                              </span>
+                            )}
                             {payment.reference_number && (
                               <p className="text-xs text-gray-500 mt-1">
                                 {payment.reference_number}
@@ -2018,11 +2016,9 @@ export default function Purchases() {
                                     (payment.reinvested_amount || 0) || "",
                                 payment_date: payment.payment_date,
                                 payment_method: payment.payment_method,
-                                reference_number:
-                                  payment.reference_number || "",
                                 reinvested_amount:
                                   payment.reinvested_amount || "",
-                                notes: payment.notes || "",
+                                partner_id: payment.partner_id || "",
                               });
                             }}
                             className="p-1.5 hover:bg-primary-100 rounded-lg text-gray-400 hover:text-primary-600"
@@ -2407,36 +2403,26 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reference Number
+                  Paid From Account (Partner)
                 </label>
-                <input
-                  type="text"
-                  value={editPaymentForm.reference_number}
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Reinvested portion will be debited from this account
+                </p>
+                <select
+                  value={editPaymentForm.partner_id || ""}
                   onChange={(e) =>
                     setEditPaymentForm({
                       ...editPaymentForm,
-                      reference_number: e.target.value,
+                      partner_id: e.target.value,
                     })
                   }
                   className="input"
-                  placeholder="Transaction ID / Check No."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={editPaymentForm.notes}
-                  onChange={(e) =>
-                    setEditPaymentForm({
-                      ...editPaymentForm,
-                      notes: e.target.value,
-                    })
-                  }
-                  className="input"
-                  rows={2}
-                />
+                >
+                  <option value="">— No account —</option>
+                  {partners.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex gap-3 pt-2">
                 <button

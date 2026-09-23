@@ -49,17 +49,13 @@ function loadSaleVisibleCols() {
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
-  { value: "bank_transfer", label: "Bank Transfer" },
-  { value: "check", label: "Check" },
-  { value: "other", label: "Other" },
 ];
 
 const INITIAL_PAYMENT = {
   amount: "",
   payment_date: new Date().toISOString().split("T")[0],
   payment_method: "cash",
-  reference_number: "",
-  notes: "",
+  partner_id: "",
 };
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
@@ -81,6 +77,7 @@ export default function Sales() {
   const [sales, setSales] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [fabrics, setFabrics] = useState([]);
+  const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
@@ -119,7 +116,7 @@ export default function Sales() {
 
   async function fetchAll() {
     try {
-      const [salesRes, customersRes, fabricsRes] = await Promise.all([
+      const [salesRes, customersRes, fabricsRes, partnersRes] = await Promise.all([
         supabase
           .from("sales")
           .select("*")
@@ -127,6 +124,7 @@ export default function Sales() {
           .order("created_at", { ascending: false }),
         supabase.from("customers").select("*").order("name"),
         supabase.from("fabrics").select("*").order("name"),
+        supabase.from("partners").select("id,name").eq("is_active", true).order("name"),
       ]);
       if (salesRes.error) throw salesRes.error;
       if (customersRes.error) throw customersRes.error;
@@ -141,6 +139,7 @@ export default function Sales() {
       setSales(salesWithCustomer);
       setCustomers(customersRes.data || []);
       setFabrics(fabricsRes.data || []);
+      setPartners(partnersRes.data || []);
       return salesWithCustomer;
     } catch (error) {
       const message =
@@ -189,14 +188,18 @@ export default function Sales() {
       toast("Please fix the validation errors", "error");
       return;
     }
+    if (paymentData.payment_method === "upi" && !paymentData.partner_id) {
+      toast("Please select the partner whose account this credits", "error");
+      return;
+    }
     try {
       const { error } = await supabase.from("sale_payments").insert([{
         sale_group_id: selectedSale.id,
         amount: parseFloat(paymentData.amount),
         payment_date: paymentData.payment_date,
         payment_method: paymentData.payment_method,
-        reference_number: paymentData.reference_number?.trim() || "",
-        notes: paymentData.notes,
+        partner_id:
+          paymentData.payment_method === "upi" ? paymentData.partner_id : null,
       }]);
       if (error) throw error;
       setPaymentData({ ...INITIAL_PAYMENT });
@@ -217,9 +220,16 @@ export default function Sales() {
         .select("*")
         .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: false });
+      // Resolve holder name from the partners list (client-side lookup)
+      const withPartner = (data || []).map((p) => ({
+        ...p,
+        partner_name: p.partner_id
+          ? partners.find((x) => x.id === p.partner_id)?.name
+          : null,
+      }));
       // Deduplicate: group payments (sale_group_id set) take priority, exclude old per-item rows that are already covered
-      const groupRows = (data || []).filter((p) => p.sale_group_id === group.id);
-      const legacyRows = (data || []).filter((p) => !p.sale_group_id);
+      const groupRows = withPartner.filter((p) => p.sale_group_id === group.id);
+      const legacyRows = withPartner.filter((p) => !p.sale_group_id);
       // Group legacy rows by created_at second to show as single entries
       const legacyGrouped = Object.values(legacyRows.reduce((acc, p) => {
         const key = p.created_at?.slice(0, 19) || p.id;
@@ -602,6 +612,7 @@ export default function Sales() {
         }}
         fabrics={fabrics}
         customers={customers}
+        partners={partners}
       />
 
       {/* Payment History + Receive Payment Modal */}
@@ -690,6 +701,11 @@ export default function Sales() {
                       <p className="text-sm text-gray-500">
                         {new Date(p.payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
                       </p>
+                      {p.partner_name && (
+                        <p className="text-xs text-primary-600 font-medium mt-0.5">
+                          {p.partner_name}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-right">
@@ -757,57 +773,48 @@ export default function Sales() {
                     />
                   </div>
                 </div>
-                <div className="mt-2">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Payment Method
-                  </label>
-                  <select
-                    value={paymentData.payment_method}
-                    onChange={(e) =>
-                      setPaymentData({
-                        ...paymentData,
-                        payment_method: e.target.value,
-                      })
-                    }
-                    className="input"
-                  >
-                    {PAYMENT_METHODS.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mt-2">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Reference Number
-                  </label>
-                  <input
-                    type="text"
-                    value={paymentData.reference_number}
-                    onChange={(e) =>
-                      setPaymentData({
-                        ...paymentData,
-                        reference_number: e.target.value,
-                      })
-                    }
-                    className="input"
-                    placeholder="Transaction ID / Check No."
-                  />
-                </div>
-                <div className="mt-2">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Notes
-                  </label>
-                  <textarea
-                    value={paymentData.notes}
-                    onChange={(e) =>
-                      setPaymentData({ ...paymentData, notes: e.target.value })
-                    }
-                    className="input"
-                    rows={2}
-                    placeholder="Optional remarks"
-                  />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Payment Method
+                    </label>
+                    <select
+                      value={paymentData.payment_method}
+                      onChange={(e) =>
+                        setPaymentData({
+                          ...paymentData,
+                          payment_method: e.target.value,
+                        })
+                      }
+                      className="input"
+                    >
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {paymentData.payment_method === "upi" && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Account Holder (Partner) *
+                      </label>
+                      <select
+                        value={paymentData.partner_id}
+                        onChange={(e) => setPaymentData({ ...paymentData, partner_id: e.target.value })}
+                        className="input"
+                        required
+                      >
+                        <option value="">— Select partner —</option>
+                        {partners.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <button type="submit" className="btn btn-accent w-full mt-3">
                   <CreditCard className="w-5 h-5 mr-2" /> Receive Payment
@@ -984,6 +991,7 @@ export default function Sales() {
         group={selectedGroupForDetails}
         fabrics={fabrics}
         customers={customers}
+        partners={partners}
         onSaleUpdated={handleSaleUpdated}
         onViewPayments={handleViewPayments}
       />

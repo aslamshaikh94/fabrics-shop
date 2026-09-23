@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Search,
@@ -14,11 +14,41 @@ import {
   ChevronLeft,
   ChevronRight,
   CreditCard,
+  Landmark,
+  Trash2,
+  AlertTriangle,
+  Download,
+  Wallet,
 } from "lucide-react";
 
 import { useToast } from "./Toast";
+import ConfirmModal from "./ConfirmModal";
+import { matchPartner } from "../utils/partnerWithdrawal";
 
 const PAGE_SIZE = 10;
+
+const MONTH_LABELS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// Round to 2 decimals (money safe)
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Badge colours per statement source
+const SOURCE_BADGE = {
+  "Customer transfer": "bg-blue-100 text-blue-700",
+  Deposit: "bg-amber-100 text-amber-700",
+  Withdrawal: "bg-rose-100 text-rose-700",
+  "Purchase payment": "bg-violet-100 text-violet-700",
+};
+
+function fmtAmt(n) {
+  return `₹${Number(n || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 export default function Payments() {
   const toast = useToast();
@@ -33,9 +63,39 @@ export default function Payments() {
   const [page, setPage] = useState(1);
   const [supplierSummary, setSupplierSummary] = useState([]);
   const [customerSummary, setCustomerSummary] = useState([]);
-  const [activeTab, setActiveTab] = useState("transactions");
+  const [activeTab, setActiveTab] = useState("partners");
   const [editingPayment, setEditingPayment] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [partners, setPartners] = useState([]);
+  const [deposits, setDeposits] = useState([]);
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [showDepositForm, setShowDepositForm] = useState(false);
+  const [confirmDeleteDeposit, setConfirmDeleteDeposit] = useState(null);
+  const [depositForm, setDepositForm] = useState({
+    id: null,
+    amount: "",
+    deposit_date: new Date().toISOString().split("T")[0],
+    method: "cash",
+    partner_id: "",
+    notes: "",
+  });
+  const [partnerYear, setPartnerYear] = useState(new Date().getFullYear());
+  const [holderFilter, setHolderFilter] = useState("all");
+  const [trackerPartner, setTrackerPartner] = useState(null);
+
+  // Opening balance editor (per account holder)
+  const [showOpeningForm, setShowOpeningForm] = useState(false);
+  const [openingForm, setOpeningForm] = useState({ amount: "", date: "" });
+
+  // Bulk assignment of customer payments that carry no account holder yet
+  const [showBulkAssign, setShowBulkAssign] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState([]);
+  const [bulkPartnerId, setBulkPartnerId] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [statementSearch, setStatementSearch] = useState("");
+  const [statementType, setStatementType] = useState("all");
+  const [statementFrom, setStatementFrom] = useState("");
+  const [statementTo, setStatementTo] = useState("");
 
   useEffect(() => {
     fetchAll();
@@ -43,7 +103,7 @@ export default function Payments() {
 
   async function fetchAll() {
     try {
-      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, purchasesRes] =
+      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, purchasesRes, partnersRes, depositsRes, withdrawalsRes] =
         await Promise.all([
           supabase.from("purchase_payments").select("*, purchase_id").order("payment_date", { ascending: false }),
           supabase.from("sale_payments").select("*, sale_id").order("payment_date", { ascending: false }),
@@ -51,7 +111,22 @@ export default function Payments() {
           supabase.from("customers").select("id, name"),
           supabase.from("sales").select("id, sale_group_id, customer_id, customer_name, total_amount, paid_amount, remaining_amount"),
           supabase.from("purchases").select("id, supplier_id, total_amount, paid_amount, remaining_amount"),
+          supabase.from("partners").select("*").order("name"),
+          supabase.from("cash_deposits").select("*").order("deposit_date", { ascending: false }),
+          supabase.from("withdrawals").select("*").order("withdrawal_date", { ascending: false }),
         ]);
+
+      const partnerMap = Object.fromEntries(
+        (partnersRes.data || []).map((p) => [p.id, p.name]),
+      );
+      setPartners(partnersRes.data || []);
+      setWithdrawals(withdrawalsRes.data || []);
+      setDeposits((depositsRes.data || []).map((d) => ({
+        ...d,
+        partner_name: d.partner_id
+          ? partnerMap[d.partner_id] || "Unknown"
+          : null,
+      })));
 
       const supplierMap = Object.fromEntries((suppliersRes.data || []).map((s) => [s.id, s.name]));
       const customerMap = Object.fromEntries((customersRes.data || []).map((c) => [c.id, c.name]));
@@ -71,7 +146,13 @@ export default function Payments() {
       setSalePayments((saleRes.data || []).map((s) => {
         const info = saleInfoMap[s.sale_id] || saleGroupMap[s.sale_group_id] || {};
         const name = info.customer_name || (info.customer_id ? customerMap[info.customer_id] : null) || "Walk-in";
-        return { ...s, sale: { customers: { name } } };
+        return {
+          ...s,
+          sale: { customers: { name } },
+          partner_name: s.partner_id
+            ? partnerMap[s.partner_id] || "Unknown"
+            : null,
+        };
       }));
 
       // Supplier summary
@@ -113,35 +194,196 @@ export default function Payments() {
   ]);
 
   async function handleEditPayment(e) {
+    e.preventDefault();
+    if (!editingPayment) return;
+    const amount = parseFloat(editForm.amount) || 0;
+    if (amount <= 0) {
+      toast("Amount must be greater than 0", "error");
+      return;
+    }
     try {
-      const [salesRes, customersRes] = await Promise.all([
-        supabase
-          .from("sales")
-          .select("customer_id, total_amount, paid_amount, remaining_amount"),
-        supabase.from("customers").select("id, name"),
-      ]);
-
-      const customerNames = Object.fromEntries(
-        (customersRes.data || []).map((c) => [c.id, c.name]),
-      );
-
-      const data = salesRes.data || [];
-      const map = {};
-      data.forEach((s) => {
-        const name = customerNames[s.customer_id] || "Walk-in";
-        if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
-        map[name].total += s.total_amount || 0;
-        map[name].paid += s.paid_amount || 0;
-        map[name].pending += Math.max(
-          (s.total_amount || 0) - (s.paid_amount || 0),
-          0,
-        );
-      });
-      setCustomerSummary(
-        Object.values(map).sort((a, b) => b.pending - a.pending),
-      );
+      const payload = {
+        amount,
+        payment_date: editForm.payment_date,
+        payment_method: editForm.payment_method,
+      };
+      let error;
+      if (editingPayment.type === "received") {
+        payload.partner_id =
+          editForm.payment_method === "upi"
+            ? editForm.partner_id || null
+            : null;
+        const res = await supabase
+          .from("sale_payments")
+          .update(payload)
+          .eq("id", editingPayment.id);
+        error = res.error;
+      } else {
+        payload.partner_id = editForm.partner_id || null;
+        const res = await supabase
+          .from("purchase_payments")
+          .update(payload)
+          .eq("id", editingPayment.id);
+        error = res.error;
+      }
+      if (error) throw error;
+      toast("Payment updated");
+      setEditingPayment(null);
+      fetchAll();
     } catch (err) {
-      console.error(err);
+      toast(err.message || "Failed to update payment", "error");
+    }
+  }
+
+  // ── Cash deposit handlers ──
+  function openDepositForm() {
+    setDepositForm({
+      id: null,
+      amount: "",
+      deposit_date: new Date().toISOString().split("T")[0],
+      method: "cash",
+      partner_id:
+        partners.find((p) => p.name === effectiveHolder)?.id || "",
+      notes: "",
+    });
+    setShowDepositForm(true);
+  }
+
+  function openEditDeposit(deposit) {
+    setDepositForm({
+      id: deposit.id,
+      amount: deposit.amount === null || deposit.amount === undefined ? "" : String(deposit.amount),
+      deposit_date: deposit.deposit_date,
+      method: deposit.method || "cash",
+      partner_id: deposit.partner_id || "",
+      notes: deposit.notes || "",
+    });
+    setShowDepositForm(true);
+  }
+
+  async function handleDepositSubmit(e) {
+    e.preventDefault();
+    const amount = parseFloat(depositForm.amount) || 0;
+    if (!(amount > 0)) {
+      toast("Amount must be greater than 0", "error");
+      return;
+    }
+    if (!depositForm.partner_id) {
+      toast("Please select the partner account for this deposit", "error");
+      return;
+    }
+    const payload = {
+      partner_id: depositForm.partner_id,
+      amount,
+      deposit_date: depositForm.deposit_date,
+      method: depositForm.method,
+      notes: depositForm.notes || "",
+    };
+    try {
+      const { error } = depositForm.id
+        ? await supabase.from("cash_deposits").update(payload).eq("id", depositForm.id)
+        : await supabase.from("cash_deposits").insert([payload]);
+      if (error) throw error;
+      toast(depositForm.id ? "Deposit updated" : "Cash deposit recorded");
+      setShowDepositForm(false);
+      fetchAll();
+    } catch (err) {
+      toast(err.message || "Failed to save deposit", "error");
+    }
+  }
+
+  async function handleDeleteDeposit(id) {
+    try {
+      const { error } = await supabase
+        .from("cash_deposits")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+      toast("Deposit deleted");
+      setConfirmDeleteDeposit(null);
+      fetchAll();
+    } catch (err) {
+      toast(err.message || "Failed to delete deposit", "error");
+    }
+  }
+
+  // ── Account opening balance ──
+  function openOpeningForm() {
+    if (!holderPartner) {
+      toast("Select an account holder first", "error");
+      return;
+    }
+    setOpeningForm({
+      amount: manualOpening ? String(manualOpening) : "",
+      date: manualOpeningDate || `${currentPartnerYear}-01-01`,
+    });
+    setShowOpeningForm(true);
+  }
+
+  async function handleOpeningSubmit(e) {
+    e.preventDefault();
+    if (!holderPartner) return;
+    const amount = parseFloat(openingForm.amount) || 0;
+    try {
+      const { error } = await supabase
+        .from("partners")
+        .update({
+          opening_balance: amount,
+          opening_balance_date: openingForm.date || null,
+        })
+        .eq("id", holderPartner.id);
+      if (error) throw error;
+      toast(`Opening balance saved for ${holderPartner.name}`);
+      setShowOpeningForm(false);
+      fetchAll();
+    } catch (err) {
+      toast(err.message || "Failed to save opening balance", "error");
+    }
+  }
+
+  // ── Bulk assign untracked UPI payments to an account holder ──
+  function openBulkAssign() {
+    setBulkSelected(untrackedYear.map((p) => p.id));
+    setBulkPartnerId("");
+    setShowBulkAssign(true);
+  }
+
+  function toggleBulkPayment(id) {
+    setBulkSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  async function handleBulkAssign(e) {
+    e.preventDefault();
+    if (bulkSelected.length === 0) {
+      toast("Select at least one payment", "error");
+      return;
+    }
+    if (!bulkPartnerId) {
+      toast("Select the account holder to credit", "error");
+      return;
+    }
+    setBulkSaving(true);
+    try {
+      const { error } = await supabase
+        .from("sale_payments")
+        .update({ partner_id: bulkPartnerId })
+        .in("id", bulkSelected);
+      if (error) throw error;
+      const name = partners.find((p) => p.id === bulkPartnerId)?.name || "account";
+      toast(
+        `${bulkSelected.length} payment${bulkSelected.length === 1 ? "" : "s"} credited to ${name}`,
+      );
+      setShowBulkAssign(false);
+      setBulkSelected([]);
+      setBulkPartnerId("");
+      setHolderFilter("all");
+      fetchAll();
+    } catch (err) {
+      toast(err.message || "Failed to assign payments", "error");
+    } finally {
+      setBulkSaving(false);
     }
   }
 
@@ -180,7 +422,7 @@ export default function Payments() {
 
   async function fetchPayments() {
     try {
-      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes] =
+      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, partnersRes, depositsRes, withdrawalsRes] =
         await Promise.all([
           supabase
             .from("purchase_payments")
@@ -188,12 +430,27 @@ export default function Payments() {
             .order("payment_date", { ascending: false }),
           supabase
             .from("sale_payments")
-            .select("*, sale_id")
+            .select("*")
             .order("payment_date", { ascending: false }),
           supabase.from("purchases").select("id, supplier_id"),
           supabase.from("customers").select("id, name"),
           supabase.from("sales").select("id, sale_group_id, customer_id, customer_name"),
+          supabase.from("partners").select("*").order("name"),
+          supabase.from("cash_deposits").select("*").order("deposit_date", { ascending: false }),
+          supabase.from("withdrawals").select("*").order("withdrawal_date", { ascending: false }),
         ]);
+
+      const partnerMap = Object.fromEntries(
+        (partnersRes.data || []).map((p) => [p.id, p.name]),
+      );
+      setPartners(partnersRes.data || []);
+      setWithdrawals(withdrawalsRes.data || []);
+      setDeposits((depositsRes.data || []).map((d) => ({
+        ...d,
+        partner_name: d.partner_id
+          ? partnerMap[d.partner_id] || "Unknown"
+          : null,
+      })));
 
       const purchasePaymentsData = purchaseRes.data || [];
       const salePaymentsData = saleRes.data || [];
@@ -267,6 +524,9 @@ export default function Payments() {
           sale: {
             customers: { name },
           },
+          partner_name: s.partner_id
+            ? partnerMap[s.partner_id] || "Unknown"
+            : null,
         };
       });
 
@@ -332,12 +592,19 @@ export default function Payments() {
       reference: p.reference_number,
       party: p.sale?.customers?.name || "Walk-in",
       notes: p.notes,
+      partner_id: p.partner_id || "",
+      partner_name: p.partner_name || null,
     }));
 
   const allPayments = [...paymentsMade, ...paymentsReceived]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .filter((p) => {
       if (paymentTypeFilter !== "all" && p.type !== paymentTypeFilter)
+        return false;
+      if (holderFilter === "__untracked__") {
+        // Customer payments collected but not credited to an account holder
+        if (p.type !== "received" || p.partner_name) return false;
+      } else if (holderFilter !== "all" && (p.partner_name || "") !== holderFilter)
         return false;
       if (searchTerm)
         return p.party.toLowerCase().includes(searchTerm.toLowerCase());
@@ -353,6 +620,476 @@ export default function Payments() {
   const totalPaid = paymentsMade.reduce((sum, p) => sum + p.amount, 0);
   const totalReceived = paymentsReceived.reduce((sum, p) => sum + p.amount, 0);
   const netFlow = totalReceived - totalPaid;
+
+  // ── Account holders (partners) ──
+  // Every account holder: partners with any historical activity plus all currently
+  // active partners. Built across ALL years so changing the year never hides an
+  // account from the dropdown.
+  const activePartners = partners.filter((p) => p.is_active !== false);
+  const holdersWithActivity = Array.from(
+    new Set([
+      ...salePayments.filter((p) => p.partner_name).map((p) => p.partner_name),
+      ...deposits.filter((d) => d.partner_name).map((d) => d.partner_name),
+      ...withdrawals
+        .map((w) => matchPartner(w.withdrawn_by, partners)?.name || null)
+        .filter(Boolean),
+    ]),
+  ).sort();
+  const holderNames = Array.from(
+    new Set([...holdersWithActivity, ...activePartners.map((p) => p.name)]),
+  ).sort();
+
+  // ── Year selector: every year that has account activity ──
+  const partnerYears = Array.from(
+    new Set([
+      ...salePayments
+        .filter((p) => p.partner_id)
+        .map((p) => new Date(p.payment_date).getFullYear()),
+      ...deposits
+        .filter((d) => d.partner_id)
+        .map((d) => new Date(d.deposit_date).getFullYear()),
+      ...withdrawals
+        .filter((w) => matchPartner(w.withdrawn_by, partners))
+        .map((w) => new Date(w.withdrawal_date).getFullYear()),
+      ...purchasePayments
+        .filter((pp) => pp.partner_id && (pp.reinvested_amount || 0) > 0)
+        .map((pp) => new Date(pp.payment_date).getFullYear()),
+    ]).values(),
+  ).sort((a, b) => b - a);
+  const currentPartnerYear = partnerYears.includes(partnerYear)
+    ? partnerYear
+    : partnerYears[0] || new Date().getFullYear();
+
+  // ── Account ledger for the selected holder ──
+  // Defaults to the first holder with activity so their statement shows immediately,
+  // and falls back safely if the selected holder is no longer available.
+  const effectiveHolder =
+    trackerPartner && holderNames.includes(trackerPartner)
+      ? trackerPartner
+      : holdersWithActivity[0] || holderNames[0] || null;
+  const yearOf = (d) => new Date(d).getFullYear();
+  const byDateDesc = (a, b) => new Date(b.date) - new Date(a.date);
+
+  const holderTransfersAll = effectiveHolder
+    ? salePayments
+        .filter((p) => p.partner_name === effectiveHolder)
+        .map((p) => ({
+          key: `sale-${p.id}`,
+          date: p.payment_date,
+          description: p.sale?.customers?.name || "Walk-in",
+          method: p.payment_method || "upi",
+          source: "Customer transfer",
+          type: "credit",
+          amount: p.amount,
+        }))
+    : [];
+  const holderDepositsAll = effectiveHolder
+    ? deposits
+        .filter((d) => d.partner_name === effectiveHolder)
+        .map((d) => ({
+          key: `deposit-${d.id}`,
+          depositId: d.id,
+          date: d.deposit_date,
+          description: d.notes || "Cash deposit",
+          method: d.method || "cash",
+          source: "Deposit",
+          type: "credit",
+          amount: d.amount,
+        }))
+    : [];
+  const holderWithdrawals = effectiveHolder
+    ? withdrawals
+        .filter((w) => {
+          const p = matchPartner(w.withdrawn_by, partners);
+          return p && p.name === effectiveHolder;
+        })
+        .map((w) => ({
+          key: `withdrawal-${w.id}`,
+          date: w.withdrawal_date,
+          description: w.reason || "Withdrawal",
+          source: "Withdrawal",
+          type: "debit",
+          amount: w.amount,
+        }))
+    : [];
+  const holderPurchaseDebits = effectiveHolder
+    ? purchasePayments
+        .filter(
+          (pp) =>
+            pp.partner_id &&
+            (pp.reinvested_amount || 0) > 0 &&
+            partners.some(
+              (p) => p.id === pp.partner_id && p.name === effectiveHolder,
+            ),
+        )
+        .map((pp) => ({
+          key: `purchase-${pp.id}`,
+          date: pp.payment_date,
+          description: `Paid to ${pp.purchase?.suppliers?.name || "Supplier"} (reinvested)`,
+          source: "Purchase payment",
+          type: "debit",
+          amount: pp.reinvested_amount,
+        }))
+    : [];
+
+  // Full history is used for the opening / closing balance so multi-year
+  // statements stay correct.
+  const allHolderEntries = [
+    ...holderTransfersAll,
+    ...holderDepositsAll,
+    ...holderWithdrawals,
+    ...holderPurchaseDebits,
+  ];
+  // ── Opening balance ──
+  // The account holder may carry a manual opening balance: a snapshot of what the
+  // account already held "as of" `opening_balance_date`. Whenever that snapshot
+  // covers the selected year, everything dated before it must be hidden from the
+  // statement — otherwise those transactions are counted twice (once inside the
+  // snapshot, once again as statement rows).
+  const holderPartner = partners.find((p) => p.name === effectiveHolder) || null;
+  const manualOpening = Number(holderPartner?.opening_balance || 0);
+  const manualOpeningDate = holderPartner?.opening_balance_date || "";
+  // A snapshot only describes its own year and later — an earlier year's statement
+  // cannot be derived from a balance that is dated after it.
+  const openingApplies =
+    Boolean(manualOpeningDate) && currentPartnerYear >= yearOf(manualOpeningDate);
+  // Set when the snapshot falls inside the year currently being viewed.
+  const openingSnapshotInYear =
+    openingApplies && yearOf(manualOpeningDate) === currentPartnerYear;
+  // Earliest date shown / accumulated for the selected year.
+  const statementStart = openingApplies ? manualOpeningDate : "";
+
+  const openingBalance = r2(
+    (openingApplies ? manualOpening : 0) +
+      allHolderEntries
+        .filter((e) => yearOf(e.date) < currentPartnerYear)
+        .filter((e) => !statementStart || e.date >= statementStart)
+        .reduce((s, e) => s + (e.type === "credit" ? e.amount : -e.amount), 0),
+  );
+
+  // Entries dated before the opening-balance snapshot are already represented by
+  // `openingBalance`, so every year-scoped total below must skip them — otherwise
+  // the same money is counted twice (once in the snapshot, once as a transaction).
+  const afterStatementStart = (e) => !statementStart || e.date >= statementStart;
+
+  // Direct transfers from customers into this account, for the selected year
+  const holderCredits = holderTransfersAll
+    .filter((e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e))
+    .sort(byDateDesc);
+  const holderCreditTotal =
+    Math.round(holderCredits.reduce((s, r) => s + (r.amount || 0), 0) * 100) / 100;
+
+  // Debits (money out) for the selected year
+  const holderDebits = [...holderWithdrawals, ...holderPurchaseDebits]
+    .filter((e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e))
+    .sort(byDateDesc);
+
+  // ── Cash deposits of the selected holder for the selected year ──
+  // Deposits subsumed by the opening-balance snapshot are excluded so they are not
+  // counted twice in the credit total.
+  const yearDeposits = deposits
+    .filter(
+      (d) =>
+        d.partner_name === effectiveHolder &&
+        new Date(d.deposit_date).getFullYear() === currentPartnerYear &&
+        afterStatementStart({ date: d.deposit_date }),
+    )
+    .sort((a, b) => new Date(b.deposit_date) - new Date(a.deposit_date));
+  const yearDepositTotal =
+    Math.round(yearDeposits.reduce((s, d) => s + (d.amount || 0), 0) * 100) / 100;
+
+  // Year totals: credits are customer transfers + deposits, debits are
+  // withdrawals + the reinvested part of supplier payments made from this account.
+  const yearCreditTotal =
+    Math.round((holderCreditTotal + yearDepositTotal) * 100) / 100;
+  const yearDebitTotal =
+    Math.round(holderDebits.reduce((s, r) => s + (r.amount || 0), 0) * 100) / 100;
+  const closingBalance =
+    Math.round((openingBalance + yearCreditTotal - yearDebitTotal) * 100) / 100;
+
+  // ── Untracked: UPI customer payments not credited to any account holder ──
+  // Cash collections are intentionally excluded: cash legitimately sits with the
+  // shop until it is deposited, and the deposit is what credits an account.
+  const untrackedYear = salePayments
+    .filter(
+      (p) =>
+        !p.partner_name &&
+        p.payment_method === "upi" &&
+        yearOf(p.payment_date) === currentPartnerYear,
+    )
+    .sort(byDateDesc);
+  const untrackedTotal = r2(
+    untrackedYear.reduce((s, p) => s + (p.amount || 0), 0),
+  );
+
+  // ── Month-wise breakdown for the selected holder (credit / debit / net) ──
+  const holderYearCredits = [
+    ...holderCredits,
+    ...yearDeposits.map((d) => ({ date: d.deposit_date, amount: d.amount })),
+  ];
+  const holderMonthRows = MONTH_LABELS.map((label, i) => {
+    const credit = holderYearCredits
+      .filter((e) => new Date(e.date).getMonth() === i)
+      .reduce((s, e) => s + (e.amount || 0), 0);
+    const debit = holderDebits
+      .filter((e) => new Date(e.date).getMonth() === i)
+      .reduce((s, e) => s + (e.amount || 0), 0);
+    return { label, credit: r2(credit), debit: r2(debit), net: r2(credit - debit) };
+  });
+  const hasMonthActivity = holderMonthRows.some((r) => r.credit || r.debit);
+
+  // ── Per-holder yearly credit / debit / net (every holder, so other accounts can
+  //    be compared and switched to without leaving the statement) ──
+  // Each holder's own opening-balance snapshot is respected: transactions dated
+  // before `opening_balance_date` are already inside that snapshot, so counting
+  // them here as credit/debit would double-count the same money.
+  const holderOpeningDate = {};
+  partners.forEach((p) => {
+    if (p.opening_balance_date) holderOpeningDate[p.name] = p.opening_balance_date;
+  });
+  const holderYearTotals = {};
+  const bumpHolderYear = (name, date, amount, type) => {
+    if (!name) return;
+    const cutoff = holderOpeningDate[name];
+    if (cutoff && date < cutoff) return;
+    const key = `${name}|${yearOf(date)}`;
+    if (!holderYearTotals[key]) {
+      holderYearTotals[key] = { credit: 0, debit: 0 };
+    }
+    if (type === "credit") holderYearTotals[key].credit += amount || 0;
+    else holderYearTotals[key].debit += amount || 0;
+  };
+  salePayments.forEach((p) =>
+    bumpHolderYear(p.partner_name, p.payment_date, p.amount, "credit"),
+  );
+  deposits.forEach((d) =>
+    bumpHolderYear(d.partner_name, d.deposit_date, d.amount, "credit"),
+  );
+  withdrawals.forEach((w) =>
+    bumpHolderYear(matchPartner(w.withdrawn_by, partners)?.name, w.withdrawal_date, w.amount, "debit"),
+  );
+  purchasePayments.forEach((pp) => {
+    if (!pp.partner_id || !((pp.reinvested_amount || 0) > 0)) return;
+    bumpHolderYear(
+      partners.find((p) => p.id === pp.partner_id)?.name,
+      pp.payment_date,
+      pp.reinvested_amount,
+      "debit",
+    );
+  });
+  const holderYearRows = holderNames.map((name) => {
+    const t = holderYearTotals[`${name}|${currentPartnerYear}`] || { credit: 0, debit: 0 };
+    return { name, credit: r2(t.credit), debit: r2(t.debit), net: r2(t.credit - t.debit) };
+  });
+
+  // ── Credit / debit composition for the selected holder + year ──
+  const creditSources = [
+    {
+      label: "Customer transfers",
+      value: r2(holderCredits.reduce((s, r) => s + (r.amount || 0), 0)),
+      color: "bg-blue-500",
+    },
+    { label: "Deposits", value: yearDepositTotal, color: "bg-amber-500" },
+  ].filter((s) => s.value);
+  const debitSources = [
+    {
+      label: "Withdrawals",
+      value: r2(
+        holderDebits
+          .filter((r) => r.source === "Withdrawal")
+          .reduce((s, r) => s + (r.amount || 0), 0),
+      ),
+      color: "bg-rose-500",
+    },
+    {
+      label: "Supplier payments (reinvested)",
+      value: r2(
+        holderDebits
+          .filter((r) => r.source === "Purchase payment")
+          .reduce((s, r) => s + (r.amount || 0), 0),
+      ),
+      color: "bg-purple-500",
+    },
+  ].filter((s) => s.value);
+
+  // ── Unified account statement for the selected holder (bank-style) ──
+  // Chronological order is used to compute the running balance; the table is then
+  // displayed newest-first with the balance as of that transaction.
+  const holderYearEntries = allHolderEntries
+    .filter((e) => yearOf(e.date) === currentPartnerYear)
+    // Transactions already covered by the opening-balance snapshot are excluded here
+    // (they are represented by `openingBalance` instead).
+    .filter((e) => !statementStart || e.date >= statementStart)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const balanceByKey = {};
+  let runningBalance = openingBalance;
+  holderYearEntries.forEach((e) => {
+    runningBalance = r2(runningBalance + (e.type === "credit" ? e.amount : -e.amount));
+    balanceByKey[e.key] = runningBalance;
+  });
+
+  const statementQuery = statementSearch.trim().toLowerCase();
+  const statementFiltersActive = Boolean(
+    statementQuery || statementType !== "all" || statementFrom || statementTo,
+  );
+  const statementRows = holderYearEntries
+    .filter((e) => {
+      if (statementType !== "all" && e.type !== statementType) return false;
+      if (statementFrom && e.date < statementFrom) return false;
+      if (statementTo && e.date > statementTo) return false;
+      if (statementQuery) {
+        const hay = `${e.description || ""} ${e.source || ""} ${e.method || ""}`.toLowerCase();
+        if (!hay.includes(statementQuery)) return false;
+      }
+      return true;
+    })
+    .slice()
+    .reverse();
+  const statementCreditTotal = r2(
+    statementRows.filter((r) => r.type === "credit").reduce((s, r) => s + (r.amount || 0), 0),
+  );
+  const statementDebitTotal = r2(
+    statementRows.filter((r) => r.type === "debit").reduce((s, r) => s + (r.amount || 0), 0),
+  );
+
+  function clearStatementFilters() {
+    setStatementSearch("");
+    setStatementType("all");
+    setStatementFrom("");
+    setStatementTo("");
+  }
+
+  /**
+   * Export the current account statement (respecting the active filters) as a CSV
+   * file, in chronological order with the running balance per transaction.
+   */
+  function exportStatementCsv() {
+    const header = [
+      "Date",
+      "Description",
+      "Source",
+      "Method",
+      "Credit (in)",
+      "Debit (out)",
+      "Balance",
+    ];
+    const rows = [];
+    if (openingBalance !== 0) {
+      rows.push([
+        "",
+        openingSnapshotInYear
+          ? `Opening balance (as of ${manualOpeningDate})`
+          : `Opening balance (before ${currentPartnerYear})`,
+        "",
+        "",
+        "",
+        "",
+        openingBalance,
+      ]);
+    }
+    // statementRows is newest-first for display; CSV reads better oldest-first.
+    statementRows
+      .slice()
+      .reverse()
+      .forEach((row) => {
+        rows.push([
+          row.date,
+          row.description || "",
+          row.source || "",
+          row.method || "",
+          row.type === "credit" ? row.amount : "",
+          row.type === "debit" ? row.amount : "",
+          balanceByKey[row.key] ?? "",
+        ]);
+      });
+    rows.push([
+      "",
+      "Closing balance",
+      "",
+      "",
+      r2(statementCreditTotal),
+      r2(statementDebitTotal),
+      closingBalance,
+    ]);
+
+    const escapeCell = (cell) => {
+      const value = String(cell ?? "");
+      return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+    };
+    const csv = [header, ...rows]
+      .map((line) => line.map(escapeCell).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `statement-${effectiveHolder || "account"}-${currentPartnerYear}.csv`.replace(
+      /[^\w.-]+/g,
+      "-",
+    );
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast("Statement exported");
+  }
+
+  // Quick date presets for the statement (all within the selected year).
+  // Single source of truth for the ranges so the "active" pill and the applied
+  // range can never drift apart.
+  function statementPresetRange(preset) {
+    const y = currentPartnerYear;
+    const pad = (n) => String(n).padStart(2, "0");
+    const lastDay = (yy, mm) => new Date(yy, mm, 0).getDate();
+    const now = new Date();
+    if (preset === "thisMonth") {
+      const m = now.getFullYear() === y ? now.getMonth() + 1 : 1;
+      return {
+        from: `${y}-${pad(m)}-01`,
+        to: `${y}-${pad(m)}-${pad(lastDay(y, m))}`,
+      };
+    }
+    if (preset === "thisQuarter") {
+      const q = now.getFullYear() === y ? Math.floor(now.getMonth() / 3) : 3;
+      const startMonth = q * 3 + 1;
+      const endMonth = startMonth + 2;
+      return {
+        from: `${y}-${pad(startMonth)}-01`,
+        to: `${y}-${pad(endMonth)}-${pad(lastDay(y, endMonth))}`,
+      };
+    }
+    if (preset === "thisYear") {
+      return { from: `${y}-01-01`, to: `${y}-12-31` };
+    }
+    return { from: "", to: "" };
+  }
+
+  function applyStatementPreset(preset) {
+    const { from, to } = statementPresetRange(preset);
+    setStatementFrom(from);
+    setStatementTo(to);
+  }
+
+  // Which preset (if any) matches the current from/to, so it can be highlighted
+  const activePreset = (() => {
+    if (!statementFrom && !statementTo) return "all";
+    const y = currentPartnerYear;
+    if (statementFrom === `${y}-01-01` && statementTo === `${y}-12-31`) return "thisYear";
+    return null;
+  })();
+
+  // Partners offered in the deposit form: active ones, plus whichever partner the
+  // loaded deposit already belongs to (so editing never loses the selection).
+  const depositPartnerOptions = partners.filter(
+    (p) => p.is_active !== false || p.id === depositForm.partner_id,
+  );
+
+  // Same rule for the payment edit form: active partners only, but never drop the
+  // partner already linked to the payment being edited even if since deactivated.
+  const paymentPartnerOptions = partners.filter(
+    (p) => p.is_active !== false || p.id === editForm.partner_id,
+  );
 
   if (loading) {
     return (
@@ -371,6 +1108,12 @@ export default function Payments() {
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab("partners")}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "partners" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+        >
+          Payment Tracking
+        </button>
         <button
           onClick={() => setActiveTab("suppliers")}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "suppliers" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
@@ -654,6 +1397,523 @@ export default function Payments() {
         </div>
       )}
 
+{activeTab === "partners" && (
+        <div className="space-y-4">
+          {/* Header */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Payment Tracking</h1>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Account transactions — credit & debit
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openDepositForm}
+                className="btn btn-primary px-3 py-1.5 text-sm flex items-center gap-1.5"
+              >
+                <Landmark className="w-4 h-4" /> Deposit Cash
+              </button>
+              {holderNames.length > 0 && (
+                <select
+                  value={effectiveHolder || ""}
+                  onChange={(e) => setTrackerPartner(e.target.value)}
+                  className="input w-auto"
+                  title="Select account holder"
+                >
+                  {holderNames.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              )}
+              {partnerYears.length > 0 && (
+                <select
+                  value={currentPartnerYear}
+                  onChange={(e) => setPartnerYear(Number(e.target.value))}
+                  className="input w-28"
+                >
+                  {partnerYears.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {untrackedYear.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">
+                    {untrackedYear.length} customer payment
+                    {untrackedYear.length === 1 ? " is" : "s are"} not linked to an
+                    account holder
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {fmtAmt(untrackedTotal)} collected in {currentPartnerYear} without
+                    being credited to an account.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openBulkAssign}
+                  className="btn btn-primary px-3 py-1.5 text-sm"
+                >
+                  Assign to account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("transactions");
+                    setPaymentTypeFilter("received");
+                    setHolderFilter("__untracked__");
+                    setPage(1);
+                  }}
+                  className="btn btn-secondary px-3 py-1.5 text-sm"
+                >
+                  Review payments
+                </button>
+              </div>
+            </div>
+          )}
+
+          {effectiveHolder ? (
+            <>
+              {/* Summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="rounded-xl p-3 bg-green-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">Total Credit (in)</p>
+                  <p className="text-lg font-bold text-green-700 mt-1">{fmtAmt(yearCreditTotal)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{currentPartnerYear}</p>
+                </div>
+                <div className="rounded-xl p-3 bg-red-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">Total Debit (out)</p>
+                  <p className="text-lg font-bold text-red-600 mt-1">{fmtAmt(yearDebitTotal)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{currentPartnerYear}</p>
+                </div>
+                <div className="rounded-xl p-3 bg-gray-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">Opening Balance</p>
+                  <p className="text-lg font-bold text-gray-700 mt-1">{fmtAmt(openingBalance)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">before {currentPartnerYear}</p>
+                </div>
+                <div className="rounded-xl p-3 bg-blue-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">Closing Balance</p>
+                  <p className="text-lg font-bold text-blue-700 mt-1">{fmtAmt(closingBalance)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">end of {currentPartnerYear}</p>
+                </div>
+              </div>
+
+              {/* Where the money came from / went */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {[
+                  { title: "Credits (money in)", rows: creditSources, total: yearCreditTotal },
+                  { title: "Debits (money out)", rows: debitSources, total: yearDebitTotal },
+                ].map((group) => (
+                  <div key={group.title} className="card p-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-700">{group.title}</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {fmtAmt(group.total)}
+                      </p>
+                    </div>
+                    {group.rows.length === 0 ? (
+                      <p className="text-xs text-gray-400 mt-3">
+                        No {group.title.split(" ")[0].toLowerCase()} in {currentPartnerYear}.
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        {group.rows.map((s) => (
+                          <div key={s.label}>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-600">{s.label}</span>
+                              <span className="font-medium text-gray-800">
+                                {fmtAmt(s.value)}
+                              </span>
+                            </div>
+                            <div className="h-1.5 rounded-full bg-gray-100 mt-1 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${s.color}`}
+                                style={{
+                                  width: `${group.total ? Math.min(100, (s.value / group.total) * 100) : 0}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* All accounts — compare every holder and switch between statements */}
+              {holderYearRows.some((r) => r.credit || r.debit) && (
+                <div className="card overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <p className="text-sm font-medium text-gray-700">
+                      All accounts — {currentPartnerYear}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Tap an account to open its statement
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Account holder
+                          </th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Credit (in)
+                          </th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Debit (out)
+                          </th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Net
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {holderYearRows
+                          .filter((r) => r.credit || r.debit)
+                          .map((r) => (
+                            <tr
+                              key={r.name}
+                              onClick={() => setTrackerPartner(r.name)}
+                              className={`cursor-pointer hover:bg-gray-50 ${
+                                r.name === effectiveHolder ? "bg-primary-50/60" : ""
+                              }`}
+                              title={`Open ${r.name}'s statement`}
+                            >
+                              <td className="px-4 py-2.5 text-sm font-medium text-gray-800">
+                                {r.name}
+                                {r.name === effectiveHolder && (
+                                  <span className="ml-2 text-xs text-primary-600 font-normal">
+                                    viewing
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-sm text-green-700">
+                                {r.credit ? `+${fmtAmt(r.credit)}` : "—"}
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-sm text-red-600">
+                                {r.debit ? `−${fmtAmt(r.debit)}` : "—"}
+                              </td>
+                              <td
+                                className={`px-4 py-2.5 text-right text-sm font-semibold ${
+                                  r.net >= 0 ? "text-gray-700" : "text-red-600"
+                                }`}
+                              >
+                                {fmtAmt(r.net)}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Month-wise summary for this account */}
+              {hasMonthActivity && (
+                <div className="card overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <p className="text-sm font-medium text-gray-700">
+                      Monthly summary — {currentPartnerYear}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Month-wise credit and debit for {effectiveHolder}&apos;s account
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Credit (in)</th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Debit (out)</th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Net</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {holderMonthRows.filter((r) => r.credit || r.debit).map((r) => (
+                          <tr key={r.label} className="hover:bg-gray-50">
+                            <td className="px-4 py-2.5 text-sm font-medium text-gray-700">{r.label}</td>
+                            <td className="px-4 py-2.5 text-right text-sm text-green-700">
+                              {r.credit ? `+${fmtAmt(r.credit)}` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-sm text-red-600">
+                              {r.debit ? `−${fmtAmt(r.debit)}` : "—"}
+                            </td>
+                            <td className={`px-4 py-2.5 text-right text-sm font-semibold ${r.net >= 0 ? "text-gray-700" : "text-red-600"}`}>
+                              {fmtAmt(r.net)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                        <tr>
+                          <td className="px-4 py-3 text-sm font-semibold text-gray-700">Year total</td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
+                            +{fmtAmt(yearCreditTotal)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
+                            −{fmtAmt(yearDebitTotal)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
+                            {fmtAmt(r2(yearCreditTotal - yearDebitTotal))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Account statement — every credit & debit with running balance */}
+              <div className="card overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">
+                      Account statement — {effectiveHolder}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Credits, debits and running balance for {currentPartnerYear}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="font-semibold text-green-700">
+                      +{fmtAmt(statementCreditTotal)}
+                    </span>
+                    <span className="font-semibold text-red-600">
+                      −{fmtAmt(statementDebitTotal)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={openOpeningForm}
+                      className="btn btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                      title="Set the balance this account already held"
+                    >
+                      <Wallet className="w-4 h-4" /> Opening Balance
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportStatementCsv}
+                      className="btn btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                      title="Download this statement as CSV"
+                    >
+                      <Download className="w-4 h-4" /> Export CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* Statement filters */}
+                <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={statementSearch}
+                      onChange={(e) => setStatementSearch(e.target.value)}
+                      placeholder="Search description or source…"
+                      className="input pl-9"
+                    />
+                  </div>
+                  <select
+                    value={statementType}
+                    onChange={(e) => setStatementType(e.target.value)}
+                    className="input w-auto"
+                    title="Filter by credit / debit"
+                  >
+                    <option value="all">All types</option>
+                    <option value="credit">Credit (in)</option>
+                    <option value="debit">Debit (out)</option>
+                  </select>
+                  <input
+                    type="date"
+                    value={statementFrom}
+                    onChange={(e) => setStatementFrom(e.target.value)}
+                    className="input w-auto"
+                    title="From date"
+                  />
+                  <input
+                    type="date"
+                    value={statementTo}
+                    onChange={(e) => setStatementTo(e.target.value)}
+                    className="input w-auto"
+                    title="To date"
+                  />
+                  {statementFiltersActive && (
+                    <button
+                      type="button"
+                      onClick={clearStatementFilters}
+                      className="btn btn-secondary px-3 py-2 text-sm flex items-center gap-1.5"
+                    >
+                      <X className="w-3.5 h-3.5" /> Clear
+                    </button>
+                  )}
+                  <div className="flex items-center gap-1 ml-auto">
+                    {[
+                      { id: "all", label: "All" },
+                      { id: "thisMonth", label: "Month" },
+                      { id: "thisQuarter", label: "Quarter" },
+                      { id: "thisYear", label: "Year" },
+                    ].map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => applyStatementPreset(preset.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                          activePreset === preset.id
+                            ? "bg-primary-600 text-white border-primary-600"
+                            : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Statement table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Date</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Source</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Credit (in)</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Debit (out)</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Balance</th>
+                        <th className="text-right px-4 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {openingBalance !== 0 && (
+                        <tr className="bg-gray-50">
+                          <td className="px-4 py-2.5 text-sm text-gray-400 whitespace-nowrap">—</td>
+                          <td className="px-4 py-2.5 text-sm font-medium text-gray-600" colSpan={2}>
+                            {openingSnapshotInYear
+                              ? `Opening balance (as of ${new Date(manualOpeningDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })})`
+                              : `Opening balance (before ${currentPartnerYear})`}
+                            {openingSnapshotInYear && (
+                              <span className="block text-xs font-normal text-gray-400">
+                                Earlier transactions are included in this balance
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5" />
+                          <td className="px-4 py-2.5" />
+                          <td className="px-4 py-2.5 text-right text-sm font-semibold text-gray-700">
+                            {fmtAmt(openingBalance)}
+                          </td>
+                          <td />
+                        </tr>
+                      )}
+                      {statementRows.map((r) => (
+                        <tr key={r.key} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-sm text-gray-600 whitespace-nowrap">
+                            {new Date(r.date).toLocaleDateString("en-GB", {
+                              day: "numeric",
+                              month: "short",
+                              year: "2-digit",
+                            })}
+                          </td>
+                          <td className="px-4 py-2.5 text-sm text-gray-900">
+                            {r.description}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={`badge ${SOURCE_BADGE[r.source] || "bg-blue-100 text-blue-700"}`}>
+                              {r.source}
+                            </span>
+                            {r.method ? (
+                              <span className="ml-2 text-xs text-gray-400 uppercase">{r.method}</span>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-sm font-bold text-green-700">
+                            {r.type === "credit" ? `+${fmtAmt(r.amount)}` : ""}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-sm font-bold text-red-600">
+                            {r.type === "debit" ? `−${fmtAmt(r.amount)}` : ""}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-sm font-semibold text-gray-700">
+                            {fmtAmt(balanceByKey[r.key])}
+                          </td>
+                          <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                            {r.depositId ? (
+                              <span className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const d = deposits.find((x) => x.id === r.depositId);
+                                    if (d) openEditDeposit(d);
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-gray-100"
+                                  title="Edit deposit"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-gray-500" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteDeposit(r.depositId)}
+                                  className="p-1.5 rounded-lg hover:bg-red-50"
+                                  title="Delete deposit"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                                </button>
+                              </span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                      <tr>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-700" colSpan={3}>
+                          {statementFiltersActive ? "Filtered total" : "Year total"}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
+                          +{fmtAmt(statementCreditTotal)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
+                          −{fmtAmt(statementDebitTotal)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-blue-700">
+                          {fmtAmt(closingBalance)}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {statementRows.length === 0 && (
+                  <p className="text-center py-10 text-gray-500 text-sm">
+                    {statementFiltersActive
+                      ? "No transactions match the current filters."
+                      : `No transactions for ${effectiveHolder} in ${currentPartnerYear}.`}
+                  </p>
+                )}
+              </div>
+
+
+            </>
+          ) : (
+            <div className="card p-8 text-center text-gray-500 text-sm">
+              No account activity yet. Record UPI sale payments or cash deposits to
+              start tracking an account here.
+            </div>
+          )}
+        </div>
+      )}
       {activeTab === "transactions" && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -718,7 +1978,7 @@ export default function Payments() {
 
           <div className="card p-4">
             <div className="flex flex-col gap-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
@@ -737,6 +1997,17 @@ export default function Payments() {
                   <option value="all">All Payments</option>
                   <option value="paid">Payments Made</option>
                   <option value="received">Payments Received</option>
+                </select>
+                <select
+                  value={holderFilter}
+                  onChange={(e) => setHolderFilter(e.target.value)}
+                  className="input"
+                >
+                  <option value="all">All Account Holders</option>
+                  <option value="__untracked__">Untracked (no account)</option>
+                  {holderNames.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
                 </select>
                 <select
                   value={dateFilter}
@@ -789,6 +2060,7 @@ export default function Payments() {
                       </div>
                       <div>
                         <p className="font-medium text-gray-900">
+                          {payment.type === "received" ? "From" : "To"}:{" "}
                           {payment.party}
                         </p>
                         <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
@@ -806,12 +2078,25 @@ export default function Payments() {
                           <span className="badge bg-gray-200 text-gray-700 uppercase">
                             {payment.method}
                           </span>
+                          {payment.type === "received" &&
+                            payment.method === "upi" &&
+                            !payment.partner_name && (
+                              <span className="badge bg-warning-100 text-warning-800">
+                                Untracked
+                              </span>
+                            )}
                           {payment.reference && (
                             <span className="text-xs text-gray-400">
                               Ref: {payment.reference}
                             </span>
                           )}
                         </div>
+                        {payment.type === "received" && payment.partner_name && (
+                          <p className="text-xs font-medium text-blue-700 flex items-center gap-1 mt-1">
+                            <Users className="w-3.5 h-3.5" />
+                            Credited to account of: {payment.partner_name}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -839,8 +2124,7 @@ export default function Payments() {
                           amount: payment.amount,
                           payment_date: payment.date,
                           payment_method: payment.method,
-                          reference_number: payment.reference || "",
-                          notes: payment.notes || "",
+                          partner_id: payment.partner_id || "",
                         });
                       }}
                       className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
@@ -939,53 +2223,65 @@ export default function Payments() {
                   className="input w-full"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Payment Method
-                </label>
-                <select
-                  value={editForm.payment_method}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, payment_method: e.target.value })
-                  }
-                  className="input"
-                >
-                  <option value="cash">Cash</option>
-                  <option value="upi">UPI</option>
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="check">Check</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reference Number
-                </label>
-                <input
-                  type="text"
-                  value={editForm.reference_number}
-                  onChange={(e) =>
-                    setEditForm({
-                      ...editForm,
-                      reference_number: e.target.value,
-                    })
-                  }
-                  className="input"
-                  placeholder="Transaction ID / Check No."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={editForm.notes}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={2}
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={editForm.payment_method}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, payment_method: e.target.value })
+                    }
+                    className="input"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                  </select>
+                </div>
+                {editingPayment.type === "received" ? (
+                  editForm.payment_method === "upi" && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Account Holder (Partner)
+                      </label>
+                      <select
+                        value={editForm.partner_id || ""}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, partner_id: e.target.value })
+                        }
+                        className="input"
+                      >
+                        <option value="">— Select partner —</option>
+                        {paymentPartnerOptions.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Paid From Account (Partner)
+                    </label>
+                    <select
+                      value={editForm.partner_id || ""}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, partner_id: e.target.value })
+                      }
+                      className="input"
+                    >
+                      <option value="">— No account —</option>
+                      {paymentPartnerOptions.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 pt-2">
                 <button
@@ -1003,6 +2299,297 @@ export default function Payments() {
           </div>
         </div>
       )}
+    {showDepositForm && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto p-2 sm:p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8 shadow-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">
+                {depositForm.id ? "Edit Deposit" : "Deposit Cash into Account"}
+              </h2>
+              <button onClick={() => setShowDepositForm(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleDepositSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Amount *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={depositForm.amount}
+                    onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })}
+                    className="input"
+                    placeholder="0.00"
+                    onWheel={(e) => e.target.blur()}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={depositForm.deposit_date}
+                    onChange={(e) => setDepositForm({ ...depositForm, deposit_date: e.target.value })}
+                    className="input w-full"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Account Holder (Partner) *
+                </label>
+                <select
+                  value={depositForm.partner_id}
+                  onChange={(e) => setDepositForm({ ...depositForm, partner_id: e.target.value })}
+                  className="input"
+                  required
+                >
+                  <option value="">— Select partner —</option>
+                  {depositPartnerOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Mode of Transfer
+                </label>
+                <select
+                  value={depositForm.method}
+                  onChange={(e) => setDepositForm({ ...depositForm, method: e.target.value })}
+                  className="input"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI Transfer</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={depositForm.notes}
+                  onChange={(e) => setDepositForm({ ...depositForm, notes: e.target.value })}
+                  className="input"
+                  rows={2}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowDepositForm(false)} className="btn btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  {depositForm.id ? "Update Deposit" : "Record Deposit"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteDeposit && (
+        <ConfirmModal
+          message="This will permanently delete this deposit and remove it from the account statement."
+          onConfirm={() => handleDeleteDeposit(confirmDeleteDeposit)}
+          onCancel={() => setConfirmDeleteDeposit(null)}
+        />
+      )}
+
+      {/* Opening balance — the balance this account already held before tracking started */}
+      {showOpeningForm && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto p-2 sm:p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8 shadow-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold">Opening Balance</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{holderPartner?.name}</p>
+              </div>
+              <button
+                onClick={() => setShowOpeningForm(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleOpeningSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Balance the account already held *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={openingForm.amount}
+                  onChange={(e) =>
+                    setOpeningForm({ ...openingForm, amount: e.target.value })
+                  }
+                  className="input"
+                  placeholder="0.00"
+                  onWheel={(e) => e.target.blur()}
+                  autoFocus
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Use a negative value if the account was overdrawn.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  As of date
+                </label>
+                <input
+                  type="date"
+                  value={openingForm.date}
+                  onChange={(e) =>
+                    setOpeningForm({ ...openingForm, date: e.target.value })
+                  }
+                  className="input w-full"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Transactions before this date are treated as already included in the
+                  opening balance.
+                </p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowOpeningForm(false)}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Save Opening Balance
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk assign untracked customer payments to an account holder */}
+      {showBulkAssign && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto p-2 sm:p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8 shadow-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-lg font-semibold">Credit payments to an account</h2>
+              <button
+                onClick={() => setShowBulkAssign(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              {untrackedYear.length} customer payment
+              {untrackedYear.length === 1 ? "" : "s"} totalling {fmtAmt(untrackedTotal)}{" "}
+              in {currentPartnerYear}{" "}
+              {untrackedYear.length === 1 ? "is" : "are"} not linked to an account
+              holder. Select the payments and the account they were credited to.
+            </p>
+
+            <form onSubmit={handleBulkAssign} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Credit to Account Holder *
+                </label>
+                <select
+                  value={bulkPartnerId}
+                  onChange={(e) => setBulkPartnerId(e.target.value)}
+                  className="input"
+                  required
+                >
+                  <option value="">— Select account holder —</option>
+                  {partners
+                    .filter((p) => p.is_active !== false)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Payments ({bulkSelected.length} of {untrackedYear.length} selected)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBulkSelected(
+                        bulkSelected.length === untrackedYear.length
+                          ? []
+                          : untrackedYear.map((p) => p.id),
+                      )
+                    }
+                    className="text-xs font-medium text-primary-600 hover:text-primary-700"
+                  >
+                    {bulkSelected.length === untrackedYear.length
+                      ? "Clear all"
+                      : "Select all"}
+                  </button>
+                </div>
+                <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-100">
+                  {untrackedYear.map((p) => (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={bulkSelected.includes(p.id)}
+                        onChange={() => toggleBulkPayment(p.id)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="flex-1 text-sm text-gray-700 truncate">
+                        {p.sale?.customers?.name || "Walk-in"}
+                      </span>
+                      <span className="text-xs text-gray-400 whitespace-nowrap">
+                        {new Date(p.payment_date).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "2-digit",
+                        })}
+                      </span>
+                      <span className="text-sm font-medium text-gray-900 whitespace-nowrap">
+                        {fmtAmt(p.amount)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkAssign(false)}
+                  className="btn btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkSaving || bulkSelected.length === 0 || !bulkPartnerId}
+                  className="btn btn-primary flex-1 disabled:opacity-50"
+                >
+                  {bulkSaving
+                    ? "Assigning…"
+                    : `Credit ${bulkSelected.length} payment${bulkSelected.length === 1 ? "" : "s"}`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
     </div>
   );
 }

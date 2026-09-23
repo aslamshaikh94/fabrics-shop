@@ -40,18 +40,24 @@ export default function QuickSale() {
   const [search, setSearch] = useState("");
   const [items, setItems] = useState([makeEmptyItem()]);
   const [activeItemIdx, setActiveItemIdx] = useState(0);
-  const paymentType = "cash";
   const [discountAmount, setDiscountAmount] = useState("");
   const [done, setDone] = useState(false);
   const [lastSale, setLastSale] = useState(null);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [partners, setPartners] = useState([]);
+  const [partnerId, setPartnerId] = useState("");
 
   useEffect(() => {
     fetchData();
   }, []);
 
   async function fetchData() {
-    const fabRes = await supabase.from("fabrics").select("*").order("name");
+    const [fabRes, partRes] = await Promise.all([
+      supabase.from("fabrics").select("*").order("name"),
+      supabase.from("partners").select("id, name").eq("is_active", true).order("name"),
+    ]);
     setFabrics(fabRes.data || []);
+    setPartners(partRes.data || []);
     setLoading(false);
   }
 
@@ -139,6 +145,8 @@ export default function QuickSale() {
     setDiscountAmount("");
     setSearch("");
     setDone(false);
+    setPaymentMethod("cash");
+    setPartnerId("");
   }
 
   async function handleSubmit(e) {
@@ -155,6 +163,10 @@ export default function QuickSale() {
       );
       return;
     }
+    if (paymentMethod === "upi" && !partnerId) {
+      toast("Please select the partner whose account this credits", "error");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -167,7 +179,7 @@ export default function QuickSale() {
         price_per_meter: parseFloat(item.price_per_meter) || 0,
         cost_price_per_meter: parseFloat(item.cost_price_per_meter) || 0,
         sale_date: new Date().toISOString().split("T")[0],
-        payment_type: paymentType,
+        payment_type: "cash",
         fabric_name: item.fabric_name,
         notes: `Fabric: ${item.fabric_name}`,
         sale_group_id: saleGroupId,
@@ -186,8 +198,8 @@ export default function QuickSale() {
 
       if (error) throw error;
 
-      // Create one payment for cash sales — attached to the sale group, discount accounted
-      if (saleRows && saleRows.length > 0 && paymentType === "cash") {
+      // Create one payment for fully-paid sales — attached to the sale group, discount accounted
+      if (saleRows && saleRows.length > 0) {
         const totalPay = Math.max(
           saleRows.reduce(
             (s, row) => s + row.meters * row.price_per_meter,
@@ -203,7 +215,8 @@ export default function QuickSale() {
                 sale_group_id: saleGroupId,
                 amount: totalPay,
                 payment_date: new Date().toISOString().split("T")[0],
-                payment_method: "cash",
+                payment_method: paymentMethod,
+                partner_id: paymentMethod === "upi" ? partnerId : null,
               },
             ]);
           if (payErr) throw payErr;
@@ -220,7 +233,7 @@ export default function QuickSale() {
         fabrics: fabricNames,
         meters: totalMeters,
         total: netTotal,
-        paymentType,
+        paymentType: paymentMethod,
         itemCount: items.length,
       });
       setDone(true);
@@ -271,13 +284,15 @@ export default function QuickSale() {
               })}
             </p>
             <span
-              className={`badge mt-2 ${lastSale.paymentType === "cash" ? "bg-accent-100 text-accent-800" : "bg-warning-100 text-warning-800"}`}
+              className={`badge mt-2 ${lastSale.paymentType === "cash" ? "bg-accent-100 text-accent-800" : "bg-blue-100 text-blue-700"}`}
             >
               {lastSale.paymentType === "cash"
                 ? "Cash Paid"
-                : lastSale.paymentType === "credit"
-                  ? "Credit"
-                  : "Partial"}
+                : lastSale.paymentType === "upi"
+                  ? "UPI Paid"
+                  : lastSale.paymentType === "credit"
+                    ? "Credit"
+                    : "Partial"}
             </span>
           </div>
           <button onClick={reset} className="btn btn-primary w-full">
@@ -508,6 +523,41 @@ export default function QuickSale() {
                   placeholder="e.g. 500"
                   onWheel={(e) => e.target.blur()}
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="input"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                  </select>
+                </div>
+                {paymentMethod === "upi" && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Account Holder (Partner) *
+                    </label>
+                    <select
+                      value={partnerId}
+                      onChange={(e) => setPartnerId(e.target.value)}
+                      className="input"
+                      required
+                    >
+                      <option value="">— Select partner —</option>
+                      {partners.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               {discountValue > 0 && (
                 <div className="flex justify-between text-sm border-t border-gray-200 pt-2">
