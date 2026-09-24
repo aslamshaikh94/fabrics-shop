@@ -24,6 +24,7 @@ import {
   Eye,
   EyeOff,
   Database,
+  Landmark,
 } from "lucide-react";
 import { getSupabase } from "../lib/supabase";
 import { useAuth } from "./AuthGuard";
@@ -35,6 +36,7 @@ const ALL_NAV = [
   { id: "purchases", label: "Purchases", icon: ShoppingBag, adminOnly: true },
   { id: "sales", label: "Sales", icon: TrendingUp },
   { id: "payments", label: "Payments", icon: CreditCard },
+  { id: "accounts", label: "Accounts", icon: Landmark },
   {
     id: "withdrawals",
     label: "Withdrawals",
@@ -54,7 +56,7 @@ const BOTTOM_NAV = [
   { id: "dashboard", label: "Home", icon: LayoutDashboard },
   { id: "quicksale", label: "Sale", icon: Zap },
   { id: "sales", label: "Sales", icon: TrendingUp },
-  { id: "customers", label: "Customers", icon: Users },
+  { id: "accounts", label: "Accounts", icon: Landmark },
   { id: "reports", label: "Reports", icon: BarChart2 },
 ];
 
@@ -102,7 +104,7 @@ export default function Shell({ children }) {
     {
       label: "Transactions",
       items: navItems.filter((n) =>
-        ["sales", "purchases", "payments"].includes(n.id),
+        ["sales", "purchases", "payments", "accounts"].includes(n.id),
       ),
     },
     {
