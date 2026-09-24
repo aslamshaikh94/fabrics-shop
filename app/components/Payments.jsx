@@ -28,8 +28,18 @@ import { matchPartner } from "../utils/partnerWithdrawal";
 const PAGE_SIZE = 10;
 
 const MONTH_LABELS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 // Round to 2 decimals (money safe)
@@ -50,7 +60,10 @@ function fmtAmt(n) {
   })}`;
 }
 
-export default function Payments() {
+export default function Payments({
+  initialTab = "suppliers",
+  accountsOnly = false,
+}) {
   const toast = useToast();
   const [purchasePayments, setPurchasePayments] = useState([]);
   const [salePayments, setSalePayments] = useState([]);
@@ -63,7 +76,11 @@ export default function Payments() {
   const [page, setPage] = useState(1);
   const [supplierSummary, setSupplierSummary] = useState([]);
   const [customerSummary, setCustomerSummary] = useState([]);
-  const [activeTab, setActiveTab] = useState("partners");
+  const [activeTab, setActiveTab] = useState(
+    ["partners", "suppliers", "customers", "transactions"].includes(initialTab)
+      ? initialTab
+      : "suppliers",
+  );
   const [editingPayment, setEditingPayment] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [partners, setPartners] = useState([]);
@@ -103,79 +120,152 @@ export default function Payments() {
 
   async function fetchAll() {
     try {
-      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, purchasesRes, partnersRes, depositsRes, withdrawalsRes] =
-        await Promise.all([
-          supabase.from("purchase_payments").select("*, purchase_id").order("payment_date", { ascending: false }),
-          supabase.from("sale_payments").select("*, sale_id").order("payment_date", { ascending: false }),
-          supabase.from("suppliers").select("id, name"),
-          supabase.from("customers").select("id, name"),
-          supabase.from("sales").select("id, sale_group_id, customer_id, customer_name, total_amount, paid_amount, remaining_amount"),
-          supabase.from("purchases").select("id, supplier_id, total_amount, paid_amount, remaining_amount"),
-          supabase.from("partners").select("*").order("name"),
-          supabase.from("cash_deposits").select("*").order("deposit_date", { ascending: false }),
-          supabase.from("withdrawals").select("*").order("withdrawal_date", { ascending: false }),
-        ]);
+      const [
+        purchaseRes,
+        saleRes,
+        suppliersRes,
+        customersRes,
+        salesRes,
+        purchasesRes,
+        partnersRes,
+        depositsRes,
+        withdrawalsRes,
+      ] = await Promise.all([
+        supabase
+          .from("purchase_payments")
+          .select("*, purchase_id")
+          .order("payment_date", { ascending: false }),
+        supabase
+          .from("sale_payments")
+          .select("*, sale_id")
+          .order("payment_date", { ascending: false }),
+        supabase.from("suppliers").select("id, name"),
+        supabase.from("customers").select("id, name"),
+        supabase
+          .from("sales")
+          .select(
+            "id, sale_group_id, customer_id, customer_name, total_amount, paid_amount, remaining_amount",
+          ),
+        supabase
+          .from("purchases")
+          .select(
+            "id, supplier_id, total_amount, paid_amount, remaining_amount",
+          ),
+        supabase.from("partners").select("*").order("name"),
+        supabase
+          .from("cash_deposits")
+          .select("*")
+          .order("deposit_date", { ascending: false }),
+        supabase
+          .from("withdrawals")
+          .select("*")
+          .order("withdrawal_date", { ascending: false }),
+      ]);
 
       const partnerMap = Object.fromEntries(
         (partnersRes.data || []).map((p) => [p.id, p.name]),
       );
       setPartners(partnersRes.data || []);
       setWithdrawals(withdrawalsRes.data || []);
-      setDeposits((depositsRes.data || []).map((d) => ({
-        ...d,
-        partner_name: d.partner_id
-          ? partnerMap[d.partner_id] || "Unknown"
-          : null,
-      })));
+      setDeposits(
+        (depositsRes.data || []).map((d) => ({
+          ...d,
+          partner_name: d.partner_id
+            ? partnerMap[d.partner_id] || "Unknown"
+            : null,
+        })),
+      );
 
-      const supplierMap = Object.fromEntries((suppliersRes.data || []).map((s) => [s.id, s.name]));
-      const customerMap = Object.fromEntries((customersRes.data || []).map((c) => [c.id, c.name]));
-      const purchaseSupplierMap = Object.fromEntries((purchasesRes.data || []).map((p) => [p.id, p.supplier_id]));
-      const saleInfoMap = Object.fromEntries((salesRes.data || []).map((s) => [s.id, { customer_id: s.customer_id, customer_name: s.customer_name }]));
+      const supplierMap = Object.fromEntries(
+        (suppliersRes.data || []).map((s) => [s.id, s.name]),
+      );
+      const customerMap = Object.fromEntries(
+        (customersRes.data || []).map((c) => [c.id, c.name]),
+      );
+      const purchaseSupplierMap = Object.fromEntries(
+        (purchasesRes.data || []).map((p) => [p.id, p.supplier_id]),
+      );
+      const saleInfoMap = Object.fromEntries(
+        (salesRes.data || []).map((s) => [
+          s.id,
+          { customer_id: s.customer_id, customer_name: s.customer_name },
+        ]),
+      );
       const saleGroupMap = {};
       (salesRes.data || []).forEach((s) => {
         if (s.sale_group_id && !saleGroupMap[s.sale_group_id]) {
-          saleGroupMap[s.sale_group_id] = { customer_id: s.customer_id, customer_name: s.customer_name };
+          saleGroupMap[s.sale_group_id] = {
+            customer_id: s.customer_id,
+            customer_name: s.customer_name,
+          };
         }
       });
 
-      setPurchasePayments((purchaseRes.data || []).map((p) => ({
-        ...p,
-        purchase: { suppliers: { name: supplierMap[purchaseSupplierMap[p.purchase_id]] || "Unknown" } },
-      })));
-      setSalePayments((saleRes.data || []).map((s) => {
-        const info = saleInfoMap[s.sale_id] || saleGroupMap[s.sale_group_id] || {};
-        const name = info.customer_name || (info.customer_id ? customerMap[info.customer_id] : null) || "Walk-in";
-        return {
-          ...s,
-          sale: { customers: { name } },
-          partner_name: s.partner_id
-            ? partnerMap[s.partner_id] || "Unknown"
-            : null,
-        };
-      }));
+      setPurchasePayments(
+        (purchaseRes.data || []).map((p) => ({
+          ...p,
+          purchase: {
+            suppliers: {
+              name:
+                supplierMap[purchaseSupplierMap[p.purchase_id]] || "Unknown",
+            },
+          },
+        })),
+      );
+      setSalePayments(
+        (saleRes.data || []).map((s) => {
+          const info =
+            saleInfoMap[s.sale_id] || saleGroupMap[s.sale_group_id] || {};
+          const name =
+            info.customer_name ||
+            (info.customer_id ? customerMap[info.customer_id] : null) ||
+            "Walk-in";
+          return {
+            ...s,
+            sale: { customers: { name } },
+            partner_name: s.partner_id
+              ? partnerMap[s.partner_id] || "Unknown"
+              : null,
+          };
+        }),
+      );
 
       // Supplier summary
       const supMap = {};
       (purchasesRes.data || []).forEach((p) => {
         const name = supplierMap[p.supplier_id] || "Unknown";
-        if (!supMap[name]) supMap[name] = { name, total: 0, paid: 0, pending: 0 };
+        if (!supMap[name])
+          supMap[name] = { name, total: 0, paid: 0, pending: 0 };
         supMap[name].total += p.total_amount || 0;
         supMap[name].paid += p.paid_amount || 0;
-        supMap[name].pending += Math.max((p.total_amount || 0) - (p.paid_amount || 0), 0);
+        supMap[name].pending += Math.max(
+          (p.total_amount || 0) - (p.paid_amount || 0),
+          0,
+        );
       });
-      setSupplierSummary(Object.values(supMap).sort((a, b) => b.pending - a.pending));
+      setSupplierSummary(
+        Object.values(supMap).sort((a, b) => b.pending - a.pending),
+      );
 
       // Customer summary
       const custMap = {};
       (salesRes.data || []).forEach((s) => {
-        const name = s.customer_name || (s.customer_id ? customerMap[s.customer_id] : null) || "Walk-in";
-        if (!custMap[name]) custMap[name] = { name, total: 0, paid: 0, pending: 0 };
+        const name =
+          s.customer_name ||
+          (s.customer_id ? customerMap[s.customer_id] : null) ||
+          "Walk-in";
+        if (!custMap[name])
+          custMap[name] = { name, total: 0, paid: 0, pending: 0 };
         custMap[name].total += s.total_amount || 0;
         custMap[name].paid += s.paid_amount || 0;
-        custMap[name].pending += Math.max((s.total_amount || 0) - (s.paid_amount || 0), 0);
+        custMap[name].pending += Math.max(
+          (s.total_amount || 0) - (s.paid_amount || 0),
+          0,
+        );
       });
-      setCustomerSummary(Object.values(custMap).sort((a, b) => b.pending - a.pending));
+      setCustomerSummary(
+        Object.values(custMap).sort((a, b) => b.pending - a.pending),
+      );
     } catch (error) {
       console.error("Error fetching payments:", error);
     } finally {
@@ -242,8 +332,7 @@ export default function Payments() {
       amount: "",
       deposit_date: new Date().toISOString().split("T")[0],
       method: "cash",
-      partner_id:
-        partners.find((p) => p.name === effectiveHolder)?.id || "",
+      partner_id: partners.find((p) => p.name === effectiveHolder)?.id || "",
       notes: "",
     });
     setShowDepositForm(true);
@@ -252,7 +341,10 @@ export default function Payments() {
   function openEditDeposit(deposit) {
     setDepositForm({
       id: deposit.id,
-      amount: deposit.amount === null || deposit.amount === undefined ? "" : String(deposit.amount),
+      amount:
+        deposit.amount === null || deposit.amount === undefined
+          ? ""
+          : String(deposit.amount),
       deposit_date: deposit.deposit_date,
       method: deposit.method || "cash",
       partner_id: deposit.partner_id || "",
@@ -281,7 +373,10 @@ export default function Payments() {
     };
     try {
       const { error } = depositForm.id
-        ? await supabase.from("cash_deposits").update(payload).eq("id", depositForm.id)
+        ? await supabase
+            .from("cash_deposits")
+            .update(payload)
+            .eq("id", depositForm.id)
         : await supabase.from("cash_deposits").insert([payload]);
       if (error) throw error;
       toast(depositForm.id ? "Deposit updated" : "Cash deposit recorded");
@@ -371,7 +466,8 @@ export default function Payments() {
         .update({ partner_id: bulkPartnerId })
         .in("id", bulkSelected);
       if (error) throw error;
-      const name = partners.find((p) => p.id === bulkPartnerId)?.name || "account";
+      const name =
+        partners.find((p) => p.id === bulkPartnerId)?.name || "account";
       toast(
         `${bulkSelected.length} payment${bulkSelected.length === 1 ? "" : "s"} credited to ${name}`,
       );
@@ -422,35 +518,53 @@ export default function Payments() {
 
   async function fetchPayments() {
     try {
-      const [purchaseRes, saleRes, suppliersRes, customersRes, salesRes, partnersRes, depositsRes, withdrawalsRes] =
-        await Promise.all([
-          supabase
-            .from("purchase_payments")
-            .select("*, purchase_id")
-            .order("payment_date", { ascending: false }),
-          supabase
-            .from("sale_payments")
-            .select("*")
-            .order("payment_date", { ascending: false }),
-          supabase.from("purchases").select("id, supplier_id"),
-          supabase.from("customers").select("id, name"),
-          supabase.from("sales").select("id, sale_group_id, customer_id, customer_name"),
-          supabase.from("partners").select("*").order("name"),
-          supabase.from("cash_deposits").select("*").order("deposit_date", { ascending: false }),
-          supabase.from("withdrawals").select("*").order("withdrawal_date", { ascending: false }),
-        ]);
+      const [
+        purchaseRes,
+        saleRes,
+        suppliersRes,
+        customersRes,
+        salesRes,
+        partnersRes,
+        depositsRes,
+        withdrawalsRes,
+      ] = await Promise.all([
+        supabase
+          .from("purchase_payments")
+          .select("*, purchase_id")
+          .order("payment_date", { ascending: false }),
+        supabase
+          .from("sale_payments")
+          .select("*")
+          .order("payment_date", { ascending: false }),
+        supabase.from("purchases").select("id, supplier_id"),
+        supabase.from("customers").select("id, name"),
+        supabase
+          .from("sales")
+          .select("id, sale_group_id, customer_id, customer_name"),
+        supabase.from("partners").select("*").order("name"),
+        supabase
+          .from("cash_deposits")
+          .select("*")
+          .order("deposit_date", { ascending: false }),
+        supabase
+          .from("withdrawals")
+          .select("*")
+          .order("withdrawal_date", { ascending: false }),
+      ]);
 
       const partnerMap = Object.fromEntries(
         (partnersRes.data || []).map((p) => [p.id, p.name]),
       );
       setPartners(partnersRes.data || []);
       setWithdrawals(withdrawalsRes.data || []);
-      setDeposits((depositsRes.data || []).map((d) => ({
-        ...d,
-        partner_name: d.partner_id
-          ? partnerMap[d.partner_id] || "Unknown"
-          : null,
-      })));
+      setDeposits(
+        (depositsRes.data || []).map((d) => ({
+          ...d,
+          partner_name: d.partner_id
+            ? partnerMap[d.partner_id] || "Unknown"
+            : null,
+        })),
+      );
 
       const purchasePaymentsData = purchaseRes.data || [];
       const salePaymentsData = saleRes.data || [];
@@ -512,7 +626,8 @@ export default function Payments() {
         },
       }));
       const enrichedSalePayments = salePaymentsData.map((s) => {
-        const saleInfo = sales[s.sale_id] || salesByGroup[s.sale_group_id] || {};
+        const saleInfo =
+          sales[s.sale_id] || salesByGroup[s.sale_group_id] || {};
         // First try customer_name from the sale record itself (for walk-in sales with custom names)
         const name = saleInfo.customer_name
           ? saleInfo.customer_name
@@ -604,7 +719,10 @@ export default function Payments() {
       if (holderFilter === "__untracked__") {
         // Customer payments collected but not credited to an account holder
         if (p.type !== "received" || p.partner_name) return false;
-      } else if (holderFilter !== "all" && (p.partner_name || "") !== holderFilter)
+      } else if (
+        holderFilter !== "all" &&
+        (p.partner_name || "") !== holderFilter
+      )
         return false;
       if (searchTerm)
         return p.party.toLowerCase().includes(searchTerm.toLowerCase());
@@ -726,23 +844,31 @@ export default function Payments() {
     const manualOpening = Number(partner?.opening_balance || 0);
     const manualOpeningDate = partner?.opening_balance_date || "";
     const openingApplies =
-      Boolean(manualOpeningDate) && currentPartnerYear >= yearOf(manualOpeningDate);
+      Boolean(manualOpeningDate) &&
+      currentPartnerYear >= yearOf(manualOpeningDate);
     const statementStart = openingApplies ? manualOpeningDate : "";
     const afterStart = (e) => !statementStart || e.date >= statementStart;
     const opening = r2(
       (openingApplies ? manualOpening : 0) +
         entries
           .filter((e) => yearOf(e.date) < currentPartnerYear && afterStart(e))
-          .reduce((s, e) => s + (e.type === "credit" ? e.amount : -e.amount), 0),
+          .reduce(
+            (s, e) => s + (e.type === "credit" ? e.amount : -e.amount),
+            0,
+          ),
     );
     const yearEntries = entries.filter(
       (e) => yearOf(e.date) === currentPartnerYear && afterStart(e),
     );
     const credit = r2(
-      yearEntries.filter((e) => e.type === "credit").reduce((s, e) => s + (e.amount || 0), 0),
+      yearEntries
+        .filter((e) => e.type === "credit")
+        .reduce((s, e) => s + (e.amount || 0), 0),
     );
     const debit = r2(
-      yearEntries.filter((e) => e.type === "debit").reduce((s, e) => s + (e.amount || 0), 0),
+      yearEntries
+        .filter((e) => e.type === "debit")
+        .reduce((s, e) => s + (e.amount || 0), 0),
     );
     return {
       name,
@@ -754,6 +880,11 @@ export default function Payments() {
       recent: [...yearEntries].sort(byDateDesc).slice(0, 5),
     };
   });
+  // One card per account holder — including holders with no activity in the selected
+  // year, so changing the year never hides an account (the same rule the account-holder
+  // dropdown follows). Drives the "All accounts" grid plus its column count, so a lone
+  // account isn't left in half a row while multiple accounts sit side by side.
+  const visibleAccounts = holderSummaries;
   const openStatement = (name) => {
     setTrackerPartner(name);
     setTimeout(() => {
@@ -839,13 +970,15 @@ export default function Payments() {
   // covers the selected year, everything dated before it must be hidden from the
   // statement — otherwise those transactions are counted twice (once inside the
   // snapshot, once again as statement rows).
-  const holderPartner = partners.find((p) => p.name === effectiveHolder) || null;
+  const holderPartner =
+    partners.find((p) => p.name === effectiveHolder) || null;
   const manualOpening = Number(holderPartner?.opening_balance || 0);
   const manualOpeningDate = holderPartner?.opening_balance_date || "";
   // A snapshot only describes its own year and later — an earlier year's statement
   // cannot be derived from a balance that is dated after it.
   const openingApplies =
-    Boolean(manualOpeningDate) && currentPartnerYear >= yearOf(manualOpeningDate);
+    Boolean(manualOpeningDate) &&
+    currentPartnerYear >= yearOf(manualOpeningDate);
   // Set when the snapshot falls inside the year currently being viewed.
   const openingSnapshotInYear =
     openingApplies && yearOf(manualOpeningDate) === currentPartnerYear;
@@ -863,18 +996,24 @@ export default function Payments() {
   // Entries dated before the opening-balance snapshot are already represented by
   // `openingBalance`, so every year-scoped total below must skip them — otherwise
   // the same money is counted twice (once in the snapshot, once as a transaction).
-  const afterStatementStart = (e) => !statementStart || e.date >= statementStart;
+  const afterStatementStart = (e) =>
+    !statementStart || e.date >= statementStart;
 
   // Direct transfers from customers into this account, for the selected year
   const holderCredits = holderTransfersAll
-    .filter((e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e))
+    .filter(
+      (e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e),
+    )
     .sort(byDateDesc);
   const holderCreditTotal =
-    Math.round(holderCredits.reduce((s, r) => s + (r.amount || 0), 0) * 100) / 100;
+    Math.round(holderCredits.reduce((s, r) => s + (r.amount || 0), 0) * 100) /
+    100;
 
   // Debits (money out) for the selected year
   const holderDebits = [...holderWithdrawals, ...holderPurchaseDebits]
-    .filter((e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e))
+    .filter(
+      (e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e),
+    )
     .sort(byDateDesc);
 
   // ── Cash deposits of the selected holder for the selected year ──
@@ -889,14 +1028,16 @@ export default function Payments() {
     )
     .sort((a, b) => new Date(b.deposit_date) - new Date(a.deposit_date));
   const yearDepositTotal =
-    Math.round(yearDeposits.reduce((s, d) => s + (d.amount || 0), 0) * 100) / 100;
+    Math.round(yearDeposits.reduce((s, d) => s + (d.amount || 0), 0) * 100) /
+    100;
 
   // Year totals: credits are customer transfers + deposits, debits are
   // withdrawals + the reinvested part of supplier payments made from this account.
   const yearCreditTotal =
     Math.round((holderCreditTotal + yearDepositTotal) * 100) / 100;
   const yearDebitTotal =
-    Math.round(holderDebits.reduce((s, r) => s + (r.amount || 0), 0) * 100) / 100;
+    Math.round(holderDebits.reduce((s, r) => s + (r.amount || 0), 0) * 100) /
+    100;
   const closingBalance =
     Math.round((openingBalance + yearCreditTotal - yearDebitTotal) * 100) / 100;
 
@@ -927,10 +1068,14 @@ export default function Payments() {
     const debit = holderDebits
       .filter((e) => new Date(e.date).getMonth() === i)
       .reduce((s, e) => s + (e.amount || 0), 0);
-    return { label, credit: r2(credit), debit: r2(debit), net: r2(credit - debit) };
+    return {
+      label,
+      credit: r2(credit),
+      debit: r2(debit),
+      net: r2(credit - debit),
+    };
   });
   const hasMonthActivity = holderMonthRows.some((r) => r.credit || r.debit);
-
 
   // ── Credit / debit composition for the selected holder + year ──
   const creditSources = [
@@ -974,7 +1119,9 @@ export default function Payments() {
   const balanceByKey = {};
   let runningBalance = openingBalance;
   holderYearEntries.forEach((e) => {
-    runningBalance = r2(runningBalance + (e.type === "credit" ? e.amount : -e.amount));
+    runningBalance = r2(
+      runningBalance + (e.type === "credit" ? e.amount : -e.amount),
+    );
     balanceByKey[e.key] = runningBalance;
   });
 
@@ -988,7 +1135,8 @@ export default function Payments() {
       if (statementFrom && e.date < statementFrom) return false;
       if (statementTo && e.date > statementTo) return false;
       if (statementQuery) {
-        const hay = `${e.description || ""} ${e.source || ""} ${e.method || ""}`.toLowerCase();
+        const hay =
+          `${e.description || ""} ${e.source || ""} ${e.method || ""}`.toLowerCase();
         if (!hay.includes(statementQuery)) return false;
       }
       return true;
@@ -996,10 +1144,14 @@ export default function Payments() {
     .slice()
     .reverse();
   const statementCreditTotal = r2(
-    statementRows.filter((r) => r.type === "credit").reduce((s, r) => s + (r.amount || 0), 0),
+    statementRows
+      .filter((r) => r.type === "credit")
+      .reduce((s, r) => s + (r.amount || 0), 0),
   );
   const statementDebitTotal = r2(
-    statementRows.filter((r) => r.type === "debit").reduce((s, r) => s + (r.amount || 0), 0),
+    statementRows
+      .filter((r) => r.type === "debit")
+      .reduce((s, r) => s + (r.amount || 0), 0),
   );
 
   function clearStatementFilters() {
@@ -1074,10 +1226,11 @@ export default function Payments() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `statement-${effectiveHolder || "account"}-${currentPartnerYear}.csv`.replace(
-      /[^\w.-]+/g,
-      "-",
-    );
+    a.download =
+      `statement-${effectiveHolder || "account"}-${currentPartnerYear}.csv`.replace(
+        /[^\w.-]+/g,
+        "-",
+      );
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1125,7 +1278,8 @@ export default function Payments() {
   const activePreset = (() => {
     if (!statementFrom && !statementTo) return "all";
     const y = currentPartnerYear;
-    if (statementFrom === `${y}-01-01` && statementTo === `${y}-12-31`) return "thisYear";
+    if (statementFrom === `${y}-01-01` && statementTo === `${y}-12-31`)
+      return "thisYear";
     return null;
   })();
 
@@ -1151,38 +1305,36 @@ export default function Payments() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
-        <p className="text-gray-500 mt-1">Track all payment transactions</p>
-      </div>
+      {!accountsOnly && (
+        <>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
+            <p className="text-gray-500 mt-1">Track all payment transactions</p>
+          </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab("partners")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "partners" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-        >
-          Payment Tracking
-        </button>
-        <button
-          onClick={() => setActiveTab("suppliers")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "suppliers" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-        >
-          Supplier Summary
-        </button>
-        <button
-          onClick={() => setActiveTab("customers")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "customers" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-        >
-          Customer Summary
-        </button>
-        <button
-          onClick={() => setActiveTab("transactions")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "transactions" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-        >
-          Transactions
-        </button>
-      </div>
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab("suppliers")}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "suppliers" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+            >
+              Supplier Summary
+            </button>
+            <button
+              onClick={() => setActiveTab("customers")}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "customers" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+            >
+              Customer Summary
+            </button>
+            <button
+              onClick={() => setActiveTab("transactions")}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "transactions" ? "border-primary-600 text-primary-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+            >
+              Transactions
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Supplier Summary Tab */}
       {activeTab === "suppliers" && (
@@ -1447,71 +1599,85 @@ export default function Payments() {
         </div>
       )}
 
-{activeTab === "partners" && (
-        <div className="space-y-4">
-          {/* Header */}
-          <div className="flex items-center justify-between flex-wrap gap-3">
+      {activeTab === "partners" && (
+        <div className="space-y-5">
+          {/* Page header + account controls */}
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold text-gray-900">Payment Tracking</h1>
-              <p className="text-sm text-gray-500 mt-0.5">
-                Account transactions — credit & debit
+              <h1 className="text-2xl font-bold text-gray-900">Accounts</h1>
+              <p className="text-gray-500 mt-1">
+                Track every credit and debit in each account holder&apos;s
+                account
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end">
+              {holderNames.length > 0 && (
+                <label className="flex w-full flex-col gap-1 sm:w-auto">
+                  <span className="text-xs font-medium text-gray-500">
+                    Account holder
+                  </span>
+                  <select
+                    value={effectiveHolder || ""}
+                    onChange={(e) => setTrackerPartner(e.target.value)}
+                    className="input w-full py-2 sm:w-auto sm:min-w-[170px]"
+                  >
+                    {holderNames.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {partnerYears.length > 0 && (
+                <label className="flex w-full flex-col gap-1 sm:w-auto">
+                  <span className="text-xs font-medium text-gray-500">
+                    Year
+                  </span>
+                  <select
+                    value={currentPartnerYear}
+                    onChange={(e) => setPartnerYear(Number(e.target.value))}
+                    className="input w-full py-2 sm:w-28"
+                  >
+                    {partnerYears.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <button
                 type="button"
                 onClick={openDepositForm}
-                className="btn btn-primary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                className="btn btn-primary w-full px-3 py-2 text-sm flex items-center justify-center gap-1.5 sm:w-auto"
               >
                 <Landmark className="w-4 h-4" /> Deposit Cash
               </button>
-              {holderNames.length > 0 && (
-                <select
-                  value={effectiveHolder || ""}
-                  onChange={(e) => setTrackerPartner(e.target.value)}
-                  className="input w-auto"
-                  title="Select account holder"
-                >
-                  {holderNames.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              )}
-              {partnerYears.length > 0 && (
-                <select
-                  value={currentPartnerYear}
-                  onChange={(e) => setPartnerYear(Number(e.target.value))}
-                  className="input w-28"
-                >
-                  {partnerYears.map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-              )}
             </div>
           </div>
 
           {untrackedYear.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-start gap-2">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-amber-800">
                     {untrackedYear.length} customer payment
-                    {untrackedYear.length === 1 ? " is" : "s are"} not linked to an
-                    account holder
+                    {untrackedYear.length === 1 ? " is" : "s are"} not linked to
+                    an account holder
                   </p>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    {fmtAmt(untrackedTotal)} collected in {currentPartnerYear} without
-                    being credited to an account.
+                    {fmtAmt(untrackedTotal)} collected in {currentPartnerYear}{" "}
+                    without being credited to an account.
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:items-center">
                 <button
                   type="button"
                   onClick={openBulkAssign}
-                  className="btn btn-primary px-3 py-1.5 text-sm"
+                  className="btn btn-primary w-full px-3 py-1.5 text-sm sm:w-auto"
                 >
                   Assign to account
                 </button>
@@ -1523,7 +1689,7 @@ export default function Payments() {
                     setHolderFilter("__untracked__");
                     setPage(1);
                   }}
-                  className="btn btn-secondary px-3 py-1.5 text-sm"
+                  className="btn btn-secondary w-full px-3 py-1.5 text-sm sm:w-auto"
                 >
                   Review payments
                 </button>
@@ -1535,52 +1701,98 @@ export default function Payments() {
             <>
               {/* Summary */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="rounded-xl p-3 bg-green-50 border border-gray-100">
-                  <p className="text-xs font-medium text-gray-500">Total Credit (in)</p>
-                  <p className="text-lg font-bold text-green-700 mt-1">{fmtAmt(yearCreditTotal)}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{currentPartnerYear}</p>
+                <div className="min-w-0 rounded-xl p-3 bg-green-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">
+                    Total Credit (in)
+                  </p>
+                  <p className="text-base sm:text-lg font-bold text-green-700 mt-1 tabular-nums break-words">
+                    {fmtAmt(yearCreditTotal)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {currentPartnerYear}
+                  </p>
                 </div>
-                <div className="rounded-xl p-3 bg-red-50 border border-gray-100">
-                  <p className="text-xs font-medium text-gray-500">Total Debit (out)</p>
-                  <p className="text-lg font-bold text-red-600 mt-1">{fmtAmt(yearDebitTotal)}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{currentPartnerYear}</p>
+                <div className="min-w-0 rounded-xl p-3 bg-red-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">
+                    Total Debit (out)
+                  </p>
+                  <p className="text-base sm:text-lg font-bold text-red-600 mt-1 tabular-nums break-words">
+                    {fmtAmt(yearDebitTotal)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {currentPartnerYear}
+                  </p>
                 </div>
-                <div className="rounded-xl p-3 bg-gray-50 border border-gray-100">
-                  <p className="text-xs font-medium text-gray-500">Opening Balance</p>
-                  <p className="text-lg font-bold text-gray-700 mt-1">{fmtAmt(openingBalance)}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">before {currentPartnerYear}</p>
+                <div className="min-w-0 rounded-xl p-3 bg-gray-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">
+                    Opening Balance
+                  </p>
+                  <p className="text-base sm:text-lg font-bold text-gray-700 mt-1 tabular-nums break-words">
+                    {fmtAmt(openingBalance)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    before {currentPartnerYear}
+                  </p>
                 </div>
-                <div className="rounded-xl p-3 bg-blue-50 border border-gray-100">
-                  <p className="text-xs font-medium text-gray-500">Closing Balance</p>
-                  <p className="text-lg font-bold text-blue-700 mt-1">{fmtAmt(closingBalance)}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">end of {currentPartnerYear}</p>
+                <div className="min-w-0 rounded-xl p-3 bg-blue-50 border border-gray-100">
+                  <p className="text-xs font-medium text-gray-500">
+                    Closing Balance
+                  </p>
+                  <p className="text-base sm:text-lg font-bold text-blue-700 mt-1 tabular-nums break-words">
+                    {fmtAmt(closingBalance)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    end of {currentPartnerYear}
+                  </p>
                 </div>
               </div>
 
               {/* Where the money came from / went */}
+              <div className="mb-3">
+                <p className="text-sm font-medium text-gray-700">
+                  Credits / debits — {effectiveHolder}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Money movement for the selected account in {currentPartnerYear}
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {[
-                  { title: "Credits (money in)", rows: creditSources, total: yearCreditTotal },
-                  { title: "Debits (money out)", rows: debitSources, total: yearDebitTotal },
+                  {
+                    title: "Credits (money in)",
+                    rows: creditSources,
+                    total: yearCreditTotal,
+                  },
+                  {
+                    title: "Debits (money out)",
+                    rows: debitSources,
+                    total: yearDebitTotal,
+                  },
                 ].map((group) => (
                   <div key={group.title} className="card p-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-gray-700">{group.title}</p>
-                      <p className="text-sm font-semibold text-gray-900">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-gray-700 min-w-0">
+                        {group.title}
+                      </p>
+                      <p className="text-sm font-semibold text-gray-900 text-right tabular-nums">
                         {fmtAmt(group.total)}
                       </p>
                     </div>
                     {group.rows.length === 0 ? (
                       <p className="text-xs text-gray-400 mt-3">
-                        No {group.title.split(" ")[0].toLowerCase()} in {currentPartnerYear}.
+                        No {group.title.split(" ")[0].toLowerCase()} in{" "}
+                        {currentPartnerYear}.
                       </p>
                     ) : (
                       <div className="mt-3 space-y-2">
                         {group.rows.map((s) => (
                           <div key={s.label}>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-600">{s.label}</span>
-                              <span className="font-medium text-gray-800">
+                            <div className="flex items-center justify-between gap-3 text-xs">
+                              <span className="text-gray-600 min-w-0 break-words">
+                                {s.label}
+                              </span>
+                              <span className="font-medium text-gray-800 text-right tabular-nums">
                                 {fmtAmt(s.value)}
                               </span>
                             </div>
@@ -1600,201 +1812,172 @@ export default function Payments() {
                 ))}
               </div>
 
+
               {/* All accounts — every holder shown separately with full detail */}
-              {holderSummaries.some((r) => r.credit || r.debit || r.opening || r.count) && (
+              {visibleAccounts.length > 0 && (
                 <div>
                   <p className="text-sm font-medium text-gray-700">
                     All accounts — {currentPartnerYear}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5 mb-3">
-                    Each account holder shown separately with their own balance and recent activity
+                    Each account holder shown separately with their own balance
+                    and recent activity
                   </p>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {holderSummaries
-                      .filter((r) => r.credit || r.debit || r.opening || r.count)
-                      .map((r) => (
-                        <div
-                          key={r.name}
-                          className={`card overflow-hidden ${
-                            r.name === effectiveHolder ? "ring-2 ring-primary-500/60" : ""
-                          }`}
-                        >
-                          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 text-sm font-bold flex items-center justify-center shrink-0">
-                                {r.name.charAt(0).toUpperCase()}
-                              </span>
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-800 truncate">
-                                  {r.name}
-                                  {r.name === effectiveHolder && (
-                                    <span className="ml-2 text-xs text-primary-600 font-normal">
-                                      viewing
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-xs text-gray-400">
-                                  {r.count} transaction{r.count === 1 ? "" : "s"} this year
-                                </p>
-                              </div>
+                  <div
+                    className={`grid grid-cols-1 gap-4 ${
+                      visibleAccounts.length > 1 ? "md:grid-cols-2" : ""
+                    }`}
+                  >
+                    {visibleAccounts.map((r) => (
+                      <div
+                        key={r.name}
+                        className={`card overflow-hidden ${
+                          r.name === effectiveHolder
+                            ? "ring-2 ring-primary-500/60"
+                            : ""
+                        }`}
+                      >
+                        <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-2 sm:items-center">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 text-sm font-bold flex items-center justify-center shrink-0">
+                              {r.name.charAt(0).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-800 truncate">
+                                {r.name}
+                                {r.name === effectiveHolder && (
+                                  <span className="ml-2 text-xs text-primary-600 font-normal">
+                                    viewing
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-gray-400">
+                                {r.count} transaction
+                                {r.count === 1 ? "" : "s"} this year
+                              </p>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => openStatement(r.name)}
-                              className="btn btn-secondary px-3 py-1.5 text-xs shrink-0"
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openStatement(r.name)}
+                            className="btn btn-secondary px-3 py-1.5 text-xs shrink-0 whitespace-nowrap"
+                          >
+                            <span className="sm:hidden">View</span>
+                            <span className="hidden sm:inline">Open statement</span>
+                          </button>
+                        </div>
+
+                        {/* Per-account summary: opening / credit / debit / balance */}
+                        <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 px-4 py-3 bg-gray-50/60">
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-gray-500">
+                              Opening
+                            </p>
+                            <p className="text-xs sm:text-sm font-semibold text-gray-700 tabular-nums break-words">
+                              {fmtAmt(r.opening)}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-gray-500">
+                              Credit (in)
+                            </p>
+                            <p className="text-xs sm:text-sm font-semibold text-green-700 tabular-nums break-words">
+                              +{fmtAmt(r.credit)}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-gray-500">
+                              Debit (out)
+                            </p>
+                            <p className="text-xs sm:text-sm font-semibold text-red-600 tabular-nums break-words">
+                              −{fmtAmt(r.debit)}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-gray-500">
+                              Balance
+                            </p>
+                            <p
+                              className={`text-xs sm:text-sm font-bold tabular-nums break-words ${
+                                r.closing >= 0
+                                  ? "text-blue-700"
+                                  : "text-red-600"
+                              }`}
                             >
-                              Open statement
-                            </button>
+                              {fmtAmt(r.closing)}
+                            </p>
                           </div>
+                        </div>
 
-                          {/* Per-account summary: opening / credit / debit / balance */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 py-3 bg-gray-50/60">
-                            <div>
-                              <p className="text-[11px] text-gray-500">Opening</p>
-                              <p className="text-sm font-semibold text-gray-700">
-                                {fmtAmt(r.opening)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] text-gray-500">Credit (in)</p>
-                              <p className="text-sm font-semibold text-green-700">
-                                +{fmtAmt(r.credit)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] text-gray-500">Debit (out)</p>
-                              <p className="text-sm font-semibold text-red-600">
-                                −{fmtAmt(r.debit)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] text-gray-500">Balance</p>
-                              <p
-                                className={`text-sm font-bold ${
-                                  r.closing >= 0 ? "text-blue-700" : "text-red-600"
-                                }`}
+                        {/* Recent activity (latest 5) */}
+                        {r.recent.length > 0 && (
+                          <ul className="divide-y divide-gray-100">
+                            {r.recent.map((e) => (
+                              <li
+                                key={`${r.name}-${e.key}`}
+                                className="px-4 py-2 flex items-center justify-between gap-3"
                               >
-                                {fmtAmt(r.closing)}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Recent activity (latest 5) */}
-                          {r.recent.length > 0 && (
-                            <ul className="divide-y divide-gray-100">
-                              {r.recent.map((e) => (
-                                <li
-                                  key={`${r.name}-${e.key}`}
-                                  className="px-4 py-2 flex items-center justify-between gap-3"
-                                >
-                                  <div className="min-w-0">
-                                    <p className="text-sm text-gray-800 truncate">
-                                      {e.description}
-                                    </p>
-                                    <p className="text-xs text-gray-400">
-                                      {new Date(e.date).toLocaleDateString("en-GB", {
+                                <div className="min-w-0">
+                                  <p className="text-sm text-gray-800 truncate">
+                                    {e.description}
+                                  </p>
+                                  <p className="text-xs text-gray-400">
+                                    {new Date(e.date).toLocaleDateString(
+                                      "en-GB",
+                                      {
                                         day: "numeric",
                                         month: "short",
                                         year: "2-digit",
-                                      })}
-                                    </p>
-                                  </div>
-                                  <span
-                                    className={`text-sm font-bold shrink-0 ${
-                                      e.type === "credit" ? "text-green-700" : "text-red-600"
-                                    }`}
-                                  >
-                                    {e.type === "credit" ? "+" : "−"}
-                                    {fmtAmt(e.amount)}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Month-wise summary for this account */}
-              {hasMonthActivity && (
-                <div className="card overflow-hidden">
-                  <div className="px-4 py-3 border-b border-gray-100">
-                    <p className="text-sm font-medium text-gray-700">
-                      Monthly summary — {currentPartnerYear}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Month-wise credit and debit for {effectiveHolder}&apos;s account
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Credit (in)</th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Debit (out)</th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Net</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {holderMonthRows.filter((r) => r.credit || r.debit).map((r) => (
-                          <tr key={r.label} className="hover:bg-gray-50">
-                            <td className="px-4 py-2.5 text-sm font-medium text-gray-700">{r.label}</td>
-                            <td className="px-4 py-2.5 text-right text-sm text-green-700">
-                              {r.credit ? `+${fmtAmt(r.credit)}` : "—"}
-                            </td>
-                            <td className="px-4 py-2.5 text-right text-sm text-red-600">
-                              {r.debit ? `−${fmtAmt(r.debit)}` : "—"}
-                            </td>
-                            <td className={`px-4 py-2.5 text-right text-sm font-semibold ${r.net >= 0 ? "text-gray-700" : "text-red-600"}`}>
-                              {fmtAmt(r.net)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="bg-gray-50 border-t-2 border-gray-200">
-                        <tr>
-                          <td className="px-4 py-3 text-sm font-semibold text-gray-700">Year total</td>
-                          <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
-                            +{fmtAmt(yearCreditTotal)}
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
-                            −{fmtAmt(yearDebitTotal)}
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
-                            {fmtAmt(r2(yearCreditTotal - yearDebitTotal))}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
+                                      },
+                                    )}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`text-sm font-bold shrink-0 ${
+                                    e.type === "credit"
+                                      ? "text-green-700"
+                                      : "text-red-600"
+                                  }`}
+                                >
+                                  {e.type === "credit" ? "+" : "−"}
+                                  {fmtAmt(e.amount)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
               {/* Account statement — every credit & debit with running balance */}
-              <div className="card overflow-hidden" id="account-statement">
-                <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium text-gray-700">
+              <div
+                className="card overflow-hidden scroll-mt-20"
+                id="account-statement"
+              >
+                <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-start justify-between gap-3 sm:items-center sm:gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-700 break-words">
                       Account statement — {effectiveHolder}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Credits, debits and running balance for {currentPartnerYear}
+                      Credits, debits and running balance for{" "}
+                      {currentPartnerYear}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <span className="font-semibold text-green-700">
+                  <div className="grid w-full grid-cols-2 gap-2 text-sm sm:flex sm:w-auto sm:items-center sm:gap-3">
+                    <span className="text-right font-semibold text-green-700 tabular-nums sm:text-left">
                       +{fmtAmt(statementCreditTotal)}
                     </span>
-                    <span className="font-semibold text-red-600">
+                    <span className="text-right font-semibold text-red-600 tabular-nums sm:text-left">
                       −{fmtAmt(statementDebitTotal)}
                     </span>
                     <button
                       type="button"
                       onClick={openOpeningForm}
-                      className="btn btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                      className="btn btn-secondary px-2 py-1.5 text-xs sm:px-3 sm:text-sm flex w-full items-center justify-center gap-1.5 sm:w-auto"
                       title="Set the balance this account already held"
                     >
                       <Wallet className="w-4 h-4" /> Opening Balance
@@ -1802,7 +1985,7 @@ export default function Payments() {
                     <button
                       type="button"
                       onClick={exportStatementCsv}
-                      className="btn btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                      className="btn btn-secondary px-2 py-1.5 text-xs sm:px-3 sm:text-sm flex w-full items-center justify-center gap-1.5 sm:w-auto"
                       title="Download this statement as CSV"
                     >
                       <Download className="w-4 h-4" /> Export CSV
@@ -1812,7 +1995,7 @@ export default function Payments() {
 
                 {/* Statement filters */}
                 <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 min-w-[180px]">
+                  <div className="relative w-full sm:flex-1 sm:min-w-[180px]">
                     <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
@@ -1825,37 +2008,39 @@ export default function Payments() {
                   <select
                     value={statementType}
                     onChange={(e) => setStatementType(e.target.value)}
-                    className="input w-auto"
+                    className="input w-full sm:w-auto"
                     title="Filter by credit / debit"
                   >
                     <option value="all">All types</option>
                     <option value="credit">Credit (in)</option>
                     <option value="debit">Debit (out)</option>
                   </select>
-                  <input
-                    type="date"
-                    value={statementFrom}
-                    onChange={(e) => setStatementFrom(e.target.value)}
-                    className="input w-auto"
-                    title="From date"
-                  />
-                  <input
-                    type="date"
-                    value={statementTo}
-                    onChange={(e) => setStatementTo(e.target.value)}
-                    className="input w-auto"
-                    title="To date"
-                  />
+                  <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
+                    <input
+                      type="date"
+                      value={statementFrom}
+                      onChange={(e) => setStatementFrom(e.target.value)}
+                      className="input w-full min-w-0 sm:w-auto"
+                      title="From date"
+                    />
+                    <input
+                      type="date"
+                      value={statementTo}
+                      onChange={(e) => setStatementTo(e.target.value)}
+                      className="input w-full min-w-0 sm:w-auto"
+                      title="To date"
+                    />
+                  </div>
                   {statementFiltersActive && (
                     <button
                       type="button"
                       onClick={clearStatementFilters}
-                      className="btn btn-secondary px-3 py-2 text-sm flex items-center gap-1.5"
+                      className="btn btn-secondary px-3 py-2 text-sm w-full justify-center sm:w-auto"
                     >
                       <X className="w-3.5 h-3.5" /> Clear
                     </button>
                   )}
-                  <div className="flex items-center gap-1 ml-auto">
+                  <div className="grid w-full grid-cols-4 gap-1 sm:ml-auto sm:flex sm:w-auto sm:items-center">
                     {[
                       { id: "all", label: "All" },
                       { id: "thisMonth", label: "Month" },
@@ -1866,7 +2051,7 @@ export default function Payments() {
                         key={preset.id}
                         type="button"
                         onClick={() => applyStatementPreset(preset.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                        className={`px-1 sm:px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
                           activePreset === preset.id
                             ? "bg-primary-600 text-white border-primary-600"
                             : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
@@ -1879,30 +2064,51 @@ export default function Payments() {
                 </div>
 
                 {/* Statement table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+                <p className="px-4 py-2 text-xs text-gray-500 sm:hidden">
+                  Swipe left to see all statement columns.
+                </p>
+                <div className="overflow-x-auto overscroll-x-contain">
+                  <table className="w-full" style={{ minWidth: "700px" }}>
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Date</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Source</th>
-                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Credit (in)</th>
-                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Debit (out)</th>
-                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Balance</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                          Date
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Description
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                          Source
+                        </th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                          Credit (in)
+                        </th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                          Debit (out)
+                        </th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                          Balance
+                        </th>
                         <th className="text-right px-4 py-3"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {openingBalance !== 0 && (
                         <tr className="bg-gray-50">
-                          <td className="px-4 py-2.5 text-sm text-gray-400 whitespace-nowrap">—</td>
-                          <td className="px-4 py-2.5 text-sm font-medium text-gray-600" colSpan={2}>
+                          <td className="px-4 py-2.5 text-sm text-gray-400 whitespace-nowrap">
+                            —
+                          </td>
+                          <td
+                            className="px-4 py-2.5 text-sm font-medium text-gray-600"
+                            colSpan={2}
+                          >
                             {openingSnapshotInYear
                               ? `Opening balance (as of ${new Date(manualOpeningDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })})`
                               : `Opening balance (before ${currentPartnerYear})`}
                             {openingSnapshotInYear && (
                               <span className="block text-xs font-normal text-gray-400">
-                                Earlier transactions are included in this balance
+                                Earlier transactions are included in this
+                                balance
                               </span>
                             )}
                           </td>
@@ -1927,11 +2133,15 @@ export default function Payments() {
                             {r.description}
                           </td>
                           <td className="px-4 py-2.5">
-                            <span className={`badge ${SOURCE_BADGE[r.source] || "bg-blue-100 text-blue-700"}`}>
+                            <span
+                              className={`badge ${SOURCE_BADGE[r.source] || "bg-blue-100 text-blue-700"}`}
+                            >
                               {r.source}
                             </span>
                             {r.method ? (
-                              <span className="ml-2 text-xs text-gray-400 uppercase">{r.method}</span>
+                              <span className="ml-2 text-xs text-gray-400 uppercase">
+                                {r.method}
+                              </span>
                             ) : null}
                           </td>
                           <td className="px-4 py-2.5 text-right text-sm font-bold text-green-700">
@@ -1949,7 +2159,9 @@ export default function Payments() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const d = deposits.find((x) => x.id === r.depositId);
+                                    const d = deposits.find(
+                                      (x) => x.id === r.depositId,
+                                    );
                                     if (d) openEditDeposit(d);
                                   }}
                                   className="p-1.5 rounded-lg hover:bg-gray-100"
@@ -1959,7 +2171,9 @@ export default function Payments() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setConfirmDeleteDeposit(r.depositId)}
+                                  onClick={() =>
+                                    setConfirmDeleteDeposit(r.depositId)
+                                  }
                                   className="p-1.5 rounded-lg hover:bg-red-50"
                                   title="Delete deposit"
                                 >
@@ -1970,12 +2184,16 @@ export default function Payments() {
                           </td>
                         </tr>
                       ))}
-
                     </tbody>
                     <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                       <tr>
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-700" colSpan={3}>
-                          {statementFiltersActive ? "Filtered total" : "Year total"}
+                        <td
+                          className="px-4 py-3 text-sm font-semibold text-gray-700"
+                          colSpan={3}
+                        >
+                          {statementFiltersActive
+                            ? "Filtered total"
+                            : "Year total"}
                         </td>
                         <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
                           +{fmtAmt(statementCreditTotal)}
@@ -2001,12 +2219,84 @@ export default function Payments() {
                 )}
               </div>
 
+              {/* Month-wise summary for this account */}
+              {hasMonthActivity && (
+                <div className="card overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <p className="text-sm font-medium text-gray-700">
+                      Monthly summary — {currentPartnerYear}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Month-wise credit and debit for {effectiveHolder}&apos;s
+                      account
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Month
+                          </th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Credit (in)
+                          </th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Debit (out)
+                          </th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Net
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {holderMonthRows
+                          .filter((r) => r.credit || r.debit)
+                          .map((r) => (
+                            <tr key={r.label} className="hover:bg-gray-50">
+                              <td className="px-4 py-2.5 text-sm font-medium text-gray-700">
+                                {r.label}
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-sm text-green-700">
+                                {r.credit ? `+${fmtAmt(r.credit)}` : "—"}
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-sm text-red-600">
+                                {r.debit ? `−${fmtAmt(r.debit)}` : "—"}
+                              </td>
+                              <td
+                                className={`px-4 py-2.5 text-right text-sm font-semibold ${r.net >= 0 ? "text-gray-700" : "text-red-600"}`}
+                              >
+                                {fmtAmt(r.net)}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                        <tr>
+                          <td className="px-4 py-3 text-sm font-semibold text-gray-700">
+                            Year total
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
+                            +{fmtAmt(yearCreditTotal)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
+                            −{fmtAmt(yearDebitTotal)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
+                            {fmtAmt(r2(yearCreditTotal - yearDebitTotal))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
 
             </>
           ) : (
             <div className="card p-8 text-center text-gray-500 text-sm">
-              No account activity yet. Record UPI sale payments or cash deposits to
-              start tracking an account here.
+              No account activity yet. Record UPI sale payments or cash deposits
+              to start tracking an account here.
             </div>
           )}
         </div>
@@ -2103,7 +2393,9 @@ export default function Payments() {
                   <option value="all">All Account Holders</option>
                   <option value="__untracked__">Untracked (no account)</option>
                   {holderNames.map((n) => (
-                    <option key={n} value={n}>{n}</option>
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
                   ))}
                 </select>
                 <select
@@ -2188,12 +2480,13 @@ export default function Payments() {
                             </span>
                           )}
                         </div>
-                        {payment.type === "received" && payment.partner_name && (
-                          <p className="text-xs font-medium text-blue-700 flex items-center gap-1 mt-1">
-                            <Users className="w-3.5 h-3.5" />
-                            Credited to account of: {payment.partner_name}
-                          </p>
-                        )}
+                        {payment.type === "received" &&
+                          payment.partner_name && (
+                            <p className="text-xs font-medium text-blue-700 flex items-center gap-1 mt-1">
+                              <Users className="w-3.5 h-3.5" />
+                              Credited to account of: {payment.partner_name}
+                            </p>
+                          )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -2328,7 +2621,10 @@ export default function Payments() {
                   <select
                     value={editForm.payment_method}
                     onChange={(e) =>
-                      setEditForm({ ...editForm, payment_method: e.target.value })
+                      setEditForm({
+                        ...editForm,
+                        payment_method: e.target.value,
+                      })
                     }
                     className="input"
                   >
@@ -2345,7 +2641,10 @@ export default function Payments() {
                       <select
                         value={editForm.partner_id || ""}
                         onChange={(e) =>
-                          setEditForm({ ...editForm, partner_id: e.target.value })
+                          setEditForm({
+                            ...editForm,
+                            partner_id: e.target.value,
+                          })
                         }
                         className="input"
                       >
@@ -2396,14 +2695,17 @@ export default function Payments() {
           </div>
         </div>
       )}
-    {showDepositForm && (
+      {showDepositForm && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto p-2 sm:p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8 shadow-xl border border-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">
                 {depositForm.id ? "Edit Deposit" : "Deposit Cash into Account"}
               </h2>
-              <button onClick={() => setShowDepositForm(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+              <button
+                onClick={() => setShowDepositForm(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2418,7 +2720,9 @@ export default function Payments() {
                     step="0.01"
                     required
                     value={depositForm.amount}
-                    onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })}
+                    onChange={(e) =>
+                      setDepositForm({ ...depositForm, amount: e.target.value })
+                    }
                     className="input"
                     placeholder="0.00"
                     onWheel={(e) => e.target.blur()}
@@ -2431,7 +2735,12 @@ export default function Payments() {
                   <input
                     type="date"
                     value={depositForm.deposit_date}
-                    onChange={(e) => setDepositForm({ ...depositForm, deposit_date: e.target.value })}
+                    onChange={(e) =>
+                      setDepositForm({
+                        ...depositForm,
+                        deposit_date: e.target.value,
+                      })
+                    }
                     className="input w-full"
                   />
                 </div>
@@ -2442,13 +2751,20 @@ export default function Payments() {
                 </label>
                 <select
                   value={depositForm.partner_id}
-                  onChange={(e) => setDepositForm({ ...depositForm, partner_id: e.target.value })}
+                  onChange={(e) =>
+                    setDepositForm({
+                      ...depositForm,
+                      partner_id: e.target.value,
+                    })
+                  }
                   className="input"
                   required
                 >
                   <option value="">— Select partner —</option>
                   {depositPartnerOptions.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -2458,7 +2774,9 @@ export default function Payments() {
                 </label>
                 <select
                   value={depositForm.method}
-                  onChange={(e) => setDepositForm({ ...depositForm, method: e.target.value })}
+                  onChange={(e) =>
+                    setDepositForm({ ...depositForm, method: e.target.value })
+                  }
                   className="input"
                 >
                   <option value="cash">Cash</option>
@@ -2471,14 +2789,20 @@ export default function Payments() {
                 </label>
                 <textarea
                   value={depositForm.notes}
-                  onChange={(e) => setDepositForm({ ...depositForm, notes: e.target.value })}
+                  onChange={(e) =>
+                    setDepositForm({ ...depositForm, notes: e.target.value })
+                  }
                   className="input"
                   rows={2}
                   placeholder="Optional"
                 />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowDepositForm(false)} className="btn btn-secondary flex-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDepositForm(false)}
+                  className="btn btn-secondary flex-1"
+                >
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary flex-1">
@@ -2505,7 +2829,9 @@ export default function Payments() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold">Opening Balance</h2>
-                <p className="text-xs text-gray-500 mt-0.5">{holderPartner?.name}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {holderPartner?.name}
+                </p>
               </div>
               <button
                 onClick={() => setShowOpeningForm(false)}
@@ -2549,8 +2875,8 @@ export default function Payments() {
                   className="input w-full"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Transactions before this date are treated as already included in the
-                  opening balance.
+                  Transactions before this date are treated as already included
+                  in the opening balance.
                 </p>
               </div>
               <div className="flex gap-3 pt-2">
@@ -2575,7 +2901,9 @@ export default function Payments() {
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto p-2 sm:p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg p-4 sm:p-6 m-4 sm:my-8 shadow-xl border border-gray-200">
             <div className="flex items-center justify-between mb-1">
-              <h2 className="text-lg font-semibold">Credit payments to an account</h2>
+              <h2 className="text-lg font-semibold">
+                Credit payments to an account
+              </h2>
               <button
                 onClick={() => setShowBulkAssign(false)}
                 className="p-2 hover:bg-gray-100 rounded-lg"
@@ -2585,10 +2913,11 @@ export default function Payments() {
             </div>
             <p className="text-xs text-gray-500 mb-4">
               {untrackedYear.length} customer payment
-              {untrackedYear.length === 1 ? "" : "s"} totalling {fmtAmt(untrackedTotal)}{" "}
-              in {currentPartnerYear}{" "}
-              {untrackedYear.length === 1 ? "is" : "are"} not linked to an account
-              holder. Select the payments and the account they were credited to.
+              {untrackedYear.length === 1 ? "" : "s"} totalling{" "}
+              {fmtAmt(untrackedTotal)} in {currentPartnerYear}{" "}
+              {untrackedYear.length === 1 ? "is" : "are"} not linked to an
+              account holder. Select the payments and the account they were
+              credited to.
             </p>
 
             <form onSubmit={handleBulkAssign} className="space-y-4">
@@ -2615,7 +2944,8 @@ export default function Payments() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-sm font-medium text-gray-700">
-                    Payments ({bulkSelected.length} of {untrackedYear.length} selected)
+                    Payments ({bulkSelected.length} of {untrackedYear.length}{" "}
+                    selected)
                   </label>
                   <button
                     type="button"
@@ -2673,7 +3003,9 @@ export default function Payments() {
                 </button>
                 <button
                   type="submit"
-                  disabled={bulkSaving || bulkSelected.length === 0 || !bulkPartnerId}
+                  disabled={
+                    bulkSaving || bulkSelected.length === 0 || !bulkPartnerId
+                  }
                   className="btn btn-primary flex-1 disabled:opacity-50"
                 >
                   {bulkSaving
@@ -2685,8 +3017,6 @@ export default function Payments() {
           </div>
         </div>
       )}
-
-
     </div>
   );
 }
