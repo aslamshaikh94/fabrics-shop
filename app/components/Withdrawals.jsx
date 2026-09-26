@@ -16,6 +16,7 @@ import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
+import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -169,10 +170,7 @@ export default function Withdrawals() {
         <p className="text-sm text-gray-500">Filtered Total Withdrawn</p>
         <p className="text-2xl font-bold text-red-600 mt-1">
           ₹
-          {totalAmount.toLocaleString("en-IN", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
+          {formatNumber2(totalAmount)}
         </p>
       </div>
 
@@ -305,10 +303,7 @@ export default function Withdrawals() {
                   <td className="px-4 py-3">
                     <p className="font-semibold text-red-600">
                       ₹
-                      {w.amount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(w.amount)}
                     </p>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">

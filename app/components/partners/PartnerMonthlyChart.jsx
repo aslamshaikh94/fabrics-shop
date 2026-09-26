@@ -1,5 +1,6 @@
 "use client";
 import { useMemo } from "react";
+import { formatINR } from "../../utils/formatters";
 import {
   BarChart,
   Bar,
@@ -33,13 +34,6 @@ const partnerColors = [
   { chart: "#f43f5e" },
   { chart: "#06b6d4" },
 ];
-
-function fmt(n) {
-  return `₹${Number(n || 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 export default function PartnerMonthlyChart({
   monthlyData,
@@ -92,7 +86,7 @@ export default function PartnerMonthlyChart({
               tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
               width={42}
             />
-            <Tooltip formatter={(v) => fmt(v)} />
+            <Tooltip formatter={(v) => formatINR(v)} />
             <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
             <Bar
               dataKey="grossProfit"
@@ -112,7 +106,7 @@ export default function PartnerMonthlyChart({
               tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
               width={42}
             />
-            <Tooltip formatter={(v) => fmt(v)} />
+            <Tooltip formatter={(v) => formatINR(v)} />
             <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
             {partners.map((p, idx) => (
               <Bar

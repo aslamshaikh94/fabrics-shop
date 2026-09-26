@@ -11,6 +11,7 @@ import {
   X,
   FileJson,
 } from "lucide-react";
+import { formatDateTime } from "../utils/formatters";
 import {
   exportBackup,
   downloadBackup,
@@ -274,9 +275,7 @@ export default function BackupRestore() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-gray-900">Backup Details</h3>
               <span className="text-xs text-gray-500">
-                {new Date(backupPreview.metadata.timestamp).toLocaleString(
-                  "en-IN",
-                )}
+                {formatDateTime(backupPreview.metadata.timestamp)}
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">

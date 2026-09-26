@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { X, Calendar, TrendingUp, CreditCard } from "lucide-react";
+import { formatNumber2 } from "../utils/formatters";
 
 export default function CustomerLedger({ customer, onClose }) {
   const [sales, setSales] = useState([]);
@@ -97,10 +98,7 @@ export default function CustomerLedger({ customer, onClose }) {
                 </p>
                 <p className="text-lg sm:text-xl font-bold text-gray-900 mt-1">
                   ₹
-                  {totalBilled.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(totalBilled)}
                 </p>
               </div>
               <div className="text-center">
@@ -109,10 +107,7 @@ export default function CustomerLedger({ customer, onClose }) {
                 </p>
                 <p className="text-lg sm:text-xl font-bold text-accent-600 mt-1">
                   ₹
-                  {totalPaid.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(totalPaid)}
                 </p>
               </div>
               <div className="text-center">
@@ -123,10 +118,7 @@ export default function CustomerLedger({ customer, onClose }) {
                   className={`text-lg sm:text-xl font-bold mt-1 ${outstanding > 0 ? "text-warning-600" : "text-accent-600"}`}
                 >
                   ₹
-                  {outstanding.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(outstanding)}
                 </p>
               </div>
             </div>
@@ -177,10 +169,7 @@ export default function CustomerLedger({ customer, onClose }) {
                         className={`font-semibold text-sm whitespace-nowrap ${item.type === "sale" ? "text-primary-700" : "text-accent-700"}`}
                       >
                         {item.type === "sale" ? "+" : "-"}₹
-                        {item.amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(item.amount)}
                       </p>
                     </div>
                   ))}

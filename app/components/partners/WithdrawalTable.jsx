@@ -5,6 +5,7 @@ import {
   matchPartner,
   partnerNameForWithdrawal,
 } from "../../utils/partnerWithdrawal";
+import { formatINR } from "../../utils/formatters";
 
 const MONTHS = [
   "Jan",
@@ -28,13 +29,6 @@ const partnerColors = [
   { chart: "#f43f5e" },
   { chart: "#06b6d4" },
 ];
-
-function fmt(n) {
-  return `₹${Number(n || 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 export default function WithdrawalTable({
   withdrawals,
@@ -164,7 +158,7 @@ export default function WithdrawalTable({
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <span className="text-sm font-semibold text-red-600">
-                      {fmt(w.amount)}
+                      {formatINR(w.amount)}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-center">

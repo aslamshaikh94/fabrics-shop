@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
+import { formatNumber2 } from "../utils/formatters";
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -278,10 +279,7 @@ export default function QuickSale() {
             </p>
             <p className="text-3xl font-bold text-accent-600 mt-2">
               ₹
-              {lastSale.total.toLocaleString("en-IN", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+              {formatNumber2(lastSale.total)}
             </p>
             <span
               className={`badge mt-2 ${lastSale.paymentType === "cash" ? "bg-accent-100 text-accent-800" : "bg-blue-100 text-blue-700"}`}
@@ -498,10 +496,7 @@ export default function QuickSale() {
                 <span className="text-sm text-gray-600">Subtotal</span>
                 <span className="text-lg font-bold text-accent-600">
                   ₹
-                  {subtotal.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(subtotal)}
                 </span>
               </div>
               <div>
@@ -566,10 +561,7 @@ export default function QuickSale() {
                   </span>
                   <span className="font-bold text-primary-600">
                     ₹
-                    {netTotal.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(netTotal)}
                   </span>
                 </div>
               )}
@@ -607,7 +599,7 @@ export default function QuickSale() {
                   Saving...
                 </>
               ) : (
-                `Record Sale — ₹${netTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                `Record Sale — ₹${formatNumber2(netTotal)}`
               )}
             </button>
           )}

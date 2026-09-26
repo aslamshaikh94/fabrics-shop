@@ -17,7 +17,7 @@ import SaleForm from "./SaleForm";
 import SaleDetailsModal from "./SaleDetailsModal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
-import { formatDate, formatCustomerName } from "../utils/formatters";
+import { formatDate, formatCustomerName, formatNumber2 } from "../utils/formatters";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
@@ -199,7 +199,7 @@ export default function Sales() {
     const outstanding = parseFloat(selectedSale.remaining_amount) || 0;
     if (amt > outstanding + 0.005) {
       toast(
-        `Amount exceeds outstanding of ₹${outstanding.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        `Amount exceeds outstanding of ₹${formatNumber2(outstanding)}`,
         "error",
       );
       return;
@@ -673,20 +673,14 @@ export default function Sales() {
                   Total:{" "}
                   <span className="font-semibold">
                     ₹
-                    {selectedSale.total_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(selectedSale.total_amount)}
                   </span>
                 </span>
                 <span className="text-sm">
                   Margin:{" "}
                   <span className="font-semibold text-accent-600">
                     ₹
-                    {selectedSale.margin.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(selectedSale.margin)}
                   </span>
                 </span>
               </div>
@@ -696,22 +690,14 @@ export default function Sales() {
                     Discount:{" "}
                     <span className="font-semibold text-red-600">
                       -₹
-                      {selectedSale.discount_amount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(selectedSale.discount_amount)}
                     </span>
                   </span>
                   <span className="text-sm">
                     Net (after discount):{" "}
                     <span className="font-semibold">
                       ₹
-                      {(
-                        selectedSale.total_amount - selectedSale.discount_amount
-                      ).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(selectedSale.total_amount - selectedSale.discount_amount)}
                     </span>
                   </span>
                 </div>
@@ -720,10 +706,7 @@ export default function Sales() {
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
                   ₹
-                  {selectedSale.remaining_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(selectedSale.remaining_amount)}
                 </span>
               </p>
             </div>
@@ -738,7 +721,7 @@ export default function Sales() {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="font-semibold text-gray-900">
-                        ₹{p.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₹{formatNumber2(p.amount)}
                       </p>
                       <p className="text-sm text-gray-500">
                         {new Date(p.payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
@@ -926,20 +909,20 @@ export default function Sales() {
                   )}
                   {col("total") && (
                     <td className="px-4 py-3 text-right font-medium text-sm">
-                      ₹{group.total_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{formatNumber2(group.total_amount)}
                     </td>
                   )}
                   {col("paid") && (
                     <td className="px-4 py-3 text-right text-sm">
                       <span className="font-medium">
-                        ₹{group.paid_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₹{formatNumber2(group.paid_amount)}
                       </span>
                     </td>
                   )}
                   {col("margin") && (
                     <td className="px-4 py-3 text-right text-sm">
                       <span className="text-accent-600 font-medium">
-                        ₹{group.margin.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₹{formatNumber2(group.margin)}
                       </span>
                     </td>
                   )}
@@ -958,12 +941,12 @@ export default function Sales() {
                           <span className="flex items-center justify-end gap-1">
                             {hasDiscount && (
                               <span className="font-medium text-primary-600">
-                                -₹{group.discount_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                -₹{formatNumber2(group.discount_amount)}
                               </span>
                             )}
                             {hasExtra && (
                               <span className="font-medium text-accent-600">
-                                +₹{extraPaid.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                +₹{formatNumber2(extraPaid)}
                               </span>
                             )}
                           </span>
@@ -974,7 +957,7 @@ export default function Sales() {
                   {col("remaining") && (
                     <td className="px-4 py-3 text-right text-sm">
                       <span className={group.remaining_amount > 0 ? "text-warning-600 font-semibold" : "text-gray-500"}>
-                        ₹{group.remaining_amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₹{formatNumber2(group.remaining_amount)}
                       </span>
                     </td>
                   )}
