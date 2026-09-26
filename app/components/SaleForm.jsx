@@ -13,6 +13,7 @@ import {
   hasErrors,
   validateCurrentItem,
 } from "../utils/validators";
+import { describeStorageFailure } from "../utils/upload";
 import BarcodeScanner from "./BarcodeScanner";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
@@ -323,11 +324,23 @@ export default function SaleForm({
         const { error: uploadError } = await supabase.storage
           .from("sales-invoices")
           .upload(path, formData.invoice_file);
-        if (uploadError) throw uploadError;
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("sales-invoices").getPublicUrl(path);
-        invoice_url = publicUrl;
+        if (uploadError) {
+          // Storage infra problems (bucket or policies from migration 043)
+          // must not abort the sale — the invoice is optional, the sale is
+          // not. Any other error is a real failure and does abort.
+          const infraMsg = describeStorageFailure(uploadError, "sales-invoices");
+          if (infraMsg) {
+            console.error("Sale invoice upload failed:", uploadError);
+            toast(infraMsg, "error");
+          } else {
+            throw uploadError;
+          }
+        } else {
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("sales-invoices").getPublicUrl(path);
+          invoice_url = publicUrl;
+        }
       }
 
       // Check credit limit for credit/partial

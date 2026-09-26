@@ -15,13 +15,14 @@ import {
   Circle,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
+import { describeStorageFailure } from "../utils/upload";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
-import ImageViewer from "./shared/ImageViewer";
+import FileViewer from "./shared/FileViewer";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
@@ -118,11 +119,23 @@ export default function Expenses() {
         const { error: uploadError } = await supabase.storage
           .from("expense-proofs")
           .upload(path, paymentProofFile, { upsert: true });
-        if (uploadError) throw uploadError;
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("expense-proofs").getPublicUrl(path);
-        payment_proof_url = publicUrl;
+        if (uploadError) {
+          // Storage infra problems (bucket or policies from migration 043)
+          // are not a reason to lose the whole expense — save it without
+          // the proof and tell the user which problem it was.
+          const infraMsg = describeStorageFailure(uploadError, "expense-proofs");
+          if (infraMsg) {
+            console.error("Expense proof upload failed:", uploadError);
+            toast(infraMsg, "error");
+          } else {
+            throw uploadError;
+          }
+        } else {
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("expense-proofs").getPublicUrl(path);
+          payment_proof_url = publicUrl;
+        }
       }
 
       if (editingId) {
@@ -753,7 +766,7 @@ export default function Expenses() {
         />
       )}
 
-      <ImageViewer
+      <FileViewer
         url={viewProofUrl}
         onClose={() => setViewProofUrl(null)}
         title="Payment Proof"

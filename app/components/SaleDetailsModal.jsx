@@ -12,6 +12,7 @@ import {
   History,
   Trash2,
 } from "lucide-react";
+import { describeStorageFailure } from "../utils/upload";
 import Modal from "./shared/Modal";
 import ConfirmModal from "./ConfirmModal";
 import FabricSelect from "./shared/FabricSelect";
@@ -139,11 +140,22 @@ export default function SaleDetailsModal({
         const { error: uploadError } = await supabase.storage
           .from("sales-invoices")
           .upload(path, editGroupFields.invoice_file);
-        if (uploadError) throw uploadError;
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("sales-invoices").getPublicUrl(path);
-        invoice_url = publicUrl;
+        if (uploadError) {
+          // Storage infra problems (bucket or policies from migration 043)
+          // must not abort the edit — the existing invoice_url is preserved.
+          const infraMsg = describeStorageFailure(uploadError, "sales-invoices");
+          if (infraMsg) {
+            console.error("Sale invoice upload failed:", uploadError);
+            toast(infraMsg, "error");
+          } else {
+            throw uploadError;
+          }
+        } else {
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("sales-invoices").getPublicUrl(path);
+          invoice_url = publicUrl;
+        }
       }
       const discountAmount = parseFloat(editGroupFields.discount_amount) || 0;
       const walkinName =

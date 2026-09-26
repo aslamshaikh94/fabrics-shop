@@ -86,6 +86,68 @@ export function getFileExtension(filename) {
   return filename.split(".").pop().toLowerCase();
 }
 
+/**
+ * Detect a Supabase Storage failure caused by the target bucket not existing
+ * (migration 043 not applied in this project).
+ *
+ * Kept deliberately narrow: it matches ONLY the explicit bucket-missing
+ * messages. An RLS violation must NOT be treated as a missing bucket — a real
+ * permission regression (revoked policy, expired session, wrong role) is a
+ * different problem with a different fix, and silently reclassifying it here
+ * would point the user at the wrong migration. See isStorageRlsError for that
+ * case.
+ */
+export function isMissingBucketError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("bucket not found") ||
+    msg.includes("bucket not exist") ||
+    msg.includes("bucketnotfound")
+  );
+}
+
+/**
+ * Detect a genuine Storage RLS denial (bucket exists, but the policies reject
+ * this write). Surfaces on projects where migration 043 created the buckets but
+ * the policies are missing/wrong.
+ *
+ * Distinct from isMissingBucketError: this one means "check the storage
+ * policies", not "run migration 043".
+ */
+export function isStorageRlsError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  return msg.includes("row-level security") || msg.includes("row level security");
+}
+
+/** True when the upload failed for infrastructure reasons, not user error. */
+export function isStorageInfraError(err) {
+  return isMissingBucketError(err) || isStorageRlsError(err);
+}
+
+/** Human-readable message for a missing storage bucket. */
+export function missingBucketMessage(bucket) {
+  return `Storage bucket '${bucket}' does not exist in Supabase — run migration 043 to create it.`;
+}
+
+/** Human-readable message for a storage permission failure. */
+export function storageRlsMessage(bucket) {
+  return `Upload to '${bucket}' was blocked by Supabase storage policies — check the policies in migration 043.`;
+}
+
+/**
+ * Message for a storage failure, distinguishing the two infra causes so the
+ * user is pointed at the right fix.
+ *
+ * @returns {string|null} the message, or null if this isn't an infra failure
+ *   (i.e. a genuine user/upload error that should abort the save).
+ */
+export function describeStorageFailure(err, bucket) {
+  if (isMissingBucketError(err)) return missingBucketMessage(bucket);
+  if (isStorageRlsError(err)) return storageRlsMessage(bucket);
+  return null;
+}
+
 export function formatFileSize(bytes) {
   if (bytes === 0) return "0 Bytes";
   const k = 1024;

@@ -16,6 +16,9 @@ import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
 import { formatDate } from "../utils/formatters";
+import { purchaseBreakdown } from "../utils/purchaseTotals";
+import { describeError, isMissingColumnError } from "../utils/validators";
+import { fetchAllRows } from "../utils/pagedQuery";
 import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
@@ -114,22 +117,27 @@ export default function Fabrics() {
 
   async function fetchAll() {
     try {
-      const [fabricsRes, suppliersRes] = await Promise.all([
-        supabase
-          .from("fabrics")
-          .select("*")
-          .order("created_at", { ascending: false }),
-        supabase.from("suppliers").select("*").order("name"),
+      // Paged: this page values stock from every fabric row, so an unpaged
+      // select (capped at 1000) would undercount the inventory figures.
+      const [fabricsRows, suppliersRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          supabase
+            .from("fabrics")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase.from("suppliers").select("*").order("name").range(from, to),
+        ),
       ]);
-      if (fabricsRes.error) throw fabricsRes.error;
-      if (suppliersRes.error) throw suppliersRes.error;
-      setSuppliers(suppliersRes.data || []);
+      setSuppliers(suppliersRows);
 
       const supplierMap = Object.fromEntries(
-        (suppliersRes.data || []).map((c) => [c.id, c]),
+        suppliersRows.map((c) => [c.id, c]),
       );
 
-      const purchaseIds = (fabricsRes.data || [])
+      const purchaseIds = fabricsRows
         .filter((f) => f.purchase_id)
         .map((f) => f.purchase_id);
 
@@ -147,7 +155,7 @@ export default function Fabrics() {
       }
 
       setFabrics(
-        (fabricsRes.data || []).map((f) => ({
+        fabricsRows.map((f) => ({
           ...f,
           supplier: supplierMap[f.supplier_id] || null,
           purchase: f.purchase_id
@@ -168,11 +176,10 @@ export default function Fabrics() {
 
   async function fetchSuppliers() {
     try {
-      const { data } = await supabase
-        .from("suppliers")
-        .select("*")
-        .order("name");
-      setSuppliers(data || []);
+      const rows = await fetchAllRows((from, to) =>
+        supabase.from("suppliers").select("*").order("name").range(from, to),
+      );
+      setSuppliers(rows);
     } catch (err) {
       console.error("Error fetching suppliers:", err);
     }
@@ -263,23 +270,38 @@ export default function Fabrics() {
         );
         if (existingPurchaseInfo) {
           // Link to the existing purchase by its ID
-          // Recalculate total from ALL fabrics linked to this purchase
+          // Recalculate fabric_amount and re-apply charges and GST
           purchaseId = existingPurchaseInfo.id;
-          const { data: linkedFabrics } = await supabase
-            .from("fabrics")
-            .select("total_meters, purchase_price_per_meter")
-            .eq("purchase_id", purchaseId);
-          const existingTotal = (linkedFabrics || []).reduce(
+          const [fabricsRes, purchaseRes] = await Promise.all([
+            supabase
+              .from("fabrics")
+              .select("total_meters, purchase_price_per_meter")
+              .eq("purchase_id", purchaseId),
+            supabase
+              .from("purchases")
+              .select("other_charges, gst_rate")
+              .eq("id", purchaseId)
+              .single(),
+          ]);
+          const existingTotal = (fabricsRes.data || []).reduce(
             (sum, f) =>
               sum +
               (parseFloat(f.total_meters) || 0) *
                 (parseFloat(f.purchase_price_per_meter) || 0),
             0,
           );
+          const newFabricAmt = existingTotal + newFabricsTotal;
+          const { gstAmount, total } = purchaseBreakdown(
+            newFabricAmt,
+            purchaseRes.data?.other_charges || 0,
+            purchaseRes.data?.gst_rate || 0,
+          );
           const { error: updateError } = await supabase
             .from("purchases")
             .update({
-              total_amount: existingTotal + newFabricsTotal,
+              fabric_amount: newFabricAmt,
+              gst_amount: gstAmount,
+              total_amount: total,
             })
             .eq("id", purchaseId);
           if (updateError) throw updateError;
@@ -290,6 +312,10 @@ export default function Fabrics() {
             .insert([
               {
                 supplier_id: formData.supplier_id || null,
+                fabric_amount: newFabricsTotal,
+                other_charges: 0,
+                gst_rate: 0,
+                gst_amount: 0,
                 total_amount: newFabricsTotal,
                 purchase_date: new Date().toISOString().split("T")[0],
                 notes: `Fabric purchase: ${validRows.map((r) => r.name).join(", ")}`,
@@ -326,8 +352,13 @@ export default function Fabrics() {
       setLinkingPurchase(false);
       fetchFabrics();
     } catch (err) {
-      console.error("Error saving fabric:", err);
-      toast(err?.message || "Failed to save fabric", "error");
+      console.error("Error saving fabric:", describeError(err), err);
+      toast(
+        isMissingColumnError(err)
+          ? "Cannot save: the database is missing the purchase GST/charges columns. Run migration 042 in the Supabase SQL editor."
+          : `Failed to save fabric — ${describeError(err)}`,
+        "error",
+      );
     }
   }
 

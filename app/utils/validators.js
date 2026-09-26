@@ -1,5 +1,46 @@
 // Form validation schemas using basic validation (zod can be added later if needed)
 
+/**
+ * Turn a caught value into a message worth showing a user.
+ *
+ * Supabase/PostgREST errors are plain objects, so `String(err)` and logging them
+ * blindly can surface as a useless "[object Object]" or an empty "{}" in the
+ * console. Always pull `.message` first, then fall back sensibly.
+ */
+export function describeError(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object") {
+    if (typeof err.message === "string" && err.message.trim()) return err.message;
+    if (err.error?.message) return String(err.error.message);
+    if (err.code) return String(err.code);
+    try {
+      const s = JSON.stringify(err);
+      if (s && s !== "{}") return s;
+    } catch {
+      /* circular — fall through */
+    }
+  }
+  return "Unknown error";
+}
+
+/**
+ * A missing column means the matching migration has not been applied to this
+ * Supabase project yet. Detect it so the UI can say what to actually do,
+ * instead of showing a raw PostgREST "schema cache" message.
+ */
+export function isMissingColumnError(err) {
+  const code = err?.code;
+  if (code === "PGRST204" || code === "42703" || code === "42P01") return true;
+  const msg = (err?.message || "").toLowerCase();
+  return (
+    msg.includes("schema cache") ||
+    msg.includes("column") && msg.includes("does not exist") ||
+    msg.includes("has not been declared")
+  );
+}
+
 export const validateCurrentItem = (item) => {
   const itemErrors = {};
   if (!item.fabric_name || item.fabric_name.trim() === "") {
@@ -71,8 +112,17 @@ export const validatePurchase = (formData) => {
   const errors = {};
   if (!formData.supplier_id || formData.supplier_id.trim() === "")
     errors.supplier_id = "Supplier is required";
-  if (!formData.total_amount || parseFloat(formData.total_amount) <= 0)
-    errors.total_amount = "Total amount must be greater than 0";
+  // fabric_amount is the invoice's fabric value; total_amount is derived from
+  // it plus other charges and GST, so validate the base value.
+  const fabricAmount =
+    parseFloat(formData.fabric_amount ?? formData.total_amount) || 0;
+  if (fabricAmount <= 0)
+    errors.fabric_amount = "Fabric amount must be greater than 0";
+  const charges = parseFloat(formData.other_charges) || 0;
+  if (charges < 0) errors.other_charges = "Other charges cannot be negative";
+  const gstRate = parseFloat(formData.gst_rate) || 0;
+  if (gstRate < 0 || gstRate > 28)
+    errors.gst_rate = "GST rate must be between 0 and 28";
   if (!formData.purchase_date)
     errors.purchase_date = "Purchase date is required";
   return errors;
