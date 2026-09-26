@@ -2,6 +2,11 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
+  fetchAllRows,
+  fetchAllRowsTolerant,
+} from "../utils/pagedQuery";
+import { buildSoldMeters } from "../utils/soldMeters";
+import {
   TrendingUp,
   TrendingDown,
   Package,
@@ -107,15 +112,30 @@ export default function Dashboard() {
         yearsRes,
         purchasePaymentsRes,
       ] = await Promise.all([
-        supabase
-          .from("sales")
-          .select("total_amount, remaining_amount, paid_amount"),
-        supabase
-          .from("purchases")
-          .select("total_amount, paid_amount, remaining_amount"),
-        supabase
-          .from("fabrics")
-          .select("available_meters, purchase_price_per_meter, quantity"),
+        // All-time sales, column-tolerant: fabric_id (migration 023) is
+        // preferred for attribution, falling back to fabric_name alone.
+        fetchAllRowsTolerant(
+          "sales:all",
+          "sales",
+          "total_amount, remaining_amount, paid_amount, meters, fabric_id, fabric_name",
+          "total_amount, remaining_amount, paid_amount, meters, fabric_name",
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("purchases")
+            .select("total_amount, paid_amount, remaining_amount")
+            .order("id")
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("fabrics")
+            .select(
+              "id, name, barcode, total_meters, available_meters, purchase_price_per_meter, quantity",
+            )
+            .order("id")
+            .range(from, to),
+        ),
         supabase.from("customers").select("id", { count: "exact", head: true }),
         supabase
           .from("sales")
@@ -172,19 +192,35 @@ export default function Dashboard() {
         (allCustomersRes.data || []).map((c) => [c.id, c.name]),
       );
 
-      const invValue =
-        fabricsRes.data?.reduce(
-          (s, f) => s + (f.available_meters * f.purchase_price_per_meter || 0),
+      // Stock is derived as purchased − sold so it can never exceed purchases.
+      // fabrics.available_meters drifts (sales without fabric_id don't
+      // decrement it), so summing it inflates inventory value.
+      // Attribution uses the shared helper, so it matches migration 041 and
+      // the Reports Stock tab exactly — a duplicated fabric name can never be
+      // subtracted from two rows at once.
+      const { soldByFabricId } = buildSoldMeters(
+        fabricsRes,
+        salesRes,
+      );
+      const availableFor = (f) =>
+        Math.max(
           0,
-        ) || 0;
-      const totalMeters =
-        fabricsRes.data?.reduce((s, f) => s + (f.available_meters || 0), 0) ||
-        0;
+          (Number(f.total_meters) || 0) - (soldByFabricId.get(f.id) || 0),
+        );
+      const invValue = (fabricsRes || []).reduce(
+        (s, f) =>
+          s + availableFor(f) * (Number(f.purchase_price_per_meter) || 0),
+        0,
+      );
+      const totalMeters = (fabricsRes || []).reduce(
+        (s, f) => s + availableFor(f),
+        0,
+      );
       const totalQuantity =
-        fabricsRes.data?.reduce((s, f) => {
+        (fabricsRes || []).reduce((s, f) => {
           const num = parseFloat((f.quantity || "").replace(/[^0-9.]/g, ""));
           return s + (isNaN(num) ? 0 : num);
-        }, 0) || 0;
+        }, 0);
 
       // Sales are stored pre-discount (total_amount = meters * price), so
       // net sales = total_amount - discount_amount to stay consistent with margin.
@@ -218,10 +254,14 @@ export default function Dashboard() {
           (s, r) => s + (r.remaining_amount || 0),
           0,
         ) || 0;
-      const totalRemaining =
-        salesRes.data?.reduce((s, r) => s + (r.remaining_amount || 0), 0) || 0;
-      const totalPaidAmount =
-        salesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0;
+      const totalRemaining = (salesRes || []).reduce(
+        (s, r) => s + (Number(r.remaining_amount) || 0),
+        0,
+      );
+      const totalPaidAmount = (salesRes || []).reduce(
+        (s, r) => s + (Number(r.paid_amount) || 0),
+        0,
+      );
 
       setStats({
         thisMonthSales: currSales,
@@ -229,29 +269,38 @@ export default function Dashboard() {
         thisMonthCollected: currCollected,
         thisMonthToCollect: currToCollect,
         pendingSalePayments: totalRemaining,
-        pendingPurchasePayments:
-          purchasesRes.data?.reduce(
-            (s, r) =>
-              s + Math.max((r.total_amount || 0) - (r.paid_amount || 0), 0),
-            0,
-          ) || 0,
-        paidPurchasePayments:
-          purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) || 0,
-        totalFabrics: fabricsRes.data?.length || 0,
+        pendingPurchasePayments: (purchasesRes || []).reduce(
+          (s, r) =>
+            s +
+            Math.max(
+              (Number(r.total_amount) || 0) - (Number(r.paid_amount) || 0),
+              0,
+            ),
+          0,
+        ),
+        paidPurchasePayments: (purchasesRes || []).reduce(
+          (s, r) => s + (Number(r.paid_amount) || 0),
+          0,
+        ),
+        totalFabrics: (fabricsRes || []).length,
         totalFabricMeters: totalMeters,
         totalFabricQuantity: totalQuantity,
         inventoryValue: invValue,
         totalCustomers: customersRes.count || 0,
-        totalPurchases:
-          purchasesRes.data?.reduce((s, r) => s + (r.total_amount || 0), 0) ||
+        totalPurchases: (purchasesRes || []).reduce(
+          (s, r) => s + (Number(r.total_amount) || 0),
           0,
+        ),
         collectedAmount: totalPaidAmount,
         reinvestedAmount: (purchasePaymentsRes.data || []).reduce(
           (s, r) => s + (r.reinvested_amount || 0),
           0,
         ),
         freshAmount: Math.max(
-          purchasesRes.data?.reduce((s, r) => s + (r.paid_amount || 0), 0) -
+          (purchasesRes || []).reduce(
+            (s, r) => s + (Number(r.paid_amount) || 0),
+            0,
+          ) -
             (purchasePaymentsRes.data || []).reduce(
               (s, r) => s + (r.reinvested_amount || 0),
               0,
@@ -355,38 +404,67 @@ export default function Dashboard() {
         endDate = "2099-12-31";
       }
 
-      const [salesRes, toCollectRes, collectRes] = await Promise.all([
-        supabase
-          .from("sales")
-          .select("total_amount, margin, discount_amount")
-          .gte("sale_date", startDate)
-          .lte("sale_date", endDate),
-        supabase
-          .from("sales")
-          .select("remaining_amount")
-          .gte("sale_date", startDate)
-          .lte("sale_date", endDate),
-        supabase
-          .from("sale_payments")
-          .select("amount")
-          .gte("payment_date", startDate)
-          .lte("payment_date", endDate),
+      // Paged: Supabase caps a single select at 1000 rows, so the "all time"
+      // period would silently undercount. Each query is isolated so one
+      // failure can't zero out the whole period view.
+      // Every paged query MUST be ordered — offset paging without a stable
+      // ORDER BY lets Postgres return rows in a different order per page,
+      // which silently skips and duplicates rows across the page boundary.
+      const safeAll = async (label, build) => {
+        try {
+          return await fetchAllRows((from, to) => build(from, to));
+        } catch (e) {
+          console.error(`Query failed [${label}]:`, e?.message || e);
+          return [];
+        }
+      };
+
+      const [periodSales, toCollectRows, collectRows] = await Promise.all([
+        safeAll("sales:period", (from, to) =>
+          supabase
+            .from("sales")
+            .select("total_amount, margin, discount_amount")
+            .gte("sale_date", startDate)
+            .lte("sale_date", endDate)
+            .order("id")
+            .range(from, to),
+        ),
+        safeAll("sales:period-toCollect", (from, to) =>
+          supabase
+            .from("sales")
+            .select("remaining_amount")
+            .gte("sale_date", startDate)
+            .lte("sale_date", endDate)
+            .order("id")
+            .range(from, to),
+        ),
+        safeAll("sale_payments:period", (from, to) =>
+          supabase
+            .from("sale_payments")
+            .select("amount")
+            .gte("payment_date", startDate)
+            .lte("payment_date", endDate)
+            .order("id")
+            .range(from, to),
+        ),
       ]);
 
       setPeriodStats({
-        sales:
-          salesRes.data?.reduce(
-            (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
-            0,
-          ) || 0,
-        profit: salesRes.data?.reduce((s, r) => s + (r.margin || 0), 0) || 0,
-        collected:
-          collectRes.data?.reduce((s, r) => s + (r.amount || 0), 0) || 0,
-        toCollect:
-          toCollectRes.data?.reduce(
-            (s, r) => s + (r.remaining_amount || 0),
-            0,
-          ) || 0,
+        // Sales are stored pre-discount, so net them for a revenue figure that
+        // matches the margin-based gross profit below.
+        sales: periodSales.reduce(
+          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          0,
+        ),
+        // Gross profit only — this project has no net-profit concept.
+        profit: periodSales.reduce((s, r) => s + (r.margin || 0), 0),
+        // "Collected" is actual payments received in the period, never
+        // sales.paid_amount (see AGENTS.md business rules).
+        collected: collectRows.reduce((s, r) => s + (r.amount || 0), 0),
+        toCollect: toCollectRows.reduce(
+          (s, r) => s + (r.remaining_amount || 0),
+          0,
+        ),
       });
     } catch (err) {
       console.error("Error fetching period stats:", err);

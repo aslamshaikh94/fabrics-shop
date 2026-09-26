@@ -898,19 +898,9 @@ export default function Sales() {
                 >
                   {col("customer") && (
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-gray-900">
-                          {formatCustomerName(group)}
-                        </p>
-                        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded bg-gray-200 text-gray-500 text-[10px] font-bold shrink-0">
-                          {group.items
-                            .map((i) => i.fabric_name?.trim().charAt(0) || "")
-                            .filter(Boolean)
-                            .join("")
-                            .toUpperCase()
-                            .slice(0, 4)}
-                        </span>
-                      </div>
+                      <p className="font-medium text-gray-900">
+                        {formatCustomerName(group)}
+                      </p>
                     </td>
                   )}
                   {col("date") && (

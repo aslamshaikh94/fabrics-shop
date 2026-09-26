@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -23,18 +23,30 @@ import {
   validatePurchase,
   validatePayment,
   hasErrors,
+  describeError,
+  isMissingColumnError,
 } from "../utils/validators";
-import { validateInvoiceFile } from "../utils/upload";
+import { validateInvoiceFile, describeStorageFailure } from "../utils/upload";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
-import ImageViewer from "./shared/ImageViewer";
+import FileViewer from "./shared/FileViewer";
 import BarcodeScanner from "./BarcodeScanner";
 import FabricRowForm from "./purchases/FabricRowForm";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 import { extractPdfText, parseFabricEntries } from "../utils/pdfExtractor";
+import {
+  DEFAULT_GST_RATE,
+  purchaseBreakdown,
+  round2,
+} from "../utils/purchaseTotals";
+import { fetchAllRows } from "../utils/pagedQuery";
+import {
+  isPurchaseItemsUnavailable,
+  mergePurchaseFabrics,
+} from "../utils/purchaseItems";
 
 const PAGE_SIZE = 10;
 
@@ -42,6 +54,9 @@ const ALL_PURCHASE_COLUMNS = [
   { key: "purchaseNo", label: "Purchase #" },
   { key: "supplier",   label: "Supplier" },
   { key: "date",       label: "Date" },
+  { key: "fabricAmt",  label: "Fabric Amt" },
+  { key: "charges",    label: "Charges" },
+  { key: "gst",        label: "GST" },
   { key: "total",      label: "Total" },
   { key: "paid",       label: "Paid" },
   { key: "remaining",  label: "Remaining" },
@@ -61,7 +76,9 @@ function loadPurchaseVisibleCols() {
 
 const INITIAL_FORM = {
   supplier_id: "",
-  total_amount: "",
+  fabric_amount: "",
+  other_charges: "",
+  gst_rate: DEFAULT_GST_RATE,
   purchase_date: new Date().toISOString().split("T")[0],
   notes: "",
 };
@@ -207,23 +224,42 @@ export default function Purchases() {
 
   async function fetchAll() {
     try {
-      const [purchasesRes, suppliersRes, fabricsRes, partnersRes] = await Promise.all([
-        supabase
-          .from("purchases")
-          .select("*")
-          .order("purchase_date", { ascending: false }),
-        supabase.from("suppliers").select("*").order("name"),
-        supabase.from("fabrics").select("*").order("name"),
-        supabase.from("partners").select("id, name").eq("is_active", true).order("name"),
-      ]);
-      if (purchasesRes.error) throw purchasesRes.error;
-      if (suppliersRes.error) throw suppliersRes.error;
-      if (fabricsRes.error) throw fabricsRes.error;
-      setPartners(partnersRes.data || []);
+      // Paged: Supabase caps a single select at 1000 rows, and this page sums
+      // totals over every row it loads — an unpaged select would undercount
+      // both the list and the totals bar.
+      const [purchasesRows, suppliersRows, fabricsRows, partnersRows] =
+        await Promise.all([
+          fetchAllRows((from, to) =>
+            supabase
+              .from("purchases")
+              .select("*")
+              .order("purchase_date", { ascending: false })
+              .range(from, to),
+          ),
+          fetchAllRows((from, to) =>
+            supabase
+              .from("suppliers")
+              .select("*")
+              .order("name")
+              .range(from, to),
+          ),
+          fetchAllRows((from, to) =>
+            supabase.from("fabrics").select("*").order("name").range(from, to),
+          ),
+          fetchAllRows((from, to) =>
+            supabase
+              .from("partners")
+              .select("id, name")
+              .eq("is_active", true)
+              .order("name")
+              .range(from, to),
+          ),
+        ]);
+      setPartners(partnersRows);
       const supplierMap = Object.fromEntries(
-        (suppliersRes.data || []).map((c) => [c.id, c]),
+        suppliersRows.map((c) => [c.id, c]),
       );
-      const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
+      const purchasesWithSupplier = purchasesRows.map((s) => ({
         ...s,
         remaining_amount: Math.max(
           (s.total_amount || 0) - (s.paid_amount || 0),
@@ -232,8 +268,8 @@ export default function Purchases() {
         supplier: supplierMap[s.supplier_id] || null,
       }));
       setPurchases(purchasesWithSupplier);
-      setSuppliers(suppliersRes.data || []);
-      setFabrics(fabricsRes.data || []);
+      setSuppliers(suppliersRows);
+      setFabrics(fabricsRows);
     } catch (error) {
       console.error("Error fetching purchases data:", error);
     } finally {
@@ -243,19 +279,22 @@ export default function Purchases() {
 
   async function fetchPurchases() {
     try {
-      const [purchasesRes, suppliersRes] = await Promise.all([
-        supabase
-          .from("purchases")
-          .select("*")
-          .order("purchase_date", { ascending: false }),
-        supabase.from("suppliers").select("*").order("name"),
+      const [purchasesRows, suppliersRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          supabase
+            .from("purchases")
+            .select("*")
+            .order("purchase_date", { ascending: false })
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase.from("suppliers").select("*").order("name").range(from, to),
+        ),
       ]);
-      if (purchasesRes.error) throw purchasesRes.error;
-      if (suppliersRes.error) throw suppliersRes.error;
       const supplierMap = Object.fromEntries(
-        (suppliersRes.data || []).map((c) => [c.id, c]),
+        suppliersRows.map((c) => [c.id, c]),
       );
-      const purchasesWithSupplier = (purchasesRes.data || []).map((s) => ({
+      const purchasesWithSupplier = purchasesRows.map((s) => ({
         ...s,
         remaining_amount: Math.max(
           (s.total_amount || 0) - (s.paid_amount || 0),
@@ -264,7 +303,7 @@ export default function Purchases() {
         supplier: supplierMap[s.supplier_id] || null,
       }));
       setPurchases(purchasesWithSupplier);
-      setSuppliers(suppliersRes.data || []);
+      setSuppliers(suppliersRows);
     } catch (error) {
       console.error("Error fetching purchases:", error);
     }
@@ -308,19 +347,43 @@ export default function Purchases() {
         const { error: uploadError } = await supabase.storage
           .from("purchase-invoices")
           .upload(path, invoiceFile, { upsert: true });
-        if (uploadError) throw uploadError;
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("purchase-invoices").getPublicUrl(path);
-        invoice_url = publicUrl;
+        if (uploadError) {
+          // Storage infra problems (bucket or policies from migration 043) are
+          // common here; save the purchase anyway without the attachment
+          // instead of losing the whole invoice, and say which problem it was.
+          console.error("Invoice upload failed:", describeError(uploadError), uploadError);
+          toast(
+            describeStorageFailure(uploadError, "purchase-invoices") ||
+              `Purchase saved without invoice — upload failed: ${describeError(uploadError)}`,
+            "error",
+          );
+        } else {
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("purchase-invoices").getPublicUrl(path);
+          invoice_url = publicUrl;
+        }
       }
+
+      const { gstAmount, total } = purchaseBreakdown(
+        formData.fabric_amount,
+        formData.other_charges,
+        formData.gst_rate,
+      );
+      const amounts = {
+        fabric_amount: parseFloat(formData.fabric_amount) || 0,
+        other_charges: parseFloat(formData.other_charges) || 0,
+        gst_rate: parseFloat(formData.gst_rate) || 0,
+        gst_amount: gstAmount,
+        total_amount: total,
+      };
 
       if (editingId) {
         const { error } = await supabase
           .from("purchases")
           .update({
             supplier_id: formData.supplier_id,
-            total_amount: parseFloat(formData.total_amount),
+            ...amounts,
             purchase_date: formData.purchase_date,
             notes: formData.notes,
             invoice_url,
@@ -334,7 +397,7 @@ export default function Purchases() {
           .insert([
             {
               supplier_id: formData.supplier_id,
-              total_amount: parseFloat(formData.total_amount),
+              ...amounts,
               purchase_date: formData.purchase_date,
               notes: formData.notes,
               status: "pending",
@@ -352,8 +415,14 @@ export default function Purchases() {
       resetForm();
       fetchPurchases();
     } catch (error) {
-      console.error("Error saving purchase:", error);
-      toast("Failed to save purchase", "error");
+      // PostgREST returns a plain object, so log the real message, not "{}".
+      console.error("Error saving purchase:", describeError(error), error);
+      toast(
+        isMissingColumnError(error)
+          ? "Cannot save: the database is missing the purchase GST/charges columns. Run migration 042 in the Supabase SQL editor."
+          : `Failed to save purchase — ${describeError(error)}`,
+        "error",
+      );
     } finally {
       setUploading(false);
     }
@@ -454,20 +523,45 @@ export default function Purchases() {
 
   async function fetchPurchaseFabrics(purchaseId) {
     try {
-      const { data } = await supabase
-        .from("fabrics")
-        .select("*")
-        .eq("purchase_id", purchaseId);
-      setPurchaseFabrics(data || []);
+      const [fabricsRes, itemsRes] = await Promise.all([
+        supabase.from("fabrics").select("*").eq("purchase_id", purchaseId),
+        supabase.from("purchase_items").select("*").eq("purchase_id", purchaseId),
+      ]);
+      if (fabricsRes.error) throw fabricsRes.error;
+      // purchase_items is a legacy invoice-lines table; it may not exist on
+      // this DB (PGRST205) or RLS may hide it — either way show fabrics.
+      if (itemsRes.error && !isPurchaseItemsUnavailable(itemsRes.error)) {
+        throw itemsRes.error;
+      }
+      if (itemsRes.error) {
+        console.warn("Purchase items unavailable, showing fabrics only:", {
+          message: itemsRes.error.message,
+          code: itemsRes.error.code,
+        });
+      }
+      setPurchaseFabrics(mergePurchaseFabrics(fabricsRes.data, itemsRes.data));
     } catch (error) {
       console.error("Error fetching purchase fabrics:", error);
     }
   }
 
   function handleEdit(purchase) {
+    // Legacy invoices (saved before the breakdown existed) hold a single total
+    // that already includes GST/charges, so prefill fabric_amount = total with
+    // 0% GST — saving cannot change the total unless the user changes a field.
+    const hasBreakdown =
+      (Number(purchase.fabric_amount) || 0) !== 0 ||
+      (Number(purchase.other_charges) || 0) !== 0 ||
+      (Number(purchase.gst_amount) || 0) !== 0;
     setFormData({
       supplier_id: purchase.supplier_id,
-      total_amount: purchase.total_amount.toString(),
+      fabric_amount: hasBreakdown
+        ? String(purchase.fabric_amount ?? "")
+        : String(purchase.total_amount ?? ""),
+      other_charges: hasBreakdown
+        ? String(purchase.other_charges || "")
+        : "",
+      gst_rate: hasBreakdown ? String(purchase.gst_rate ?? 0) : "0",
       purchase_date: purchase.purchase_date,
       notes: purchase.notes,
     });
@@ -478,6 +572,8 @@ export default function Purchases() {
 
   function handleViewPayments(purchase) {
     setSelectedPurchase(purchase);
+    setPayments([]);
+    setPurchaseFabrics([]);
     Promise.all([
       supabase
         .from("purchase_payments")
@@ -485,19 +581,77 @@ export default function Purchases() {
         .eq("purchase_id", purchase.id)
         .order("payment_date", { ascending: false }),
       supabase.from("fabrics").select("*").eq("purchase_id", purchase.id),
-    ]).then(([paymentsRes, fabricsRes]) => {
-      setPayments(paymentsRes.data || []);
-      setPurchaseFabrics(fabricsRes.data || []);
-    });
+      supabase.from("purchase_items").select("*").eq("purchase_id", purchase.id),
+    ])
+      .then(([paymentsRes, fabricsRes, itemsRes]) => {
+        if (paymentsRes.error)
+          console.error("Error fetching payments:", {
+            message: paymentsRes.error.message,
+            code: paymentsRes.error.code,
+          });
+        if (fabricsRes.error)
+          console.error("Error fetching purchase fabrics:", {
+            message: fabricsRes.error.message,
+            code: fabricsRes.error.code,
+          });
+        if (fabricsRes.error && !itemsRes.error && !itemsRes.data) {
+          // fabrics query itself failed — leave list empty rather than stale.
+          setPayments(paymentsRes.data || []);
+          setPurchaseFabrics([]);
+          return;
+        }
+        if (itemsRes.error && !isPurchaseItemsUnavailable(itemsRes.error)) {
+          console.error("Error fetching purchase items:", {
+            message: itemsRes.error.message,
+            code: itemsRes.error.code,
+          });
+        }
+        setPayments(paymentsRes.data || []);
+        setPurchaseFabrics(mergePurchaseFabrics(fabricsRes.data, itemsRes.data));
+      })
+      .catch((e) =>
+        console.error("Error fetching purchase details:", {
+          message: e?.message,
+          code: e?.code,
+        }),
+      );
   }
 
-  function handleAddPayment(purchase) {
+  async function handleAddPayment(purchase) {
     setSelectedPurchase(purchase);
+    setPayments([]);
+    setPurchaseFabrics([]);
     setShowPaymentModal(true);
+    try {
+      const [paymentsRes, fabricsRes, itemsRes] = await Promise.all([
+        supabase
+          .from("purchase_payments")
+          .select("*")
+          .eq("purchase_id", purchase.id)
+          .order("payment_date", { ascending: false }),
+        supabase.from("fabrics").select("*").eq("purchase_id", purchase.id),
+        supabase
+          .from("purchase_items")
+          .select("*")
+          .eq("purchase_id", purchase.id),
+      ]);
+      setPayments(paymentsRes.data || []);
+      setPurchaseFabrics(mergePurchaseFabrics(fabricsRes.data, itemsRes.data));
+    } catch (error) {
+      console.error("Error fetching purchase details:", error);
+    }
   }
 
   function handleOpenAddFabrics(purchase) {
-    setSelectedPurchase(purchase);
+    const enriched =
+      purchase?.supplier || purchase?.supplier_id
+        ? purchase
+        : {
+            ...purchase,
+            supplier:
+              suppliers.find((s) => s.id === purchase?.supplier_id) || null,
+          };
+    setSelectedPurchase(enriched);
     setFabricRows([makeEmptyFabricRow()]);
     setFabricSearch("");
     setActiveFabricIdx(null);
@@ -858,23 +1012,55 @@ export default function Purchases() {
     if (formErrors[field]) setFormErrors((prev) => ({ ...prev, [field]: "" }));
   }
 
-  const filteredPurchases = purchases.filter((p) => {
-    const matchesSearch =
-      p.supplier?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.notes?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.purchase_number || "")
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase());
-    const matchesStatus = filterStatus === "all" || p.status === filterStatus;
-    const matchesFrom = !dateFrom || p.purchase_date >= dateFrom;
-    const matchesTo = !dateTo || p.purchase_date <= dateTo;
-    return matchesSearch && matchesStatus && matchesFrom && matchesTo;
-  });
+  // Memoized: both the filter and the totals below would otherwise re-run the
+  // whole list on every keystroke in the search box, and again on every page
+  // change (the totals span all filtered rows, not just the current page).
+  const filteredPurchases = useMemo(
+    () =>
+      purchases.filter((p) => {
+        const matchesSearch =
+          p.supplier?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          p.notes?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (p.purchase_number || "")
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase());
+        const matchesStatus = filterStatus === "all" || p.status === filterStatus;
+        const matchesFrom = !dateFrom || p.purchase_date >= dateFrom;
+        const matchesTo = !dateTo || p.purchase_date <= dateTo;
+        return matchesSearch && matchesStatus && matchesFrom && matchesTo;
+      }),
+    [purchases, searchTerm, filterStatus, dateFrom, dateTo],
+  );
 
   const totalPages = Math.ceil(filteredPurchases.length / PAGE_SIZE);
   const paginated = filteredPurchases.slice(
     (page - 1) * PAGE_SIZE,
     page * PAGE_SIZE,
+  );
+
+  const purchaseTotals = useMemo(
+    () =>
+      filteredPurchases.reduce(
+        (s, p) => ({
+          total: s.total + (p.total_amount || 0),
+          paid: s.paid + (p.paid_amount || 0),
+          remaining: s.remaining + (p.remaining_amount || 0),
+        }),
+        { total: 0, paid: 0, remaining: 0 },
+      ),
+    [filteredPurchases],
+  );
+  const fmtTotal = (n) =>
+    `₹${Number(n || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+
+  // Live invoice breakdown for the open purchase form
+  const formGst = purchaseBreakdown(
+    formData.fabric_amount,
+    formData.other_charges,
+    formData.gst_rate,
   );
 
   const statusBadge = (status) => {
@@ -982,16 +1168,71 @@ export default function Purchases() {
               ))}
             </select>
           </FormField>
-          <FormField
-            field="total_amount"
-            label="Total Amount"
-            type="number"
-            required
-            placeholder="₹0.00"
-            formData={formData}
-            formErrors={formErrors}
-            onFieldChange={handleFieldChange}
-          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField
+              field="fabric_amount"
+              label="Fabric Amount (₹)"
+              type="number"
+              required
+              placeholder="₹0.00"
+              formData={formData}
+              formErrors={formErrors}
+              onFieldChange={handleFieldChange}
+            />
+            <FormField
+              field="other_charges"
+              label="Other Charges (₹)"
+              type="number"
+              placeholder="Freight, packing..."
+              formData={formData}
+              formErrors={formErrors}
+              onFieldChange={handleFieldChange}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField
+              field="gst_rate"
+              label="GST Rate (%)"
+              type="number"
+              formData={formData}
+              formErrors={formErrors}
+              onFieldChange={handleFieldChange}
+            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                GST Amount
+              </label>
+              <div className="input bg-gray-50 text-gray-700 flex items-center">
+                ₹
+                {formGst.gstAmount.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                {(parseFloat(formData.gst_rate) || 0).toString()}% of fabric
+                amount + other charges
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg bg-primary-50 border border-primary-100 px-3 py-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-primary-700">
+                Total Payable (fabric + charges + GST)
+              </span>
+              <span className="font-bold text-primary-700">
+                ₹
+                {formGst.total.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            </div>
+            <p className="text-[11px] text-primary-600/80 mt-0.5">
+              This is the amount owed to the supplier — dues and payments use
+              it. Stock valuation stays on each fabric's buying price.
+            </p>
+          </div>
           <FormField
             field="purchase_date"
             label="Purchase Date"
@@ -1741,10 +1982,57 @@ export default function Purchases() {
                   {selectedPurchase.notes}
                 </p>
               )}
+              {/* Invoice Breakdown */}
+              {(selectedPurchase.other_charges > 0 ||
+                selectedPurchase.gst_amount > 0 ||
+                (selectedPurchase.fabric_amount > 0 &&
+                  selectedPurchase.fabric_amount !==
+                    selectedPurchase.total_amount)) && (
+                <div className="mt-2 pt-2 border-t border-gray-200 text-xs space-y-1 text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Fabric Amount:</span>
+                    <span className="font-medium text-gray-900">
+                      ₹
+                      {(
+                        selectedPurchase.fabric_amount || 0
+                      ).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  {selectedPurchase.other_charges > 0 && (
+                    <div className="flex justify-between">
+                      <span>Other Charges:</span>
+                      <span className="font-medium text-gray-900">
+                        ₹
+                        {selectedPurchase.other_charges.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  )}
+                  {selectedPurchase.gst_amount > 0 && (
+                    <div className="flex justify-between">
+                      <span>
+                        GST ({selectedPurchase.gst_rate || 0}%):
+                      </span>
+                      <span className="font-medium text-gray-900">
+                        ₹
+                        {selectedPurchase.gst_amount.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex justify-between mt-2 pt-2 border-t border-gray-200">
                 <span className="text-sm">
-                  Total:{" "}
-                  <span className="font-semibold">
+                  Total Payable:{" "}
+                  <span className="font-semibold text-gray-900">
                     ₹
                     {selectedPurchase.total_amount.toLocaleString("en-IN", {
                       minimumFractionDigits: 2,
@@ -1764,6 +2052,64 @@ export default function Purchases() {
                 </span>
               </div>
             </div>
+
+            {purchaseFabrics.length > 0 &&
+              (() => {
+                const totalMeters = purchaseFabrics.reduce(
+                  (s, f) => s + (Number(f.total_meters) || 0),
+                  0,
+                );
+                const totalAmount = purchaseFabrics.reduce(
+                  (s, f) =>
+                    s +
+                    (Number(f.total_meters) || 0) *
+                      (Number(f.purchase_price_per_meter) || 0),
+                  0,
+                );
+                // Legacy rows carry no per-item discount; new fabric rows have
+                // no discount column either, so discount shows only when present.
+                const totalDisc = purchaseFabrics.reduce(
+                  (s, f) => s + (Number(f.discount_amount) || 0),
+                  0,
+                );
+                const netAmount = totalAmount - totalDisc;
+                const inr = (n) =>
+                  Number(n || 0).toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  });
+                return (
+                  <div className="bg-primary-50 border border-primary-200 rounded-xl p-3 mb-4">
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <span className="text-primary-700">
+                        Items: <strong>{purchaseFabrics.length}</strong>
+                      </span>
+                      <span className="text-primary-700">
+                        Mtrs: <strong>{totalMeters.toFixed(2)}m</strong>
+                      </span>
+                      <span className="text-primary-700">
+                        Total: <strong>₹{inr(totalAmount)}</strong>
+                      </span>
+                      {totalDisc > 0 && (
+                        <span className="text-warning-700">
+                          Disc: <strong>-₹{inr(totalDisc)}</strong>
+                        </span>
+                      )}
+                      <span className="text-primary-700">
+                        Net: <strong>₹{inr(netAmount)}</strong>
+                      </span>
+                      <span className="text-primary-700">
+                        GST ({selectedPurchase.gst_rate || 5}%):{" "}
+                        <strong>₹{inr(selectedPurchase.gst_amount)}</strong>
+                      </span>
+                      <span className="text-accent-700 font-semibold">
+                        Total with GST:{" "}
+                        <strong>₹{inr(selectedPurchase.total_amount)}</strong>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
             {purchaseFabrics.length > 0 && (
               <div className="mb-4">
@@ -1892,46 +2238,108 @@ export default function Purchases() {
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium text-gray-900 text-sm">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
                               {fabric.name}
+                              {fabric.type ? (
+                                <span className="ml-1.5 text-[10px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                                  {fabric.type}
+                                </span>
+                              ) : null}
+                              {fabric.legacy ? (
+                                <span className="ml-1.5 text-[10px] text-warning-700 bg-warning-100 px-1.5 py-0.5 rounded-full">
+                                  invoice item
+                                </span>
+                              ) : null}
                             </p>
-                            <p className="text-xs text-gray-500">
-                              {fabric.total_meters}m @ ₹
-                              {fabric.purchase_price_per_meter}/m
-                              {fabric.quantity ? ` • ${fabric.quantity}` : ""}
-                              {fabric.barcode ? ` • ${fabric.barcode}` : ""}
+                            <p className="text-xs text-gray-500 flex items-center gap-1.5 flex-wrap">
+                              {fabric.color ? (
+                                <span
+                                  className="inline-block w-2.5 h-2.5 rounded-full border border-gray-300"
+                                  style={{ backgroundColor: fabric.color }}
+                                  title={fabric.color}
+                                />
+                              ) : null}
+                              <span>
+                                {fabric.total_meters}m @ ₹
+                                {fabric.purchase_price_per_meter}/m
+                              </span>
+                              {Number(fabric.selling_price_per_meter) > 0 && (
+                                <span>
+                                  • Sell ₹{fabric.selling_price_per_meter}/m
+                                </span>
+                              )}
+                              {fabric.quantity ? (
+                                <span>• {fabric.quantity}</span>
+                              ) : null}
+                              {fabric.barcode ? (
+                                <span>• {fabric.barcode}</span>
+                              ) : null}
                             </p>
+                            {(() => {
+                              const mtrs = Number(fabric.total_meters) || 0;
+                              const rate =
+                                Number(fabric.purchase_price_per_meter) || 0;
+                              const disc = Number(fabric.discount_amount) || 0;
+                              const total = mtrs * rate;
+                              const net = total - disc;
+                              const inr = (n) =>
+                                Number(n || 0).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                });
+                              return (
+                                <div className="flex gap-3 mt-1 text-[11px]">
+                                  <span className="text-gray-600">
+                                    Amt: <strong>₹{inr(total)}</strong>
+                                  </span>
+                                  <span
+                                    className={
+                                      disc > 0
+                                        ? "text-warning-600"
+                                        : "text-gray-400"
+                                    }
+                                  >
+                                    Disc:{" "}
+                                    <strong>
+                                      {disc > 0 ? "-" : ""}₹{inr(disc)}
+                                    </strong>
+                                  </span>
+                                  <span className="text-gray-700">
+                                    Net: <strong>₹{inr(net)}</strong>
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                            {fabric.notes ? (
+                              <p className="text-[11px] text-gray-500 italic mt-0.5">
+                                {fabric.notes}
+                              </p>
+                            ) : null}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-gray-900 text-sm">
-                              ₹
-                              {(
-                                fabric.total_meters *
-                                fabric.purchase_price_per_meter
-                              ).toLocaleString("en-IN", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => handleEditDetailFabric(fabric)}
-                              className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
-                              title="Edit fabric"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteDetailFabric(fabric.id)}
-                              className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
-                              title="Delete fabric"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          {!fabric.legacy && (
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              <button
+                                type="button"
+                                onClick={() => handleEditDetailFabric(fabric)}
+                                className="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600"
+                                title="Edit fabric"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmDeleteDetailFabric(fabric.id)
+                                }
+                                className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
+                                title="Delete fabric"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2082,6 +2490,21 @@ export default function Purchases() {
                     Date
                   </th>
                 )}
+                {col("fabricAmt") && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fabric Amt
+                  </th>
+                )}
+                {col("charges") && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Charges
+                  </th>
+                )}
+                {col("gst") && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    GST
+                  </th>
+                )}
                 {col("total") && (
                   <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Total
@@ -2149,6 +2572,39 @@ export default function Purchases() {
                       </div>
                     </td>
                   )}
+                  {col("fabricAmt") && (
+                    <td className="px-4 py-3 text-right text-sm text-gray-600">
+                      ₹
+                      {(purchase.fabric_amount || 0).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </td>
+                  )}
+                  {col("charges") && (
+                    <td className="px-4 py-3 text-right text-sm text-gray-600">
+                      ₹
+                      {(purchase.other_charges || 0).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </td>
+                  )}
+                  {col("gst") && (
+                    <td className="px-4 py-3 text-right text-sm text-gray-600">
+                      {purchase.gst_amount
+                        ? `₹${purchase.gst_amount.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}`
+                        : "—"}
+                      {purchase.gst_amount ? (
+                        <span className="block text-[10px] text-gray-400">
+                          {purchase.gst_rate}%
+                        </span>
+                      ) : null}
+                    </td>
+                  )}
                   {col("total") && (
                     <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
                       ₹
@@ -2156,6 +2612,15 @@ export default function Purchases() {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
+                      {purchase.gst_amount ? (
+                        <span className="block text-[10px] font-normal text-gray-400">
+                          incl. GST ₹
+                          {purchase.gst_amount.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      ) : null}
                     </td>
                   )}
                   {col("paid") && (
@@ -2267,6 +2732,46 @@ export default function Purchases() {
                 </tr>
               ))}
             </tbody>
+            {filteredPurchases.length > 0 && (
+              <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                <tr>
+                  {col("purchaseNo") && (
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700">
+                      Total ({filteredPurchases.length})
+                    </td>
+                  )}
+                  {col("supplier") && !col("purchaseNo") && (
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700">
+                      Total ({filteredPurchases.length})
+                    </td>
+                  )}
+                  {col("supplier") && col("purchaseNo") && <td />}
+                  {col("date") && !col("purchaseNo") && !col("supplier") && (
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700">
+                      Total ({filteredPurchases.length})
+                    </td>
+                  )}
+                  {col("date") && (col("purchaseNo") || col("supplier")) && <td />}
+                  {col("total") && (
+                    <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
+                      {fmtTotal(purchaseTotals.total)}
+                    </td>
+                  )}
+                  {col("paid") && (
+                    <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
+                      {fmtTotal(purchaseTotals.paid)}
+                    </td>
+                  )}
+                  {col("remaining") && (
+                    <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
+                      {fmtTotal(purchaseTotals.remaining)}
+                    </td>
+                  )}
+                  {col("status") && <td />}
+                  {col("actions") && <td />}
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
@@ -2451,7 +2956,7 @@ export default function Purchases() {
         </div>
       )}
 
-      <ImageViewer
+      <FileViewer
         url={viewInvoiceUrl}
         onClose={() => setViewInvoiceUrl(null)}
         title="Invoice / Bill"
