@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, safeQuery, withRetry } from "../lib/supabase";
-import { describeStorageFailure } from "../utils/upload";
+import { uploadToBucket, buildUploadPath } from "../utils/upload";
 
 /**
  * Reusable hook for common CRUD operations on a Supabase table.
@@ -137,26 +137,19 @@ export function useFileUpload(bucket) {
       setUploading(true);
       setError(null);
       try {
-        const ext = file.name.split(".").pop();
-        const path = pathPrefix
-          ? `${pathPrefix}/${Date.now()}.${ext}`
-          : `${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from(bucket)
-          .upload(path, file, { upsert: true });
-        if (uploadError) {
+        const path = buildUploadPath(pathPrefix, file);
+        const { url, error: uploadError, infraMessage } =
+          await uploadToBucket(bucket, file, path);
+        if (!url) {
           // Surface the specific infra cause (missing bucket vs. rejected by
           // storage policies) instead of masking both as one problem.
-          const msg = describeStorageFailure(uploadError, bucket) || uploadError.message;
+          const msg = infraMessage || "Upload failed";
           setError(msg);
           const err = new Error(msg);
           err.cause = uploadError;
           throw err;
         }
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from(bucket).getPublicUrl(path);
-        return publicUrl;
+        return url;
       } catch (err) {
         setError(err.message || "Upload failed");
         throw err;

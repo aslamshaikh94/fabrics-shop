@@ -24,6 +24,7 @@ import {
 import { useToast } from "./Toast";
 import ConfirmModal from "./ConfirmModal";
 import { matchPartner } from "../utils/partnerWithdrawal";
+import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -52,13 +53,6 @@ const SOURCE_BADGE = {
   Withdrawal: "bg-rose-100 text-rose-700",
   "Purchase payment": "bg-violet-100 text-violet-700",
 };
-
-function fmtAmt(n) {
-  return `₹${Number(n || 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 export default function Payments({
   initialTab = "suppliers",
@@ -1383,18 +1377,12 @@ export default function Payments({
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
                         ₹
-                        {s.total.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(s.total)}
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
                         <span className="font-semibold text-accent-600">
                           ₹
-                          {s.paid.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatNumber2(s.paid)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-sm">
@@ -1406,10 +1394,7 @@ export default function Payments({
                           }
                         >
                           ₹
-                          {s.pending.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatNumber2(s.pending)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -1447,30 +1432,18 @@ export default function Payments({
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
                       ₹
-                      {supplierSummary
-                        .reduce((s, r) => s + r.total, 0)
-                        .toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      {formatNumber2(supplierSummary
+                        .reduce((s, r) => s + r.total, 0))}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
                       ₹
-                      {supplierSummary
-                        .reduce((s, r) => s + r.paid, 0)
-                        .toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      {formatNumber2(supplierSummary
+                        .reduce((s, r) => s + r.paid, 0))}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
                       ₹
-                      {supplierSummary
-                        .reduce((s, r) => s + r.pending, 0)
-                        .toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      {formatNumber2(supplierSummary
+                        .reduce((s, r) => s + r.pending, 0))}
                     </td>
                   </tr>
                 </tfoot>
@@ -1523,17 +1496,11 @@ export default function Payments({
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
                       ₹
-                      {c.total.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(c.total)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-accent-600">
                       ₹
-                      {c.paid.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(c.paid)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm">
                       <span
@@ -1544,10 +1511,7 @@ export default function Payments({
                         }
                       >
                         ₹
-                        {c.pending.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(c.pending)}
                       </span>
                     </td>
                   </tr>
@@ -1561,30 +1525,18 @@ export default function Payments({
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
                       ₹
-                      {customerSummary
-                        .reduce((s, r) => s + r.total, 0)
-                        .toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      {formatNumber2(customerSummary
+                        .reduce((s, r) => s + r.total, 0))}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
                       ₹
-                      {customerSummary
-                        .reduce((s, r) => s + r.paid, 0)
-                        .toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      {formatNumber2(customerSummary
+                        .reduce((s, r) => s + r.paid, 0))}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
                       ₹
-                      {customerSummary
-                        .reduce((s, r) => s + r.pending, 0)
-                        .toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      {formatNumber2(customerSummary
+                        .reduce((s, r) => s + r.pending, 0))}
                     </td>
                   </tr>
                 </tfoot>
@@ -1668,7 +1620,7 @@ export default function Payments({
                     an account holder
                   </p>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    {fmtAmt(untrackedTotal)} collected in {currentPartnerYear}{" "}
+                    {formatINR(untrackedTotal)} collected in {currentPartnerYear}{" "}
                     without being credited to an account.
                   </p>
                 </div>
@@ -1706,7 +1658,7 @@ export default function Payments({
                     Total Credit (in)
                   </p>
                   <p className="text-base sm:text-lg font-bold text-green-700 mt-1 tabular-nums break-words">
-                    {fmtAmt(yearCreditTotal)}
+                    {formatINR(yearCreditTotal)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {currentPartnerYear}
@@ -1717,7 +1669,7 @@ export default function Payments({
                     Total Debit (out)
                   </p>
                   <p className="text-base sm:text-lg font-bold text-red-600 mt-1 tabular-nums break-words">
-                    {fmtAmt(yearDebitTotal)}
+                    {formatINR(yearDebitTotal)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {currentPartnerYear}
@@ -1728,7 +1680,7 @@ export default function Payments({
                     Opening Balance
                   </p>
                   <p className="text-base sm:text-lg font-bold text-gray-700 mt-1 tabular-nums break-words">
-                    {fmtAmt(openingBalance)}
+                    {formatINR(openingBalance)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     before {currentPartnerYear}
@@ -1739,7 +1691,7 @@ export default function Payments({
                     Closing Balance
                   </p>
                   <p className="text-base sm:text-lg font-bold text-blue-700 mt-1 tabular-nums break-words">
-                    {fmtAmt(closingBalance)}
+                    {formatINR(closingBalance)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     end of {currentPartnerYear}
@@ -1776,7 +1728,7 @@ export default function Payments({
                         {group.title}
                       </p>
                       <p className="text-sm font-semibold text-gray-900 text-right tabular-nums">
-                        {fmtAmt(group.total)}
+                        {formatINR(group.total)}
                       </p>
                     </div>
                     {group.rows.length === 0 ? (
@@ -1793,7 +1745,7 @@ export default function Payments({
                                 {s.label}
                               </span>
                               <span className="font-medium text-gray-800 text-right tabular-nums">
-                                {fmtAmt(s.value)}
+                                {formatINR(s.value)}
                               </span>
                             </div>
                             <div className="h-1.5 rounded-full bg-gray-100 mt-1 overflow-hidden">
@@ -1874,7 +1826,7 @@ export default function Payments({
                               Opening
                             </p>
                             <p className="text-xs sm:text-sm font-semibold text-gray-700 tabular-nums break-words">
-                              {fmtAmt(r.opening)}
+                              {formatINR(r.opening)}
                             </p>
                           </div>
                           <div className="min-w-0">
@@ -1882,7 +1834,7 @@ export default function Payments({
                               Credit (in)
                             </p>
                             <p className="text-xs sm:text-sm font-semibold text-green-700 tabular-nums break-words">
-                              +{fmtAmt(r.credit)}
+                              +{formatINR(r.credit)}
                             </p>
                           </div>
                           <div className="min-w-0">
@@ -1890,7 +1842,7 @@ export default function Payments({
                               Debit (out)
                             </p>
                             <p className="text-xs sm:text-sm font-semibold text-red-600 tabular-nums break-words">
-                              −{fmtAmt(r.debit)}
+                              −{formatINR(r.debit)}
                             </p>
                           </div>
                           <div className="min-w-0">
@@ -1904,7 +1856,7 @@ export default function Payments({
                                   : "text-red-600"
                               }`}
                             >
-                              {fmtAmt(r.closing)}
+                              {formatINR(r.closing)}
                             </p>
                           </div>
                         </div>
@@ -1940,7 +1892,7 @@ export default function Payments({
                                   }`}
                                 >
                                   {e.type === "credit" ? "+" : "−"}
-                                  {fmtAmt(e.amount)}
+                                  {formatINR(e.amount)}
                                 </span>
                               </li>
                             ))}
@@ -1969,10 +1921,10 @@ export default function Payments({
                   </div>
                   <div className="grid w-full grid-cols-2 gap-2 text-sm sm:flex sm:w-auto sm:items-center sm:gap-3">
                     <span className="text-right font-semibold text-green-700 tabular-nums sm:text-left">
-                      +{fmtAmt(statementCreditTotal)}
+                      +{formatINR(statementCreditTotal)}
                     </span>
                     <span className="text-right font-semibold text-red-600 tabular-nums sm:text-left">
-                      −{fmtAmt(statementDebitTotal)}
+                      −{formatINR(statementDebitTotal)}
                     </span>
                     <button
                       type="button"
@@ -2115,7 +2067,7 @@ export default function Payments({
                           <td className="px-4 py-2.5" />
                           <td className="px-4 py-2.5" />
                           <td className="px-4 py-2.5 text-right text-sm font-semibold text-gray-700">
-                            {fmtAmt(openingBalance)}
+                            {formatINR(openingBalance)}
                           </td>
                           <td />
                         </tr>
@@ -2145,13 +2097,13 @@ export default function Payments({
                             ) : null}
                           </td>
                           <td className="px-4 py-2.5 text-right text-sm font-bold text-green-700">
-                            {r.type === "credit" ? `+${fmtAmt(r.amount)}` : ""}
+                            {r.type === "credit" ? `+${formatINR(r.amount)}` : ""}
                           </td>
                           <td className="px-4 py-2.5 text-right text-sm font-bold text-red-600">
-                            {r.type === "debit" ? `−${fmtAmt(r.amount)}` : ""}
+                            {r.type === "debit" ? `−${formatINR(r.amount)}` : ""}
                           </td>
                           <td className="px-4 py-2.5 text-right text-sm font-semibold text-gray-700">
-                            {fmtAmt(balanceByKey[r.key])}
+                            {formatINR(balanceByKey[r.key])}
                           </td>
                           <td className="px-4 py-2.5 text-right whitespace-nowrap">
                             {r.depositId ? (
@@ -2196,13 +2148,13 @@ export default function Payments({
                             : "Year total"}
                         </td>
                         <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
-                          +{fmtAmt(statementCreditTotal)}
+                          +{formatINR(statementCreditTotal)}
                         </td>
                         <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
-                          −{fmtAmt(statementDebitTotal)}
+                          −{formatINR(statementDebitTotal)}
                         </td>
                         <td className="px-4 py-3 text-right text-sm font-bold text-blue-700">
-                          {fmtAmt(closingBalance)}
+                          {formatINR(closingBalance)}
                         </td>
                         <td />
                       </tr>
@@ -2258,15 +2210,15 @@ export default function Payments({
                                 {r.label}
                               </td>
                               <td className="px-4 py-2.5 text-right text-sm text-green-700">
-                                {r.credit ? `+${fmtAmt(r.credit)}` : "—"}
+                                {r.credit ? `+${formatINR(r.credit)}` : "—"}
                               </td>
                               <td className="px-4 py-2.5 text-right text-sm text-red-600">
-                                {r.debit ? `−${fmtAmt(r.debit)}` : "—"}
+                                {r.debit ? `−${formatINR(r.debit)}` : "—"}
                               </td>
                               <td
                                 className={`px-4 py-2.5 text-right text-sm font-semibold ${r.net >= 0 ? "text-gray-700" : "text-red-600"}`}
                               >
-                                {fmtAmt(r.net)}
+                                {formatINR(r.net)}
                               </td>
                             </tr>
                           ))}
@@ -2277,13 +2229,13 @@ export default function Payments({
                             Year total
                           </td>
                           <td className="px-4 py-3 text-right text-sm font-bold text-green-700">
-                            +{fmtAmt(yearCreditTotal)}
+                            +{formatINR(yearCreditTotal)}
                           </td>
                           <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
-                            −{fmtAmt(yearDebitTotal)}
+                            −{formatINR(yearDebitTotal)}
                           </td>
                           <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
-                            {fmtAmt(r2(yearCreditTotal - yearDebitTotal))}
+                            {formatINR(r2(yearCreditTotal - yearDebitTotal))}
                           </td>
                         </tr>
                       </tfoot>
@@ -2310,10 +2262,7 @@ export default function Payments({
                   <p className="text-sm text-gray-500">Payments Made</p>
                   <p className="text-2xl font-bold text-red-600 mt-1">
                     ₹
-                    {totalPaid.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(totalPaid)}
                   </p>
                 </div>
                 <div className="bg-red-100 p-3 rounded-lg">
@@ -2327,10 +2276,7 @@ export default function Payments({
                   <p className="text-sm text-gray-500">Payments Received</p>
                   <p className="text-2xl font-bold text-accent-600 mt-1">
                     ₹
-                    {totalReceived.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(totalReceived)}
                   </p>
                 </div>
                 <div className="bg-accent-100 p-3 rounded-lg">
@@ -2346,10 +2292,7 @@ export default function Payments({
                     className={`text-2xl font-bold mt-1 ${netFlow >= 0 ? "text-accent-600" : "text-red-600"}`}
                   >
                     ₹
-                    {netFlow.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(netFlow)}
                   </p>
                 </div>
                 <div
@@ -2494,10 +2437,7 @@ export default function Payments({
                         className={`text-lg font-bold ${payment.type === "received" ? "text-accent-600" : "text-red-600"}`}
                       >
                         {payment.type === "received" ? "+" : "-"}₹
-                        {payment.amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(payment.amount)}
                       </p>
                     </div>
                   </div>
@@ -2914,7 +2854,7 @@ export default function Payments({
             <p className="text-xs text-gray-500 mb-4">
               {untrackedYear.length} customer payment
               {untrackedYear.length === 1 ? "" : "s"} totalling{" "}
-              {fmtAmt(untrackedTotal)} in {currentPartnerYear}{" "}
+              {formatINR(untrackedTotal)} in {currentPartnerYear}{" "}
               {untrackedYear.length === 1 ? "is" : "are"} not linked to an
               account holder. Select the payments and the account they were
               credited to.
@@ -2986,7 +2926,7 @@ export default function Payments({
                         })}
                       </span>
                       <span className="text-sm font-medium text-gray-900 whitespace-nowrap">
-                        {fmtAmt(p.amount)}
+                        {formatINR(p.amount)}
                       </span>
                     </label>
                   ))}

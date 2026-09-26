@@ -8,9 +8,10 @@ import {
   CreditCard,
   TrendingDown,
 } from "lucide-react";
+import { formatNumber2 } from "../utils/formatters";
 
 function fmt(n) {
-  return `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `₹${formatNumber2(Number(n || 0))}`;
 }
 
 export default function SupplierLedger({ supplier, onClose }) {

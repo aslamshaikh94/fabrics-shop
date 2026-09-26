@@ -15,7 +15,7 @@ import {
   Circle,
 } from "lucide-react";
 import { validateExpense, hasErrors } from "../utils/validators";
-import { describeStorageFailure } from "../utils/upload";
+import { uploadToBucket, buildUploadPath } from "../utils/upload";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -25,6 +25,7 @@ import LoadingSpinner from "./shared/LoadingSpinner";
 import FileViewer from "./shared/FileViewer";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
+import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -114,27 +115,20 @@ export default function Expenses() {
           setUploading(false);
           return;
         }
-        const ext = paymentProofFile.name.split(".").pop();
-        const path = `expense-proofs/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("expense-proofs")
-          .upload(path, paymentProofFile, { upsert: true });
-        if (uploadError) {
+        const path = buildUploadPath("expense-proofs", paymentProofFile);
+        const { url, error: uploadError, infraMessage } = await uploadToBucket(
+          "expense-proofs",
+          paymentProofFile,
+          path,
+        );
+        if (url) {
+          payment_proof_url = url;
+        } else {
           // Storage infra problems (bucket or policies from migration 043)
           // are not a reason to lose the whole expense — save it without
           // the proof and tell the user which problem it was.
-          const infraMsg = describeStorageFailure(uploadError, "expense-proofs");
-          if (infraMsg) {
-            console.error("Expense proof upload failed:", uploadError);
-            toast(infraMsg, "error");
-          } else {
-            throw uploadError;
-          }
-        } else {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from("expense-proofs").getPublicUrl(path);
-          payment_proof_url = publicUrl;
+          console.error("Expense proof upload failed:", uploadError);
+          toast(infraMessage || "Payment proof upload failed", "error");
         }
       }
 
@@ -300,30 +294,21 @@ export default function Expenses() {
           <p className="text-sm text-gray-500">Total Expenses (All Time)</p>
           <p className="text-2xl font-bold text-red-600 mt-1">
             ₹
-            {totalAll.toLocaleString("en-IN", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {formatNumber2(totalAll)}
           </p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Pending Reimbursement</p>
           <p className="text-2xl font-bold text-orange-600 mt-1">
             ₹
-            {totalUncleared.toLocaleString("en-IN", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {formatNumber2(totalUncleared)}
           </p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Filtered Total</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">
             ₹
-            {totalFiltered.toLocaleString("en-IN", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {formatNumber2(totalFiltered)}
           </p>
         </div>
       </div>
@@ -652,10 +637,7 @@ export default function Expenses() {
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-red-600 text-sm">
                     ₹
-                    {expense.amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(expense.amount)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {expense.payment_proof_url ? (

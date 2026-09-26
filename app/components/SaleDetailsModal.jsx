@@ -12,14 +12,14 @@ import {
   History,
   Trash2,
 } from "lucide-react";
-import { describeStorageFailure } from "../utils/upload";
+import { uploadToBucket, buildUploadPath } from "../utils/upload";
 import Modal from "./shared/Modal";
 import ConfirmModal from "./ConfirmModal";
 import FabricSelect from "./shared/FabricSelect";
 import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
-import { formatCustomerName } from "../utils/formatters";
+import { formatCustomerName, formatNumber2 } from "../utils/formatters";
 
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
@@ -135,26 +135,23 @@ export default function SaleDetailsModal({
       const saleIds = group.items.map((i) => i.id);
       let invoice_url = group.items[0]?.invoice_url || "";
       if (editGroupFields.invoice_file) {
-        const ext = editGroupFields.invoice_file.name.split(".").pop();
-        const path = `sales-invoices/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("sales-invoices")
-          .upload(path, editGroupFields.invoice_file);
-        if (uploadError) {
+        const { url, error: uploadError, infraMessage } = await uploadToBucket(
+          "sales-invoices",
+          editGroupFields.invoice_file,
+          buildUploadPath("sales-invoices", editGroupFields.invoice_file),
+          { upsert: false },
+        );
+        if (url) {
+          invoice_url = url;
+        } else {
           // Storage infra problems (bucket or policies from migration 043)
           // must not abort the edit — the existing invoice_url is preserved.
-          const infraMsg = describeStorageFailure(uploadError, "sales-invoices");
-          if (infraMsg) {
+          if (infraMessage) {
             console.error("Sale invoice upload failed:", uploadError);
-            toast(infraMsg, "error");
+            toast(infraMessage, "error");
           } else {
-            throw uploadError;
+            throw uploadError || new Error("Invoice upload failed");
           }
-        } else {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from("sales-invoices").getPublicUrl(path);
-          invoice_url = publicUrl;
         }
       }
       const discountAmount = parseFloat(editGroupFields.discount_amount) || 0;
@@ -449,10 +446,7 @@ export default function SaleDetailsModal({
                 Total:{" "}
                 <span className="font-semibold">
                   ₹
-                  {group.total_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(group.total_amount)}
                 </span>
               </span>
               <span>
@@ -461,10 +455,7 @@ export default function SaleDetailsModal({
                   className={`font-semibold ${group.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
                 >
                   ₹
-                  {group.remaining_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(group.remaining_amount)}
                 </span>
               </span>
             </div>
@@ -650,40 +641,28 @@ export default function SaleDetailsModal({
                           <p className="text-xs text-gray-500 mb-1">Buy/M</p>
                           <p className="font-semibold">
                             ₹
-                            {item.cost_price_per_meter.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatNumber2(item.cost_price_per_meter)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Price/M</p>
                           <p className="font-semibold">
                             ₹
-                            {item.price_per_meter.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatNumber2(item.price_per_meter)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Total</p>
                           <p className="font-semibold">
                             ₹
-                            {computedTotal.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatNumber2(computedTotal)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-500 mb-1">Margin</p>
                           <p className="font-semibold text-accent-600">
                             ₹
-                            {computedMargin.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatNumber2(computedMargin)}
                           </p>
                         </div>
                       </div>
@@ -714,10 +693,7 @@ export default function SaleDetailsModal({
               </p>
               <p className="text-xl font-bold">
                 ₹
-                {group.total_amount.toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatNumber2(group.total_amount)}
               </p>
             </div>
             <div>
@@ -726,10 +702,7 @@ export default function SaleDetailsModal({
               </p>
               <p className="text-xl font-bold text-accent-600">
                 ₹
-                {group.items.reduce((s, i) => s + Math.max((parseFloat(i.meters) || 0) * ((parseFloat(i.price_per_meter) || 0) - (parseFloat(i.cost_price_per_meter) || 0)), 0), 0).toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatNumber2(group.items.reduce((s, i) => s + Math.max((parseFloat(i.meters) || 0) * ((parseFloat(i.price_per_meter) || 0) - (parseFloat(i.cost_price_per_meter) || 0)), 0), 0))}
               </p>
             </div>
             <div>
@@ -740,10 +713,7 @@ export default function SaleDetailsModal({
                 className={`text-xl font-bold ${group.remaining_amount > 0 ? "text-warning-600" : "text-gray-500"}`}
               >
                 ₹
-                {group.remaining_amount.toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatNumber2(group.remaining_amount)}
               </p>
             </div>
           </div>
@@ -783,30 +753,21 @@ export default function SaleDetailsModal({
                 <span>Total Sale Amount</span>
                 <span className="font-semibold">
                   ₹
-                  {group.total_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(group.total_amount)}
                 </span>
               </div>
               <div className="flex justify-between text-green-700">
                 <span>Already Paid (recorded)</span>
                 <span className="font-semibold">
                   ₹
-                  {group.paid_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(group.paid_amount)}
                 </span>
               </div>
               <div className="flex justify-between border-t border-blue-200 pt-1 text-warning-700">
                 <span>Outstanding</span>
                 <span className="font-semibold">
                   ₹
-                  {group.remaining_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(group.remaining_amount)}
                 </span>
               </div>
             </div>

@@ -13,11 +13,11 @@ import {
   hasErrors,
   validateCurrentItem,
 } from "../utils/validators";
-import { describeStorageFailure } from "../utils/upload";
+import { uploadToBucket, buildUploadPath } from "../utils/upload";
 import BarcodeScanner from "./BarcodeScanner";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
-import { formatCurrency } from "../utils/formatters";
+import { formatCurrency, formatNumber2 } from "../utils/formatters";
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -319,27 +319,24 @@ export default function SaleForm({
 
       let invoice_url = "";
       if (formData.invoice_file) {
-        const ext = formData.invoice_file.name.split(".").pop();
-        const path = `sales-invoices/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("sales-invoices")
-          .upload(path, formData.invoice_file);
-        if (uploadError) {
+        const { url, error: uploadError, infraMessage } = await uploadToBucket(
+          "sales-invoices",
+          formData.invoice_file,
+          buildUploadPath("sales-invoices", formData.invoice_file),
+          { upsert: false },
+        );
+        if (url) {
+          invoice_url = url;
+        } else {
           // Storage infra problems (bucket or policies from migration 043)
           // must not abort the sale — the invoice is optional, the sale is
           // not. Any other error is a real failure and does abort.
-          const infraMsg = describeStorageFailure(uploadError, "sales-invoices");
-          if (infraMsg) {
+          if (infraMessage) {
             console.error("Sale invoice upload failed:", uploadError);
-            toast(infraMsg, "error");
+            toast(infraMessage, "error");
           } else {
-            throw uploadError;
+            throw uploadError || new Error("Invoice upload failed");
           }
-        } else {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from("sales-invoices").getPublicUrl(path);
-          invoice_url = publicUrl;
         }
       }
 
@@ -351,7 +348,7 @@ export default function SaleForm({
           const currentDue = customerDues?.[customer.id] || 0;
           if (currentDue + newRemaining > customer.credit_limit) {
             toast(
-              `Credit limit exceeded! Customer's limit is ₹${customer.credit_limit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, current dues: ₹${currentDue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, new would add: ₹${newRemaining.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              `Credit limit exceeded! Customer's limit is ₹${formatNumber2(customer.credit_limit)}, current dues: ₹${formatNumber2(currentDue)}, new would add: ₹${formatNumber2(newRemaining)}`,
               "error",
             );
             setSaving(false);
@@ -676,10 +673,10 @@ export default function SaleForm({
                       </div>
                       <p className="text-xs text-gray-700 font-medium mt-1 ml-4">
                         Total: ₹
-                        {(
+                        {formatNumber2(
                           parseFloat(item.meters) *
-                          parseFloat(item.price_per_meter)
-                        ).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                            parseFloat(item.price_per_meter),
+                        )}
                       </p>
                     </div>
                     <button

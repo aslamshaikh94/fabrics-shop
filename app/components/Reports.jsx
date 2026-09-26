@@ -7,7 +7,12 @@ import {
   fetchAllRowsTolerant,
 } from "../utils/pagedQuery";
 import { buildSoldMeters } from "../utils/soldMeters";
-import { formatDate } from "../utils/formatters";
+import {
+  formatDate,
+  formatINR,
+  formatINRMasked,
+  formatINRCompact,
+} from "../utils/formatters";
 import {
   BarChart,
   Bar,
@@ -52,20 +57,6 @@ const MONTHS = [
   "Nov",
   "Dec",
 ];
-function fmt(n, show = true) {
-  if (!show) return "₹•••";
-  return `₹${Number(n || 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-function fmtShort(n, show = true) {
-  if (!show) return "₹•••";
-  n = Number(n || 0);
-  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
-  return `₹${n.toFixed(2)}`;
-}
 function pctChange(curr, prev) {
   if (!prev) return null;
   const diff = ((curr - prev) / prev) * 100;
@@ -667,6 +658,17 @@ export default function Reports() {
       invoiceGst: inv.gst,
       // Per-invoice tax + charges vs. the cost of the fabric itself.
       chargesGap: inv.total - t.boughtValue,
+      // Integrity check WITHIN the invoice rows: per migration 042 every
+      // invoice must satisfy total = fabric + other charges + GST. This is the
+      // only comparison that is guaranteed to hold, so it is the one surfaced.
+      //
+      // Deliberately NOT compared against soldValue/inStockCost: those come
+      // from the fabrics table (total_meters × buy rate) while inv.total comes
+      // from purchases.total_amount. They are independent sources and are
+      // expected to differ slightly — chargesGap above already reports that
+      // difference, and treating it as an error would raise a false alarm.
+      invoiceInternalsDiff:
+        inv.total - (inv.fabric + inv.charges + inv.gst),
     };
   }, [stockRows, invoiceRows]);
 
@@ -873,10 +875,10 @@ export default function Reports() {
                     </div>
                   </div>
                   <p className={`text-base font-bold ${card.text}`}>
-                    {fmtShort(card.value, showAmount)}
+                    {formatINRCompact(card.value, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {fmt(card.value, showAmount)}
+                    {formatINRMasked(card.value, showAmount)}
                   </p>
                   {card.subtitle && (
                     <p className="text-[10px] text-gray-400 mt-1">
@@ -933,7 +935,7 @@ export default function Reports() {
                   tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
                   width={42}
                 />
-                <Tooltip formatter={(v) => fmt(v, showAmount)} />
+                <Tooltip formatter={(v) => formatINRMasked(v, showAmount)} />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
                 {(chartView === "all" || chartView === "sales") && (
                   <Line
@@ -986,7 +988,7 @@ export default function Reports() {
                   tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
                   width={42}
                 />
-                <Tooltip formatter={(v) => fmt(v, showAmount)} />
+                <Tooltip formatter={(v) => formatINRMasked(v, showAmount)} />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
                 <Bar
                   dataKey="sales"
@@ -1067,12 +1069,12 @@ export default function Reports() {
                               </span>
                               {rankView !== "pending" && c.pending > 0 && (
                                 <span className="shrink-0 text-xs text-warning-600 font-medium">
-                                  ({fmt(c.pending, showAmount)} due)
+                                  ({formatINRMasked(c.pending, showAmount)} due)
                                 </span>
                               )}
                             </div>
                             <span className="text-gray-600 shrink-0 ml-2">
-                              {fmtShort(val, showAmount)}
+                              {formatINRCompact(val, showAmount)}
                             </span>
                           </div>
                           <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -1130,7 +1132,7 @@ export default function Reports() {
                             <span className="text-gray-600 shrink-0 ml-2">
                               {rankView === "meters"
                                 ? `${f.meters.toFixed(1)}m`
-                                : fmtShort(f.revenue, showAmount)}
+                                : formatINRCompact(f.revenue, showAmount)}
                             </span>
                           </div>
                           <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -1188,7 +1190,7 @@ export default function Reports() {
               {
                 title: "Bought Stock",
                 raw: stockTotals.boughtValue,
-                big: fmtShort(stockTotals.boughtValue, showAmount),
+                big: formatINRCompact(stockTotals.boughtValue, showAmount),
                 small: `${stockTotals.boughtMeters.toFixed(1)}m purchased (buy price)`,
                 icon: ShoppingBag,
                 bg: "bg-orange-50",
@@ -1198,7 +1200,7 @@ export default function Reports() {
               {
                 title: "Sold Stock",
                 raw: stockTotals.soldValue,
-                big: fmtShort(stockTotals.soldValue, showAmount),
+                big: formatINRCompact(stockTotals.soldValue, showAmount),
                 small: `${stockTotals.soldMeters.toFixed(1)}m sold (at buy price)`,
                 icon: TrendingUp,
                 bg: "bg-blue-50",
@@ -1208,7 +1210,7 @@ export default function Reports() {
               {
                 title: "In-Stock Stock",
                 raw: stockTotals.inStockCost,
-                big: fmtShort(stockTotals.inStockCost, showAmount),
+                big: formatINRCompact(stockTotals.inStockCost, showAmount),
                 small: `${stockTotals.inStockMeters.toFixed(1)}m in hand (at buy price)`,
                 icon: DollarSign,
                 bg: "bg-green-50",
@@ -1253,7 +1255,7 @@ export default function Reports() {
                   <p className="text-xs text-gray-400 mt-0.5">
                     {card.raw === null
                       ? card.small
-                      : fmt(card.raw, showAmount)}
+                      : formatINRMasked(card.raw, showAmount)}
                   </p>
                   {card.raw !== null && (
                     <p className="text-[10px] text-gray-400 mt-1">
@@ -1272,34 +1274,72 @@ export default function Reports() {
             </p>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <span className="font-semibold text-gray-900">
-                Bought {fmt(stockTotals.boughtValue, showAmount)}
+                Bought {formatINRMasked(stockTotals.boughtValue, showAmount)}
               </span>
               <span className="text-gray-400">=</span>
               <span className="text-blue-700">
-                Sold {fmt(stockTotals.soldValue, showAmount)}
+                Sold {formatINRMasked(stockTotals.soldValue, showAmount)}
               </span>
               <span className="text-gray-400">+</span>
               <span className="text-green-700">
-                In-Stock {fmt(stockTotals.inStockCost, showAmount)}
+                In-Stock {formatINRMasked(stockTotals.inStockCost, showAmount)}
               </span>
             </div>
             <p className="text-[11px] text-gray-400 mt-2">
               Stock value above uses each fabric&apos;s own buying price, so it
               excludes GST and other charges. Invoice figures{" "}
               <span className="text-gray-500 font-medium">
-                {fmt(stockTotals.invoiceTotal, showAmount)}
+                {formatINRMasked(stockTotals.invoiceTotal, showAmount)}
               </span>{" "}
               are the supplier payable only and are{" "}
               <span className="text-gray-500 font-medium">
-                {fmt(Math.abs(stockTotals.chargesGap), showAmount)}
+                {formatINRMasked(Math.abs(stockTotals.chargesGap), showAmount)}
               </span>{" "}
               {stockTotals.chargesGap > 0 ? "more" : "less"} — broken down below.
             </p>
+
+            {/* Same identity at invoice level: adds charges + GST on top of the
+                fabric cost, so the supplier payable reconciles the same way.
+                Hidden entirely when no purchase invoices exist — a row of
+                zeroes is noise, not information. */}
+            {invoiceRows.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-gray-100">
+                <p className="text-[11px] text-gray-400 mb-1">
+                  Including other charges and GST (what you owe suppliers)
+                </p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                  <span className="font-semibold text-gray-900">
+                    Invoice payable {formatINRMasked(stockTotals.invoiceTotal, showAmount)}
+                  </span>
+                  <span className="text-gray-400">=</span>
+                  <span className="text-blue-700">
+                    Fabric {formatINRMasked(stockTotals.invoiceFabric, showAmount)}
+                  </span>
+                  <span className="text-gray-400">+</span>
+                  <span className="text-sky-700">
+                    Charges {formatINRMasked(stockTotals.invoiceCharges, showAmount)}
+                  </span>
+                  <span className="text-gray-400">+</span>
+                  <span className="text-violet-700">
+                    GST {formatINRMasked(stockTotals.invoiceGst, showAmount)}
+                  </span>
+                </div>
+                {Math.abs(stockTotals.invoiceInternalsDiff) > 1 && (
+                  <p className="text-[11px] text-amber-600 mt-1.5">
+                    Some invoices don&apos;t add up: {invoiceRows.length} bill
+                    {invoiceRows.length > 1 ? "s" : ""} total{" "}
+                    {formatINRMasked(Math.abs(stockTotals.invoiceInternalsDiff), showAmount)}{" "}
+                    off from fabric + charges + GST. Check the By Supplier /
+                    All Invoices breakdown below.
+                  </p>
+                )}
+              </div>
+            )}
             {unattributed.count > 0 && (
               <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5 mt-2">
                 <p>
                   {unattributed.count} sale{unattributed.count > 1 ? "s" : ""}{" "}
-                  totalling {fmt(unattributed.meters, showAmount)}m could not be
+                  totalling {formatINRMasked(unattributed.meters, showAmount)}m could not be
                   matched to a single fabric, so they are excluded from Sold
                   above. Re-link those sales to a fabric to include them.
                 </p>
@@ -1317,7 +1357,7 @@ export default function Reports() {
                           <span>
                             — {a.candidates} fabrics share this name,{" "}
                             {a.count} sale{a.count > 1 ? "s" : ""} (
-                            {fmt(a.meters, showAmount)}m) can&apos;t be pinned
+                            {formatINRMasked(a.meters, showAmount)}m) can&apos;t be pinned
                             to one
                           </span>
                         </li>
@@ -1417,9 +1457,9 @@ export default function Reports() {
                   </div>
                   <p
                     className={`text-lg font-bold ${c.text} tabular-nums`}
-                    title={fmt(c.value, showAmount)}
+                    title={formatINRMasked(c.value, showAmount)}
                   >
-                    {fmtShort(c.value, showAmount)}
+                    {formatINRCompact(c.value, showAmount)}
                   </p>
                   <p className="text-[11px] text-gray-400">{c.sub}</p>
                 </div>
@@ -1452,10 +1492,10 @@ export default function Reports() {
                           <tr key={s.supplier} className="hover:bg-gray-50">
                             <td className="px-4 py-2.5 font-medium text-gray-900">{s.supplier}</td>
                             <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{s.invoices}</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{fmt(s.fabric, showAmount)}</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{fmt(s.charges, showAmount)}</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{fmt(s.gst, showAmount)}</td>
-                            <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{fmt(s.total, showAmount)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatINRMasked(s.fabric, showAmount)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(s.charges, showAmount)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(s.gst, showAmount)}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{formatINRMasked(s.total, showAmount)}</td>
                             <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">
                               {s.fabric > 0 ? `${((s.gst / s.fabric) * 100).toFixed(1)}%` : "—"}
                             </td>
@@ -1470,10 +1510,10 @@ export default function Reports() {
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             {invoiceBySupplier.reduce((n, s) => n + s.invoices, 0)}
                           </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{fmt(stockTotals.invoiceFabric, showAmount)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{fmt(stockTotals.invoiceCharges, showAmount)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{fmt(stockTotals.invoiceGst, showAmount)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 whitespace-nowrap">{fmt(stockTotals.invoiceTotal, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatINRMasked(stockTotals.invoiceFabric, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceCharges, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceGst, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceTotal, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-gray-500">
                             {stockTotals.invoiceFabric > 0
                               ? `${((stockTotals.invoiceGst / stockTotals.invoiceFabric) * 100).toFixed(1)}%`
@@ -1514,13 +1554,13 @@ export default function Reports() {
                               <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{r.number}</td>
                               <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDate(r.date)}</td>
                               <td className="px-4 py-2.5 text-gray-600">{r.supplier || "—"}</td>
-                              <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{fmt(r.fabric, showAmount)}</td>
-                              <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{fmt(r.charges, showAmount)}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatINRMasked(r.fabric, showAmount)}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(r.charges, showAmount)}</td>
                               <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">
                                 {r.gstRate ? `${r.gstRate}%` : "—"}
                               </td>
-                              <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{fmt(r.gst, showAmount)}</td>
-                              <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{fmt(r.total, showAmount)}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(r.gst, showAmount)}</td>
+                              <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{formatINRMasked(r.total, showAmount)}</td>
                             </tr>
                           ))
                       )}
@@ -1529,11 +1569,11 @@ export default function Reports() {
                       <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-semibold">
                         <tr>
                           <td colSpan={3} className="px-4 py-2.5 text-gray-900">Total ({invoiceRows.length})</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{fmt(stockTotals.invoiceFabric, showAmount)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{fmt(stockTotals.invoiceCharges, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatINRMasked(stockTotals.invoiceFabric, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceCharges, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right text-gray-400">—</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{fmt(stockTotals.invoiceGst, showAmount)}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 whitespace-nowrap">{fmt(stockTotals.invoiceTotal, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceGst, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceTotal, showAmount)}</td>
                         </tr>
                       </tfoot>
                     )}
@@ -1612,11 +1652,11 @@ export default function Reports() {
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <p className="font-medium text-gray-900">{r.totalMeters.toFixed(1)}m</p>
-                          <p className="text-[11px] text-gray-400">{fmt(r.boughtValue, showAmount)}</p>
+                          <p className="text-[11px] text-gray-400">{formatINRMasked(r.boughtValue, showAmount)}</p>
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <p className="font-medium text-gray-900">{r.soldMeters.toFixed(1)}m</p>
-                          <p className="text-[11px] text-gray-400">{fmt(r.soldValue, showAmount)}</p>
+                          <p className="text-[11px] text-gray-400">{formatINRMasked(r.soldValue, showAmount)}</p>
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <span className={`font-semibold ${r.availableMeters < 2 ? "text-red-600" : "text-gray-900"}`}>
@@ -1625,7 +1665,7 @@ export default function Reports() {
                           {r.availableMeters < 2 && <span className="ml-1 text-[11px]">⚠️</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right font-medium text-green-700">
-                          {fmt(r.inStockCostValue, showAmount)}
+                          {formatINRMasked(r.inStockCostValue, showAmount)}
                         </td>
                       </tr>
                     ))}
@@ -1638,20 +1678,20 @@ export default function Reports() {
                       <td className="px-4 py-2.5 text-right text-gray-900">
                         {stockTotals.boughtMeters.toFixed(1)}m
                         <span className="block text-[11px] font-normal text-gray-400">
-                          {fmt(stockTotals.boughtValue, showAmount)}
+                          {formatINRMasked(stockTotals.boughtValue, showAmount)}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-900">
                         {stockTotals.soldMeters.toFixed(1)}m
                         <span className="block text-[11px] font-normal text-gray-400">
-                          {fmt(stockTotals.soldValue, showAmount)}
+                          {formatINRMasked(stockTotals.soldValue, showAmount)}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-900">
                         {stockTotals.inStockMeters.toFixed(1)}m
                       </td>
                       <td className="px-4 py-2.5 text-right text-green-700">
-                        {fmt(stockTotals.inStockCost, showAmount)}
+                        {formatINRMasked(stockTotals.inStockCost, showAmount)}
                       </td>
                     </tr>
                   </tfoot>
@@ -1708,11 +1748,11 @@ export default function Reports() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="font-semibold text-warning-600 text-sm">
-                        {fmt(c.pending, showAmount)}
+                        {formatINRMasked(c.pending, showAmount)}
                       </span>
                       {c.phone && (
                         <a
-                          href={`https://wa.me/91${c.phone.replace(/\D/g, "")}?text=${encodeURIComponent(`Hello ${c.name}, your outstanding balance is ${fmt(c.pending)}. Please clear at your earliest convenience. Thank you!`)}`}
+                          href={`https://wa.me/91${c.phone.replace(/\D/g, "")}?text=${encodeURIComponent(`Hello ${c.name}, your outstanding balance is ${formatINRMasked(c.pending)}. Please clear at your earliest convenience. Thank you!`)}`}
                           target="_blank"
                           rel="noreferrer"
                           className="p-1.5 bg-green-50 hover:bg-green-100 rounded-lg text-green-600"
@@ -1753,7 +1793,7 @@ export default function Reports() {
                       {s.name}
                     </p>
                     <span className="font-semibold text-orange-600 text-sm">
-                      {fmt(s.pending, showAmount)}
+                      {formatINRMasked(s.pending, showAmount)}
                     </span>
                   </div>
                 ))}

@@ -35,12 +35,7 @@ const partnerColors = [
   },
 ];
 
-function fmt(n) {
-  return `₹${Number(n || 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
+import { formatINR } from "../../utils/formatters";
 
 export default function PartnerCards({
   partners,
@@ -101,13 +96,13 @@ export default function PartnerCards({
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Profit Share</p>
                 <p className="font-semibold text-green-700 text-sm">
-                  {fmt(ps.share)}
+                  {formatINR(ps.share)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Withdrawn</p>
                 <p className="font-semibold text-red-600 text-sm">
-                  {fmt(ps.withdrawn)}
+                  {formatINR(ps.withdrawn)}
                 </p>
               </div>
               <div>
@@ -115,7 +110,7 @@ export default function PartnerCards({
                 <p
                   className={`font-bold text-sm ${ps.balance >= 0 ? "text-green-700" : "text-red-600"}`}
                 >
-                  {fmt(ps.balance)}
+                  {formatINR(ps.balance)}
                 </p>
               </div>
             </div>

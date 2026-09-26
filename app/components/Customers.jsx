@@ -21,6 +21,7 @@ import { useToast } from "./Toast";
 import Pagination from "./shared/Pagination";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
+import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 9;
 
@@ -154,7 +155,7 @@ export default function Customers() {
 
   function handleWhatsApp(customer) {
     const due = customer.current_balance || 0;
-    const msg = `Hello ${customer.name}, your outstanding balance is ₹${due.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Please clear at your earliest convenience. Thank you!`;
+    const msg = `Hello ${customer.name}, your outstanding balance is ₹${formatNumber2(due)}. Please clear at your earliest convenience. Thank you!`;
     const phone = customer.phone?.replace(/\D/g, "");
     const url = phone
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`
@@ -421,7 +422,7 @@ export default function Customers() {
                         }`}
                       >
                         {customer.current_balance > 0
-                          ? `₹${Number(customer.current_balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          ? `₹${formatNumber2(Number(customer.current_balance))}`
                           : "Cleared ✓"}
                       </span>
                     </td>

@@ -1,6 +1,7 @@
 /**
- * File upload validation utilities
+ * File upload validation + Supabase Storage upload helpers.
  */
+import { supabase } from "../lib/supabase";
 
 const ALLOWED_TYPES = {
   images: ["image/jpeg", "image/png", "image/gif", "image/webp"],
@@ -82,9 +83,55 @@ export function validateImageFile(file) {
   });
 }
 
-export function getFileExtension(filename) {
-  return filename.split(".").pop().toLowerCase();
+/**
+ * Upload a file to a Supabase Storage bucket, classifying any failure.
+ *
+ * Five call sites (purchase invoices, sale invoices on create + edit, expense
+ * proofs, and the generic useCrud uploader) each had their own copy of this
+ * try/catch, and they had drifted — one of them reported a permissions problem
+ * as "run migration 043", which sends you down the wrong path.
+ *
+ * @returns {Promise<{url: string|null, infraMessage: string|null}>}
+ *   - `url`          the public URL on success, else null
+ *   - `infraMessage` set when the failure is a bucket/policy problem the user
+ *                   must fix; null when the upload succeeded. The caller
+ *                   decides whether an infra failure should abort the save
+ *                   (useCrud) or only be toasted (invoice/proof uploads).
+ */
+export async function uploadToBucket(bucket, file, path, { upsert = true } = {}) {
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(path, file, { upsert });
+
+  if (error) {
+    // Return the raw error too: callers that abort need something to throw
+    // with a real `cause`, and log output stays debuggable.
+    return {
+      url: null,
+      error,
+      infraMessage: describeStorageFailure(error, bucket),
+    };
+  }
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from(bucket).getPublicUrl(path);
+
+  return { url: publicUrl, error: null, infraMessage: null };
 }
+
+/**
+ * Build a timestamped, extension-suffixed object key.
+ *
+ * @param prefix folder to place the file in (e.g. "sales-invoices"). Pass an
+ *   empty string to upload at the bucket root.
+ */
+export function buildUploadPath(prefix, file) {
+  const ext = String(file?.name || "").split(".").pop()?.toLowerCase() || "bin";
+  const name = `${Date.now()}.${ext}`;
+  return prefix ? `${prefix}/${name}` : name;
+}
+
 
 /**
  * Detect a Supabase Storage failure caused by the target bucket not existing

@@ -15,7 +15,7 @@ import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
-import { formatDate } from "../utils/formatters";
+import { formatDate, formatNumber2 } from "../utils/formatters";
 import { purchaseBreakdown } from "../utils/purchaseTotals";
 import { describeError, isMissingColumnError } from "../utils/validators";
 import { fetchAllRows } from "../utils/pagedQuery";
@@ -598,10 +598,7 @@ export default function Fabrics() {
                   </p>
                   <p className="text-xs text-green-600 mt-0.5">
                     Supplier: {existingPurchaseInfo.supplier?.name} — ₹
-                    {existingPurchaseInfo.total_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(existingPurchaseInfo.total_amount)}
                   </p>
                 </div>
               )}
@@ -900,7 +897,7 @@ export default function Fabrics() {
                 {col("totalPrice") && (
                   <td className="px-4 py-3 text-right">
                     <p className="text-sm font-medium text-gray-900">
-                      ₹{((fabric.total_meters || 0) * (fabric.purchase_price_per_meter || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₹{formatNumber2(((fabric.total_meters || 0) * (fabric.purchase_price_per_meter || 0)))}
                     </p>
                   </td>
                 )}

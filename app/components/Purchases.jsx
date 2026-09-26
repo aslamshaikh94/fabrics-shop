@@ -26,7 +26,7 @@ import {
   describeError,
   isMissingColumnError,
 } from "../utils/validators";
-import { validateInvoiceFile, describeStorageFailure } from "../utils/upload";
+import { validateInvoiceFile, uploadToBucket, buildUploadPath } from "../utils/upload";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import Modal from "./shared/Modal";
@@ -47,6 +47,7 @@ import {
   isPurchaseItemsUnavailable,
   mergePurchaseFabrics,
 } from "../utils/purchaseItems";
+import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -342,26 +343,24 @@ export default function Purchases() {
         : "";
 
       if (invoiceFile) {
-        const ext = invoiceFile.name.split(".").pop();
-        const path = `${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("purchase-invoices")
-          .upload(path, invoiceFile, { upsert: true });
-        if (uploadError) {
+        const path = buildUploadPath("", invoiceFile);
+        const { url, infraMessage } = await uploadToBucket(
+          "purchase-invoices",
+          invoiceFile,
+          path,
+        );
+        if (url) {
+          invoice_url = url;
+        } else {
           // Storage infra problems (bucket or policies from migration 043) are
           // common here; save the purchase anyway without the attachment
           // instead of losing the whole invoice, and say which problem it was.
-          console.error("Invoice upload failed:", describeError(uploadError), uploadError);
+          console.error("Purchase invoice upload failed:", invoiceFile, path);
           toast(
-            describeStorageFailure(uploadError, "purchase-invoices") ||
-              `Purchase saved without invoice — upload failed: ${describeError(uploadError)}`,
+            infraMessage ||
+              "Purchase saved without invoice — upload failed.",
             "error",
           );
-        } else {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from("purchase-invoices").getPublicUrl(path);
-          invoice_url = publicUrl;
         }
       }
 
@@ -1050,12 +1049,6 @@ export default function Purchases() {
       ),
     [filteredPurchases],
   );
-  const fmtTotal = (n) =>
-    `₹${Number(n || 0).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-
   // Live invoice breakdown for the open purchase form
   const formGst = purchaseBreakdown(
     formData.fabric_amount,
@@ -1204,10 +1197,7 @@ export default function Purchases() {
               </label>
               <div className="input bg-gray-50 text-gray-700 flex items-center">
                 ₹
-                {formGst.gstAmount.toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatNumber2(formGst.gstAmount)}
               </div>
               <p className="text-xs text-gray-400 mt-1">
                 {(parseFloat(formData.gst_rate) || 0).toString()}% of fabric
@@ -1222,10 +1212,7 @@ export default function Purchases() {
               </span>
               <span className="font-bold text-primary-700">
                 ₹
-                {formGst.total.toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatNumber2(formGst.total)}
               </span>
             </div>
             <p className="text-[11px] text-primary-600/80 mt-0.5">
@@ -1367,10 +1354,7 @@ export default function Purchases() {
                 Remaining:{" "}
                 <span className="font-semibold text-warning-600">
                   ₹
-                  {selectedPurchase.remaining_amount.toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatNumber2(selectedPurchase.remaining_amount)}
                 </span>
               </p>
             </div>
@@ -1421,10 +1405,10 @@ export default function Purchases() {
                 {(paymentData.amount || paymentData.reinvested_amount) && (
                   <p className="text-xs text-gray-400 mt-1">
                     Total: ₹
-                    {(
+                    {formatNumber2(
                       (parseFloat(paymentData.amount) || 0) +
-                      (parseFloat(paymentData.reinvested_amount) || 0)
-                    ).toLocaleString("en-IN")}
+                        (parseFloat(paymentData.reinvested_amount) || 0),
+                    )}
                   </p>
                 )}
               </div>
@@ -1548,10 +1532,7 @@ export default function Purchases() {
                     Total:{" "}
                     <strong>
                       ₹
-                      {totalAmount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(totalAmount)}
                     </strong>
                   </span>
                   {totalDisc > 0 && (
@@ -1559,10 +1540,7 @@ export default function Purchases() {
                       Disc:{" "}
                       <strong>
                         -₹
-                        {totalDisc.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(totalDisc)}
                       </strong>
                     </span>
                   )}
@@ -1570,34 +1548,21 @@ export default function Purchases() {
                     Net:{" "}
                     <strong>
                       ₹
-                      {netAmount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(netAmount)}
                     </strong>
                   </span>
                   <span className="text-primary-700">
                     GST (5%):{" "}
                     <strong>
                       ₹
-                      {(
-                        Math.round(netAmount * 0.05 * 100) / 100
-                      ).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(Math.round(netAmount * 0.05 * 100) / 100)}
                     </strong>
                   </span>
                   <span className="text-accent-700 font-semibold">
                     Total with GST:{" "}
                     <strong>
                       ₹
-                      {(
-                        Math.round(netAmount * 1.05 * 100) / 100
-                      ).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(Math.round(netAmount * 1.05 * 100) / 100)}
                     </strong>
                   </span>
                 </div>
@@ -1696,10 +1661,7 @@ export default function Purchases() {
                               Amt:{" "}
                               <strong>
                                 ₹
-                                {total.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatNumber2(total)}
                               </strong>
                             </span>
                             {disc > 0 && (
@@ -1707,10 +1669,7 @@ export default function Purchases() {
                                 Disc:{" "}
                                 <strong>
                                   -₹
-                                  {disc.toLocaleString("en-IN", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
+                                  {formatNumber2(disc)}
                                 </strong>
                               </span>
                             )}
@@ -1718,10 +1677,7 @@ export default function Purchases() {
                               Net:{" "}
                               <strong>
                                 ₹
-                                {net.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatNumber2(net)}
                               </strong>
                             </span>
                           </div>
@@ -1757,7 +1713,7 @@ export default function Purchases() {
                       <p className="text-xs text-gray-500">
                         {row.total_meters}m @ ₹{row.purchase_price_per_meter}/m
                         {row.discount_amount
-                          ? ` • Disc: ₹${parseFloat(row.discount_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          ? ` • Disc: ₹${formatNumber2(parseFloat(row.discount_amount))}`
                           : ""}
                         {row.quantity ? ` • ${row.quantity}` : ""}
                         {row.barcode ? ` • ${row.barcode}` : ""}
@@ -1775,10 +1731,7 @@ export default function Purchases() {
                               Amt:{" "}
                               <strong>
                                 ₹
-                                {total.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatNumber2(total)}
                               </strong>
                             </span>
                             <span
@@ -1789,20 +1742,14 @@ export default function Purchases() {
                               Disc:{" "}
                               <strong>
                                 {disc > 0 ? "-" : ""}₹
-                                {disc.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatNumber2(disc)}
                               </strong>
                             </span>
                             <span className="text-gray-700">
                               Net:{" "}
                               <strong>
                                 ₹
-                                {net.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatNumber2(net)}
                               </strong>
                             </span>
                           </div>
@@ -1993,12 +1940,7 @@ export default function Purchases() {
                     <span>Fabric Amount:</span>
                     <span className="font-medium text-gray-900">
                       ₹
-                      {(
-                        selectedPurchase.fabric_amount || 0
-                      ).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(selectedPurchase.fabric_amount || 0)}
                     </span>
                   </div>
                   {selectedPurchase.other_charges > 0 && (
@@ -2006,10 +1948,7 @@ export default function Purchases() {
                       <span>Other Charges:</span>
                       <span className="font-medium text-gray-900">
                         ₹
-                        {selectedPurchase.other_charges.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(selectedPurchase.other_charges)}
                       </span>
                     </div>
                   )}
@@ -2020,10 +1959,7 @@ export default function Purchases() {
                       </span>
                       <span className="font-medium text-gray-900">
                         ₹
-                        {selectedPurchase.gst_amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(selectedPurchase.gst_amount)}
                       </span>
                     </div>
                   )}
@@ -2034,20 +1970,14 @@ export default function Purchases() {
                   Total Payable:{" "}
                   <span className="font-semibold text-gray-900">
                     ₹
-                    {selectedPurchase.total_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(selectedPurchase.total_amount)}
                   </span>
                 </span>
                 <span className="text-sm">
                   Remaining:{" "}
                   <span className="font-semibold text-warning-600">
                     ₹
-                    {selectedPurchase.remaining_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatNumber2(selectedPurchase.remaining_amount)}
                   </span>
                 </span>
               </div>
@@ -2073,11 +2003,6 @@ export default function Purchases() {
                   0,
                 );
                 const netAmount = totalAmount - totalDisc;
-                const inr = (n) =>
-                  Number(n || 0).toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  });
                 return (
                   <div className="bg-primary-50 border border-primary-200 rounded-xl p-3 mb-4">
                     <div className="flex flex-wrap gap-4 text-sm">
@@ -2088,23 +2013,23 @@ export default function Purchases() {
                         Mtrs: <strong>{totalMeters.toFixed(2)}m</strong>
                       </span>
                       <span className="text-primary-700">
-                        Total: <strong>₹{inr(totalAmount)}</strong>
+                        Total: <strong>₹{formatNumber2(totalAmount)}</strong>
                       </span>
                       {totalDisc > 0 && (
                         <span className="text-warning-700">
-                          Disc: <strong>-₹{inr(totalDisc)}</strong>
+                          Disc: <strong>-₹{formatNumber2(totalDisc)}</strong>
                         </span>
                       )}
                       <span className="text-primary-700">
-                        Net: <strong>₹{inr(netAmount)}</strong>
+                        Net: <strong>₹{formatNumber2(netAmount)}</strong>
                       </span>
                       <span className="text-primary-700">
                         GST ({selectedPurchase.gst_rate || 5}%):{" "}
-                        <strong>₹{inr(selectedPurchase.gst_amount)}</strong>
+                        <strong>₹{formatNumber2(selectedPurchase.gst_amount)}</strong>
                       </span>
                       <span className="text-accent-700 font-semibold">
                         Total with GST:{" "}
-                        <strong>₹{inr(selectedPurchase.total_amount)}</strong>
+                        <strong>₹{formatNumber2(selectedPurchase.total_amount)}</strong>
                       </span>
                     </div>
                   </div>
@@ -2209,10 +2134,7 @@ export default function Purchases() {
                                   Amt:{" "}
                                   <strong>
                                     ₹
-                                    {total.toLocaleString("en-IN", {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatNumber2(total)}
                                   </strong>
                                 </span>
                               </div>
@@ -2284,15 +2206,10 @@ export default function Purchases() {
                               const disc = Number(fabric.discount_amount) || 0;
                               const total = mtrs * rate;
                               const net = total - disc;
-                              const inr = (n) =>
-                                Number(n || 0).toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                });
                               return (
                                 <div className="flex gap-3 mt-1 text-[11px]">
                                   <span className="text-gray-600">
-                                    Amt: <strong>₹{inr(total)}</strong>
+                                    Amt: <strong>₹{formatNumber2(total)}</strong>
                                   </span>
                                   <span
                                     className={
@@ -2303,11 +2220,11 @@ export default function Purchases() {
                                   >
                                     Disc:{" "}
                                     <strong>
-                                      {disc > 0 ? "-" : ""}₹{inr(disc)}
+                                      {disc > 0 ? "-" : ""}₹{formatNumber2(disc)}
                                     </strong>
                                   </span>
                                   <span className="text-gray-700">
-                                    Net: <strong>₹{inr(net)}</strong>
+                                    Net: <strong>₹{formatNumber2(net)}</strong>
                                   </span>
                                 </div>
                               );
@@ -2369,10 +2286,7 @@ export default function Purchases() {
                         <div>
                           <p className="font-semibold text-gray-900">
                             ₹
-                            {payment.amount.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatNumber2(payment.amount)}
                           </p>
                           <p className="text-sm text-gray-500">
                             {new Date(payment.payment_date).toLocaleDateString(
@@ -2387,13 +2301,7 @@ export default function Purchases() {
                           {payment.reinvested_amount > 0 && (
                             <p className="text-xs text-emerald-600 mt-0.5">
                               ♻️ ₹
-                              {payment.reinvested_amount.toLocaleString(
-                                "en-IN",
-                                {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                },
-                              )}{" "}
+                              {formatNumber2(payment.reinvested_amount)}{" "}
                               reinvested
                             </p>
                           )}
@@ -2575,28 +2483,19 @@ export default function Purchases() {
                   {col("fabricAmt") && (
                     <td className="px-4 py-3 text-right text-sm text-gray-600">
                       ₹
-                      {(purchase.fabric_amount || 0).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2((purchase.fabric_amount || 0))}
                     </td>
                   )}
                   {col("charges") && (
                     <td className="px-4 py-3 text-right text-sm text-gray-600">
                       ₹
-                      {(purchase.other_charges || 0).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2((purchase.other_charges || 0))}
                     </td>
                   )}
                   {col("gst") && (
                     <td className="px-4 py-3 text-right text-sm text-gray-600">
                       {purchase.gst_amount
-                        ? `₹${purchase.gst_amount.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`
+                        ? `₹${formatNumber2(purchase.gst_amount)}`
                         : "—"}
                       {purchase.gst_amount ? (
                         <span className="block text-[10px] text-gray-400">
@@ -2608,17 +2507,11 @@ export default function Purchases() {
                   {col("total") && (
                     <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">
                       ₹
-                      {purchase.total_amount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatNumber2(purchase.total_amount)}
                       {purchase.gst_amount ? (
                         <span className="block text-[10px] font-normal text-gray-400">
                           incl. GST ₹
-                          {purchase.gst_amount.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatNumber2(purchase.gst_amount)}
                         </span>
                       ) : null}
                     </td>
@@ -2627,10 +2520,7 @@ export default function Purchases() {
                     <td className="px-4 py-3 text-right text-sm">
                       <span className="font-medium text-gray-900">
                         ₹
-                        {purchase.paid_amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(purchase.paid_amount)}
                       </span>
                     </td>
                   )}
@@ -2644,10 +2534,7 @@ export default function Purchases() {
                         }
                       >
                         ₹
-                        {purchase.remaining_amount.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {formatNumber2(purchase.remaining_amount)}
                       </span>
                     </td>
                   )}
@@ -2754,17 +2641,17 @@ export default function Purchases() {
                   {col("date") && (col("purchaseNo") || col("supplier")) && <td />}
                   {col("total") && (
                     <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
-                      {fmtTotal(purchaseTotals.total)}
+                      {formatINR(purchaseTotals.total)}
                     </td>
                   )}
                   {col("paid") && (
                     <td className="px-4 py-3 text-right text-sm font-bold text-accent-600">
-                      {fmtTotal(purchaseTotals.paid)}
+                      {formatINR(purchaseTotals.paid)}
                     </td>
                   )}
                   {col("remaining") && (
                     <td className="px-4 py-3 text-right text-sm font-bold text-warning-600">
-                      {fmtTotal(purchaseTotals.remaining)}
+                      {formatINR(purchaseTotals.remaining)}
                     </td>
                   )}
                   {col("status") && <td />}
@@ -2862,10 +2749,10 @@ export default function Purchases() {
                   editPaymentForm.reinvested_amount) && (
                   <p className="text-xs text-gray-400 mt-1">
                     Total: ₹
-                    {(
+                    {formatNumber2(
                       (parseFloat(editPaymentForm.amount) || 0) +
-                      (parseFloat(editPaymentForm.reinvested_amount) || 0)
-                    ).toLocaleString("en-IN")}
+                        (parseFloat(editPaymentForm.reinvested_amount) || 0),
+                    )}
                   </p>
                 )}
               </div>

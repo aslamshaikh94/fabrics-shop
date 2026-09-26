@@ -6,6 +6,7 @@ import {
   fetchAllRowsTolerant,
 } from "../utils/pagedQuery";
 import { buildSoldMeters } from "../utils/soldMeters";
+import { formatINRMasked, formatMonthName } from "../utils/formatters";
 import {
   TrendingUp,
   TrendingDown,
@@ -25,14 +26,6 @@ function pctChange(curr, prev) {
     up: diff >= 0,
     good: diff >= 0,
   };
-}
-
-function fmtAmt(n, show) {
-  if (!show) return "₹•••";
-  return `₹${Number(n || 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 const MONTHS = [
@@ -488,7 +481,7 @@ export default function Dashboard() {
   }
 
   const now = new Date();
-  const monthName = now.toLocaleString("en-IN", { month: "long" });
+  const monthName = formatMonthName(now);
 
   const periodLabel =
     selectedPeriod === "month"
@@ -556,7 +549,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <p className={`text-xl font-bold ${card.valueBg}`}>
-                {fmtAmt(card.value, showAmount)}
+                {formatINRMasked(card.value, showAmount)}
               </p>
               {card.change && (
                 <p
@@ -667,7 +660,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <p className={`text-xl font-bold ${card.valueBg}`}>
-                {fmtAmt(card.value, showAmount)}
+                {formatINRMasked(card.value, showAmount)}
               </p>
             </div>
           );
@@ -690,19 +683,19 @@ export default function Dashboard() {
             <div>
               <p className="text-xs text-gray-400">Total Collected</p>
               <p className="text-sm font-bold text-blue-600 mt-0.5">
-                {fmtAmt(stats.collectedAmount, showAmount)}
+                {formatINRMasked(stats.collectedAmount, showAmount)}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-400">Reinvested</p>
               <p className="text-sm font-bold text-emerald-600 mt-0.5">
-                {fmtAmt(stats.reinvestedAmount, showAmount)}
+                {formatINRMasked(stats.reinvestedAmount, showAmount)}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-400">Fresh Capital</p>
               <p className="text-sm font-bold text-primary-600 mt-0.5">
-                {fmtAmt(stats.freshAmount, showAmount)}
+                {formatINRMasked(stats.freshAmount, showAmount)}
               </p>
             </div>
             <div>
@@ -714,7 +707,7 @@ export default function Dashboard() {
                     : "text-red-500"
                 }`}
               >
-                {fmtAmt(
+                {formatINRMasked(
                   Math.max(stats.collectedAmount - stats.reinvestedAmount, 0),
                   showAmount,
                 )}
@@ -750,19 +743,19 @@ export default function Dashboard() {
             <div>
               <p className="text-xs text-gray-400">Purchased</p>
               <p className="text-sm font-bold text-gray-900 mt-0.5">
-                {fmtAmt(stats.totalPurchases, showAmount)}
+                {formatINRMasked(stats.totalPurchases, showAmount)}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-400">Paid</p>
               <p className="text-sm font-bold text-green-600 mt-0.5">
-                {fmtAmt(stats.paidPurchasePayments, showAmount)}
+                {formatINRMasked(stats.paidPurchasePayments, showAmount)}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-400">Pending</p>
               <p className="text-sm font-bold text-orange-600 mt-0.5">
-                {fmtAmt(stats.pendingPurchasePayments, showAmount)}
+                {formatINRMasked(stats.pendingPurchasePayments, showAmount)}
               </p>
             </div>
           </div>
@@ -890,7 +883,7 @@ export default function Dashboard() {
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-semibold text-gray-900 text-sm">
-                    {fmtAmt(group.total_amount, showAmount)}
+                    {formatINRMasked(group.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
                     {new Date(group.sale_date).toLocaleDateString("en-GB", {
