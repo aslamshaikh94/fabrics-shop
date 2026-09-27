@@ -47,7 +47,7 @@ import {
   isPurchaseItemsUnavailable,
   mergePurchaseFabrics,
 } from "../utils/purchaseItems";
-import { formatNumber2 } from "../utils/formatters";
+import { formatINR, formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 

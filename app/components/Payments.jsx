@@ -24,7 +24,7 @@ import {
 import { useToast } from "./Toast";
 import ConfirmModal from "./ConfirmModal";
 import { matchPartner } from "../utils/partnerWithdrawal";
-import { formatNumber2 } from "../utils/formatters";
+import { formatINR, formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
