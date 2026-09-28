@@ -18,6 +18,7 @@ import BarcodeScanner from "./BarcodeScanner";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
 import { formatCurrency, formatNumber2 } from "../utils/formatters";
+import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -296,6 +297,14 @@ export default function SaleForm({
         return;
       }
 
+      // A customer paying cash hands the money to the secondary account holder
+      // (Riyaz), so cash payments credit that account automatically. UPI money
+      // arrives directly, so it credits the partner chosen in the form.
+      const creditPartnerId =
+        formData.payment_method === "upi"
+          ? formData.partner_id || null
+          : getCashAccountId(partnersList);
+
       // Auto-create customer for walk-in with a name
       let customerId = formData.customer_id;
       if (!customerId && formData.customer_name?.trim()) {
@@ -400,8 +409,7 @@ export default function SaleForm({
                 amount: netTotal,
                 payment_date: formData.sale_date,
                 payment_method: formData.payment_method,
-                partner_id:
-                  formData.payment_method === "upi" ? formData.partner_id : null,
+                partner_id: creditPartnerId,
               },
             ]);
           if (payErr) throw payErr;
@@ -414,8 +422,7 @@ export default function SaleForm({
                 amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
                 payment_method: formData.payment_method,
-                partner_id:
-                  formData.payment_method === "upi" ? formData.partner_id : null,
+                partner_id: creditPartnerId,
               },
             ]);
           if (payErr) throw payErr;
@@ -468,8 +475,7 @@ export default function SaleForm({
               amount: totalPay,
               payment_date: formData.sale_date,
               payment_method: formData.payment_method,
-              partner_id:
-                formData.payment_method === "upi" ? formData.partner_id : null,
+              partner_id: creditPartnerId,
             }]);
             if (payErr) throw payErr;
           }
@@ -970,7 +976,7 @@ export default function SaleForm({
                   <option value="upi">UPI</option>
                 </select>
               </div>
-              {formData.payment_method === "upi" && (
+              {formData.payment_method === "upi" ? (
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Account Holder (Partner) *</label>
                   <select
@@ -987,6 +993,13 @@ export default function SaleForm({
                     ))}
                   </select>
                 </div>
+              ) : (
+                getCashAccountName(partnersList) && (
+                  <p className="text-xs text-gray-500">
+                    Cash is collected by {getCashAccountName(partnersList)} and
+                    credited to that account.
+                  </p>
+                )
               )}
             </div>
           </div>

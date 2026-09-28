@@ -13,6 +13,7 @@ import {
 import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
 import { formatNumber2 } from "../utils/formatters";
+import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -217,7 +218,12 @@ export default function QuickSale() {
                 amount: totalPay,
                 payment_date: new Date().toISOString().split("T")[0],
                 payment_method: paymentMethod,
-                partner_id: paymentMethod === "upi" ? partnerId : null,
+                // Cash is collected by the secondary account holder (Riyaz);
+                // UPI credits the account chosen in the form.
+                partner_id:
+                  paymentMethod === "upi"
+                    ? partnerId
+                    : getCashAccountId(partners),
               },
             ]);
           if (payErr) throw payErr;
@@ -533,7 +539,7 @@ export default function QuickSale() {
                     <option value="upi">UPI</option>
                   </select>
                 </div>
-                {paymentMethod === "upi" && (
+                {paymentMethod === "upi" ? (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">
                       Account Holder (Partner) *
@@ -552,6 +558,12 @@ export default function QuickSale() {
                       ))}
                     </select>
                   </div>
+                ) : (
+                  getCashAccountName(partners) && (
+                    <p className="text-xs text-gray-500">
+                      Cash is credited to {getCashAccountName(partners)}.
+                    </p>
+                  )
                 )}
               </div>
               {discountValue > 0 && (

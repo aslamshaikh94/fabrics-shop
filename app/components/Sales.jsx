@@ -18,6 +18,7 @@ import SaleDetailsModal from "./SaleDetailsModal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName, formatNumber2 } from "../utils/formatters";
+import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 
@@ -214,8 +215,12 @@ export default function Sales() {
         amount: amt,
         payment_date: paymentData.payment_date,
         payment_method: paymentData.payment_method,
+        // Cash is collected by the secondary account holder (Riyaz); UPI credits
+        // the account chosen in the form.
         partner_id:
-          paymentData.payment_method === "upi" ? paymentData.partner_id : null,
+          paymentData.payment_method === "upi"
+            ? paymentData.partner_id
+            : getCashAccountId(partners),
       }]);
       if (error) throw error;
       setPaymentData({ ...INITIAL_PAYMENT });
@@ -820,7 +825,7 @@ export default function Sales() {
                       ))}
                     </select>
                   </div>
-                  {paymentData.payment_method === "upi" && (
+                  {paymentData.payment_method === "upi" ? (
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">
                         Account Holder (Partner) *
@@ -839,6 +844,12 @@ export default function Sales() {
                         ))}
                       </select>
                     </div>
+                  ) : (
+                    getCashAccountName(partners) && (
+                      <p className="text-xs text-gray-500">
+                        Cash is credited to {getCashAccountName(partners)}.
+                      </p>
+                    )
                   )}
                 </div>
                 <button type="submit" className="btn btn-accent w-full mt-3">
