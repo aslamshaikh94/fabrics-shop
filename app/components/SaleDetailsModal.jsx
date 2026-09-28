@@ -20,6 +20,7 @@ import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
 import { formatCustomerName, formatNumber2 } from "../utils/formatters";
+import { CASH_ACCOUNT_NAME, getCashAccountId } from "../utils/cashAccount";
 
 const PAYMENT_BADGES = {
   cash: "bg-accent-100 text-accent-800",
@@ -271,7 +272,7 @@ export default function SaleDetailsModal({
           partner_id:
             editGroupFields.payment_method === "upi"
               ? editGroupFields.partner_id
-              : null,
+              : editGroupFields.partner_id || getCashAccountId(partnersList),
         }]);
       }
       onSaleUpdated();
@@ -825,29 +826,38 @@ export default function SaleDetailsModal({
                   <option value="upi">UPI</option>
                 </select>
               </div>
-              {editGroupFields.payment_method === "upi" && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Account Holder (Partner) *
-                  </label>
-                  <select
-                    value={editGroupFields.partner_id}
-                    onChange={(e) =>
-                      setEditGroupFields({
-                        ...editGroupFields,
-                        partner_id: e.target.value,
-                      })
-                    }
-                    className="input bg-white"
-                    required
-                  >
-                    <option value="">— Select partner —</option>
-                    {partnersList.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Account Holder (Partner)
+                  {editGroupFields.payment_method === "upi" ? " *" : ""}
+                </label>
+                <select
+                  value={editGroupFields.partner_id}
+                  onChange={(e) =>
+                    setEditGroupFields({
+                      ...editGroupFields,
+                      partner_id: e.target.value,
+                    })
+                  }
+                  className="input bg-white"
+                  required={editGroupFields.payment_method === "upi"}
+                >
+                  <option value="">
+                    {editGroupFields.payment_method === "upi"
+                      ? "— Select partner —"
+                      : `— Default (${CASH_ACCOUNT_NAME} — cash account) —`}
+                  </option>
+                  {partnersList.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {editGroupFields.payment_method === "cash" && (
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Cash is collected by {CASH_ACCOUNT_NAME}, so it credits that
+                    account unless you choose someone else.
+                  </p>
+                )}
+              </div>
             </div>
 
           </div>

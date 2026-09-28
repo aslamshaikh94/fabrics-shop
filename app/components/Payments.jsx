@@ -25,6 +25,12 @@ import { useToast } from "./Toast";
 import ConfirmModal from "./ConfirmModal";
 import { matchPartner } from "../utils/partnerWithdrawal";
 import { formatINR, formatNumber2 } from "../utils/formatters";
+import {
+  CASH_ACCOUNT_NAME,
+  getCashAccountId,
+  getCashAccountPartner,
+  getPrimaryAccountPartner,
+} from "../utils/cashAccount";
 
 const PAGE_SIZE = 10;
 
@@ -49,7 +55,9 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 // Badge colours per statement source
 const SOURCE_BADGE = {
   "Customer transfer": "bg-blue-100 text-blue-700",
+  "Unlinked receipt": "bg-sky-100 text-sky-700",
   Deposit: "bg-amber-100 text-amber-700",
+  "Deposited to partner": "bg-orange-100 text-orange-700",
   Withdrawal: "bg-rose-100 text-rose-700",
   "Purchase payment": "bg-violet-100 text-violet-700",
 };
@@ -86,7 +94,7 @@ export default function Payments({
     id: null,
     amount: "",
     deposit_date: new Date().toISOString().split("T")[0],
-    method: "cash",
+    method: "upi",
     partner_id: "",
     notes: "",
   });
@@ -293,10 +301,13 @@ export default function Payments({
       };
       let error;
       if (editingPayment.type === "received") {
+        // Cash is collected by the secondary account, so fall back to that account
+        // rather than clearing the link. Writing null here would silently drop an
+        // already-attributed cash payment out of that account's ledger.
         payload.partner_id =
           editForm.payment_method === "upi"
             ? editForm.partner_id || null
-            : null;
+            : editForm.partner_id || getCashAccountId(partners);
         const res = await supabase
           .from("sale_payments")
           .update(payload)
@@ -320,13 +331,20 @@ export default function Payments({
   }
 
   // ── Cash deposit handlers ──
+  // A deposit credits the selected account (normally the primary account the
+  // cash is handed over to). No "from" account is stored: the debit side is
+  // derived in the ledger from the fact that the secondary account holder is
+  // holding the cash being deposited.
   function openDepositForm() {
     setDepositForm({
       id: null,
       amount: "",
       deposit_date: new Date().toISOString().split("T")[0],
-      method: "cash",
-      partner_id: partners.find((p) => p.name === effectiveHolder)?.id || "",
+      method: "upi",
+      partner_id:
+        getPrimaryAccountPartner(partners)?.id ||
+        partners.find((p) => p.name === effectiveHolder)?.id ||
+        "",
       notes: "",
     });
     setShowDepositForm(true);
@@ -738,6 +756,50 @@ export default function Payments({
   // active partners. Built across ALL years so changing the year never hides an
   // account from the dropdown.
   const activePartners = partners.filter((p) => p.is_active !== false);
+
+  // The account holder physically holding the shop's cash (the secondary
+  // account). Every cash collection lands here, and a deposit credited to any
+  // OTHER account is funded from the cash this person is holding — so it shows
+  // up as leaving their account.
+  //
+  // This is derived, not stored: `cash_deposits` only records the destination
+  // account, so the "from" side is inferred from the fact that cash sits with
+  // the secondary holder until it is deposited elsewhere. No schema change and
+  // no extra column are required.
+  const cashAccountName = getCashAccountPartner(partners)?.name || null;
+  // Cash handed over to another account (usually the primary account). Only the
+  // holder of the cash funds these, so every other account is unaffected.
+  const isCashHolder = (holderName) =>
+    Boolean(holderName) && holderName === cashAccountName;
+  const transferOutEntries = (holderName) =>
+    isCashHolder(holderName)
+      ? deposits
+          .filter((d) => d.partner_name && d.partner_name !== holderName)
+          .map((d) => ({
+            key: `deposit-out-${d.id}`,
+            date: d.deposit_date,
+            description: d.notes || `Deposited into ${d.partner_name}`,
+            method: d.method || "upi",
+            type: "debit",
+            amount: d.amount,
+          }))
+      : [];
+
+  // ── Received payments shown inside an account ──
+  // A holder's credits are the customer payments already credited to them. The
+  // secondary account additionally absorbs every receipt that is not linked to an
+  // account yet — cash is handed to that holder in the first place, and a receipt
+  // with no account is physically sitting in the same cash pool. Money already
+  // linked to another account (e.g. the primary account Heena) is never repeated
+  // here, so nothing is shown in two accounts at once.
+  const receivedCreditsFor = (holderName) =>
+    holderName
+      ? salePayments.filter(
+          (p) =>
+            p.partner_name === holderName ||
+            (isCashHolder(holderName) && !p.partner_name),
+        )
+      : [];
   const holdersWithActivity = Array.from(
     new Set([
       ...salePayments.filter((p) => p.partner_name).map((p) => p.partner_name),
@@ -745,6 +807,11 @@ export default function Payments({
       ...withdrawals
         .map((w) => matchPartner(w.withdrawn_by, partners)?.name || null)
         .filter(Boolean),
+      // Unlinked receipts are shown inside the cash account, so that account has
+      // activity even when nothing has been explicitly assigned to it.
+      ...(cashAccountName && salePayments.some((p) => !p.partner_name)
+        ? [cashAccountName]
+        : []),
     ]),
   ).sort();
   const holderNames = Array.from(
@@ -752,10 +819,13 @@ export default function Payments({
   ).sort();
 
   // ── Year selector: every year that has account activity ──
+  // Years come from payments already linked to an account, plus — while a cash
+  // account exists — receipts that are still unlinked, because those are shown
+  // inside that account's statement and would otherwise be unreachable.
   const partnerYears = Array.from(
     new Set([
       ...salePayments
-        .filter((p) => p.partner_id)
+        .filter((p) => p.partner_id || (cashAccountName && !p.partner_name))
         .map((p) => new Date(p.payment_date).getFullYear()),
       ...deposits
         .filter((d) => d.partner_id)
@@ -786,15 +856,16 @@ export default function Payments({
   const getHolderEntries = (name) => {
     if (!name) return [];
     return [
-      ...salePayments
-        .filter((p) => p.partner_name === name)
-        .map((p) => ({
-          key: `sale-${p.id}`,
-          date: p.payment_date,
-          description: p.sale?.customers?.name || "Walk-in",
-          type: "credit",
-          amount: p.amount,
-        })),
+      ...receivedCreditsFor(name).map((p) => ({
+        key: `sale-${p.id}`,
+        date: p.payment_date,
+        description: p.sale?.customers?.name || "Walk-in",
+        type: "credit",
+        amount: p.amount,
+        // Surfaced so the row can be flagged as not yet linked to an account.
+        unlinked: !p.partner_name,
+        method: p.payment_method || "upi",
+      })),
       ...deposits
         .filter((d) => d.partner_name === name)
         .map((d) => ({
@@ -804,6 +875,10 @@ export default function Payments({
           type: "credit",
           amount: d.amount,
         })),
+      // Cash this holder collected and then handed over to another account (the
+      // primary account). Derived from deposits credited elsewhere, so nothing
+      // is stored twice and the same money can never be counted both ways.
+      ...transferOutEntries(name),
       ...withdrawals
         .filter((w) => {
           const p = matchPartner(w.withdrawn_by, partners);
@@ -888,19 +963,19 @@ export default function Payments({
     }, 80);
   };
 
-  const holderTransfersAll = effectiveHolder
-    ? salePayments
-        .filter((p) => p.partner_name === effectiveHolder)
-        .map((p) => ({
-          key: `sale-${p.id}`,
-          date: p.payment_date,
-          description: p.sale?.customers?.name || "Walk-in",
-          method: p.payment_method || "upi",
-          source: "Customer transfer",
-          type: "credit",
-          amount: p.amount,
-        }))
-    : [];
+  const holderTransfersAll = receivedCreditsFor(effectiveHolder).map((p) => ({
+    key: `sale-${p.id}`,
+    date: p.payment_date,
+    description: p.sale?.customers?.name || "Walk-in",
+    method: p.payment_method || "upi",
+    // Receipts not linked to an account are labelled so it is obvious they are
+    // being shown because the cash holder is holding them, not because someone
+    // assigned them to this account.
+    source: p.partner_name ? "Customer transfer" : "Unlinked receipt",
+    unlinked: !p.partner_name,
+    type: "credit",
+    amount: p.amount,
+  }));
   const holderDepositsAll = effectiveHolder
     ? deposits
         .filter((d) => d.partner_name === effectiveHolder)
@@ -915,6 +990,14 @@ export default function Payments({
           amount: d.amount,
         }))
     : [];
+  // Cash this holder collected and then transferred out to another account.
+  // Mirrors the credit side (holderDepositsAll) so a transfer debits the sender
+  // exactly once — without this, money would leave the account without ever
+  // reducing its balance.
+  const holderTransferDebits = transferOutEntries(effectiveHolder).map((e) => ({
+    ...e,
+    source: "Deposited to partner",
+  }));
   const holderWithdrawals = effectiveHolder
     ? withdrawals
         .filter((w) => {
@@ -955,6 +1038,7 @@ export default function Payments({
   const allHolderEntries = [
     ...holderTransfersAll,
     ...holderDepositsAll,
+    ...holderTransferDebits,
     ...holderWithdrawals,
     ...holderPurchaseDebits,
   ];
@@ -1004,7 +1088,11 @@ export default function Payments({
     100;
 
   // Debits (money out) for the selected year
-  const holderDebits = [...holderWithdrawals, ...holderPurchaseDebits]
+  const holderDebits = [
+    ...holderTransferDebits,
+    ...holderWithdrawals,
+    ...holderPurchaseDebits,
+  ]
     .filter(
       (e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e),
     )
@@ -1026,7 +1114,8 @@ export default function Payments({
     100;
 
   // Year totals: credits are customer transfers + deposits, debits are
-  // withdrawals + the reinvested part of supplier payments made from this account.
+  // transfers out to another account + withdrawals + the reinvested part of
+  // supplier payments made from this account.
   const yearCreditTotal =
     Math.round((holderCreditTotal + yearDepositTotal) * 100) / 100;
   const yearDebitTotal =
@@ -1035,15 +1124,13 @@ export default function Payments({
   const closingBalance =
     Math.round((openingBalance + yearCreditTotal - yearDebitTotal) * 100) / 100;
 
-  // ── Untracked: UPI customer payments not credited to any account holder ──
-  // Cash collections are intentionally excluded: cash legitimately sits with the
-  // shop until it is deposited, and the deposit is what credits an account.
+  // ── Receipts not linked to any account holder ──
+  // These are displayed inside the cash account's statement (the secondary holder
+  // is holding the money), but they are still worth surfacing: assigning them to
+  // an account is what moves them out of the cash pool and into that account.
   const untrackedYear = salePayments
     .filter(
-      (p) =>
-        !p.partner_name &&
-        p.payment_method === "upi" &&
-        yearOf(p.payment_date) === currentPartnerYear,
+      (p) => !p.partner_name && yearOf(p.payment_date) === currentPartnerYear,
     )
     .sort(byDateDesc);
   const untrackedTotal = r2(
@@ -1072,11 +1159,26 @@ export default function Payments({
   const hasMonthActivity = holderMonthRows.some((r) => r.credit || r.debit);
 
   // ── Credit / debit composition for the selected holder + year ──
+  // Unlinked receipts are broken out from assigned customer transfers so it is
+  // clear how much of the balance is money not yet tied to a specific account.
   const creditSources = [
     {
       label: "Customer transfers",
-      value: r2(holderCredits.reduce((s, r) => s + (r.amount || 0), 0)),
+      value: r2(
+        holderCredits
+          .filter((e) => !e.unlinked)
+          .reduce((s, r) => s + (r.amount || 0), 0),
+      ),
       color: "bg-blue-500",
+    },
+    {
+      label: "Unlinked receipts",
+      value: r2(
+        holderCredits
+          .filter((e) => e.unlinked)
+          .reduce((s, r) => s + (r.amount || 0), 0),
+      ),
+      color: "bg-sky-500",
     },
     { label: "Deposits", value: yearDepositTotal, color: "bg-amber-500" },
   ].filter((s) => s.value);
@@ -1615,13 +1717,15 @@ export default function Payments({
                 <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-amber-800">
-                    {untrackedYear.length} customer payment
+                    {untrackedYear.length} receipt
                     {untrackedYear.length === 1 ? " is" : "s are"} not linked to
                     an account holder
                   </p>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    {formatINR(untrackedTotal)} collected in {currentPartnerYear}{" "}
-                    without being credited to an account.
+                    {formatINR(untrackedTotal)} received in {currentPartnerYear}
+                    {cashAccountName
+                      ? ` is counted under ${cashAccountName} (cash). Assign it to move it into a specific account.`
+                      : " has no cash account to sit in. Add or reactivate the cash-holding partner."}
                   </p>
                 </div>
               </div>
@@ -2573,30 +2677,40 @@ export default function Payments({
                   </select>
                 </div>
                 {editingPayment.type === "received" ? (
-                  editForm.payment_method === "upi" && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Account Holder (Partner)
-                      </label>
-                      <select
-                        value={editForm.partner_id || ""}
-                        onChange={(e) =>
-                          setEditForm({
-                            ...editForm,
-                            partner_id: e.target.value,
-                          })
-                        }
-                        className="input"
-                      >
-                        <option value="">— Select partner —</option>
-                        {paymentPartnerOptions.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Account Holder (Partner)
+                      {editForm.payment_method === "upi" ? " *" : ""}
+                    </label>
+                    <select
+                      value={editForm.partner_id || ""}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          partner_id: e.target.value,
+                        })
+                      }
+                      className="input"
+                      required={editForm.payment_method === "upi"}
+                    >
+                      <option value="">
+                        {editForm.payment_method === "upi"
+                          ? "— Select partner —"
+                          : `— Default (${CASH_ACCOUNT_NAME} — cash account) —`}
+                      </option>
+                      {paymentPartnerOptions.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    {editForm.payment_method === "cash" && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Cash is collected by {CASH_ACCOUNT_NAME}, so it credits
+                        that account unless you choose someone else.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2707,6 +2821,11 @@ export default function Payments({
                     </option>
                   ))}
                 </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Cash collected by {CASH_ACCOUNT_NAME} is already counted in
+                  their account, so depositing it here is shown as leaving their
+                  account.
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
