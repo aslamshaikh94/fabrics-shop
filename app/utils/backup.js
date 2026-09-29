@@ -125,6 +125,9 @@ const TABLE_COLUMNS = {
     "payment_proof_url",
     "cleared",
     "cleared_at",
+    // Account that paid the expense. Must be listed here or a backup restore
+    // would drop it, silently un-linking expenses from their account.
+    "partner_id",
   ],
   withdrawals: [
     "id",

@@ -46,12 +46,17 @@ const emptyForm = {
   amount: "",
   expense_date: new Date().toISOString().split("T")[0],
   paid_by: "",
+  // Account the money came out of. When set, the amount is deducted from that
+  // account's balance in the Payments ledger (like a reinvested supplier
+  // payment). Empty means it was paid out of pocket (see paid_by / cleared).
+  partner_id: "",
   notes: "",
 };
 
 export default function Expenses() {
   const toast = useToast();
   const [expenses, setExpenses] = useState([]);
+  const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -72,6 +77,7 @@ export default function Expenses() {
 
   useEffect(() => {
     fetchExpenses();
+    fetchPartners();
   }, []);
 
   useEffect(() => {
@@ -90,6 +96,20 @@ export default function Expenses() {
       console.error("Error fetching expenses:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchPartners() {
+    try {
+      const { data, error } = await supabase
+        .from("partners")
+        .select("id, name")
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      setPartners(data || []);
+    } catch (err) {
+      console.error("Error fetching partners:", err);
     }
   }
 
@@ -132,35 +152,55 @@ export default function Expenses() {
         }
       }
 
+      const savePayload = {
+        title: formData.title,
+        category: formData.category,
+        amount: parseFloat(formData.amount),
+        expense_date: formData.expense_date,
+        paid_by: formData.paid_by,
+        notes: formData.notes,
+        payment_proof_url,
+        partner_id: formData.partner_id || null,
+      };
+
       if (editingId) {
         const { error } = await supabase
           .from("expenses")
-          .update({
-            title: formData.title,
-            category: formData.category,
-            amount: parseFloat(formData.amount),
-            expense_date: formData.expense_date,
-            paid_by: formData.paid_by,
-            notes: formData.notes,
-            payment_proof_url,
-          })
+          .update(savePayload)
           .eq("id", editingId);
-        if (error) throw error;
-        toast("Expense updated");
+        if (error) {
+          // Migration 045 may not be applied yet: keeping expenses saveable is
+          // more important than blocking on the account link.
+          if (error.message?.includes("partner_id")) {
+            const { partner_id, ...withoutPartner } = savePayload;
+            const retry = await supabase
+              .from("expenses")
+              .update(withoutPartner)
+              .eq("id", editingId);
+            if (retry.error) throw retry.error;
+            toast("Saved, but the account link needs migration 045", "error");
+          } else {
+            throw error;
+          }
+        } else {
+          toast("Expense updated");
+        }
       } else {
-        const { error } = await supabase.from("expenses").insert([
-          {
-            title: formData.title,
-            category: formData.category,
-            amount: parseFloat(formData.amount),
-            expense_date: formData.expense_date,
-            paid_by: formData.paid_by,
-            notes: formData.notes,
-            payment_proof_url,
-          },
-        ]);
-        if (error) throw error;
-        toast("Expense added");
+        const { error } = await supabase.from("expenses").insert([savePayload]);
+        if (error) {
+          if (error.message?.includes("partner_id")) {
+            const { partner_id, ...withoutPartner } = savePayload;
+            const retry = await supabase
+              .from("expenses")
+              .insert([withoutPartner]);
+            if (retry.error) throw retry.error;
+            toast("Saved, but the account link needs migration 045", "error");
+          } else {
+            throw error;
+          }
+        } else {
+          toast("Expense added");
+        }
       }
       setShowForm(false);
       setEditingId(null);
@@ -184,6 +224,7 @@ export default function Expenses() {
       amount: expense.amount.toString(),
       expense_date: expense.expense_date,
       paid_by: expense.paid_by || "",
+      partner_id: expense.partner_id || "",
       notes: expense.notes || "",
     });
     setPaymentProofFile(null);
@@ -242,8 +283,11 @@ export default function Expenses() {
 
   const totalFiltered = useMemo(() => filtered.reduce((s, e) => s + (e.amount || 0), 0), [filtered]);
   const totalAll = useMemo(() => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
+  // Pending reimbursement only counts money someone paid out of their own pocket.
+  // An expense paid straight from an account has already left that account's
+  // balance, so reimbursing it would pay the same money twice.
   const totalUncleared = useMemo(() => expenses
-    .filter((e) => !e.cleared)
+    .filter((e) => !e.cleared && !e.partner_id)
     .reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
 
   const categoryColors = {
@@ -302,6 +346,9 @@ export default function Expenses() {
           <p className="text-2xl font-bold text-orange-600 mt-1">
             ₹
             {formatNumber2(totalUncleared)}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Out-of-pocket only — account-paid expenses are excluded
           </p>
         </div>
         <div className="card p-5">
@@ -464,6 +511,30 @@ export default function Expenses() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
+              Paid From Account
+            </label>
+            <select
+              value={formData.partner_id}
+              onChange={(e) =>
+                setFormData({ ...formData, partner_id: e.target.value })
+              }
+              className="input"
+            >
+              <option value="">— Out of pocket (no account) —</option>
+              {partners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              {formData.partner_id
+                ? "This amount will be deducted from the selected account's balance."
+                : "No account selected — nothing is deducted from any account balance."}
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
               Notes
             </label>
             <textarea
@@ -613,6 +684,13 @@ export default function Expenses() {
                         Paid by: {expense.paid_by}
                       </p>
                     )}
+                    {expense.partner_id && (
+                      <p className="text-xs text-accent-600 mt-0.5">
+                        From account:{" "}
+                        {partners.find((p) => p.id === expense.partner_id)
+                          ?.name || "Account"}
+                      </p>
+                    )}
                     {expense.notes && (
                       <p className="text-xs text-gray-500 mt-0.5">
                         {expense.notes}
@@ -657,27 +735,39 @@ export default function Expenses() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-1">
-                      <button
-                        onClick={() => handleToggleClear(expense)}
-                        disabled={togglingClear === expense.id}
-                        className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
-                          expense.cleared
-                            ? "bg-green-100 text-green-700 hover:bg-green-200"
-                            : "bg-gray-100 text-gray-500 hover:bg-orange-100 hover:text-orange-600"
-                        }`}
-                        title={
-                          expense.cleared
-                            ? "Mark as unpaid"
-                            : "Mark as reimbursed"
-                        }
-                      >
-                        {expense.cleared ? (
+                      {expense.partner_id ? (
+                        // Paid from an account: nothing to reimburse, so the
+                        // toggle is replaced with a static marker instead.
+                        <span
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg bg-accent-100 text-accent-700"
+                          title="Paid from an account — already deducted, no reimbursement needed"
+                        >
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                        ) : (
-                          <Circle className="w-3.5 h-3.5" />
-                        )}
-                        {expense.cleared ? "Paid" : "Clear"}
-                      </button>
+                          From account
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleClear(expense)}
+                          disabled={togglingClear === expense.id}
+                          className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
+                            expense.cleared
+                              ? "bg-green-100 text-green-700 hover:bg-green-200"
+                              : "bg-gray-100 text-gray-500 hover:bg-orange-100 hover:text-orange-600"
+                          }`}
+                          title={
+                            expense.cleared
+                              ? "Mark as unpaid"
+                              : "Mark as reimbursed"
+                          }
+                        >
+                          {expense.cleared ? (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          ) : (
+                            <Circle className="w-3.5 h-3.5" />
+                          )}
+                          {expense.cleared ? "Paid" : "Clear"}
+                        </button>
+                      )}
                       {expense.cleared && expense.cleared_at && (
                         <span className="text-[10px] text-gray-400">
                           {new Date(expense.cleared_at).toLocaleDateString(
