@@ -60,6 +60,7 @@ const SOURCE_BADGE = {
   "Deposited to partner": "bg-orange-100 text-orange-700",
   Withdrawal: "bg-rose-100 text-rose-700",
   "Purchase payment": "bg-violet-100 text-violet-700",
+  Expense: "bg-red-100 text-red-700",
 };
 
 export default function Payments({
@@ -88,6 +89,9 @@ export default function Payments({
   const [partners, setPartners] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  // Expenses attributed to an account (partner_id set) are debits on that
+  // account, the same way reinvested supplier payments are.
+  const [expenses, setExpenses] = useState([]);
   const [showDepositForm, setShowDepositForm] = useState(false);
   const [confirmDeleteDeposit, setConfirmDeleteDeposit] = useState(null);
   const [depositForm, setDepositForm] = useState({
@@ -132,6 +136,7 @@ export default function Payments({
         partnersRes,
         depositsRes,
         withdrawalsRes,
+        expensesRes,
       ] = await Promise.all([
         supabase
           .from("purchase_payments")
@@ -162,6 +167,10 @@ export default function Payments({
           .from("withdrawals")
           .select("*")
           .order("withdrawal_date", { ascending: false }),
+        supabase
+          .from("expenses")
+          .select("id, title, category, amount, expense_date, partner_id")
+          .order("expense_date", { ascending: false }),
       ]);
 
       const partnerMap = Object.fromEntries(
@@ -169,6 +178,12 @@ export default function Payments({
       );
       setPartners(partnersRes.data || []);
       setWithdrawals(withdrawalsRes.data || []);
+      setExpenses(
+        (expensesRes.data || []).map((e) => ({
+          ...e,
+          partner_name: e.partner_id ? partnerMap[e.partner_id] || "Unknown" : null,
+        })),
+      );
       setDeposits(
         (depositsRes.data || []).map((d) => ({
           ...d,
@@ -539,6 +554,7 @@ export default function Payments({
         partnersRes,
         depositsRes,
         withdrawalsRes,
+        expensesRes,
       ] = await Promise.all([
         supabase
           .from("purchase_payments")
@@ -562,6 +578,10 @@ export default function Payments({
           .from("withdrawals")
           .select("*")
           .order("withdrawal_date", { ascending: false }),
+        supabase
+          .from("expenses")
+          .select("id, title, category, amount, expense_date, partner_id")
+          .order("expense_date", { ascending: false }),
       ]);
 
       const partnerMap = Object.fromEntries(
@@ -569,6 +589,12 @@ export default function Payments({
       );
       setPartners(partnersRes.data || []);
       setWithdrawals(withdrawalsRes.data || []);
+      setExpenses(
+        (expensesRes.data || []).map((e) => ({
+          ...e,
+          partner_name: e.partner_id ? partnerMap[e.partner_id] || "Unknown" : null,
+        })),
+      );
       setDeposits(
         (depositsRes.data || []).map((d) => ({
           ...d,
@@ -785,6 +811,25 @@ export default function Payments({
           }))
       : [];
 
+  // ── Expenses paid out of an account ──
+  // An expense settled from an account reduces that account's balance, exactly
+  // like a reinvested supplier payment. Only rows with a partner_id do this —
+  // expenses paid out of pocket carry no account and are untouched.
+  const expenseDebitEntries = (holderName) =>
+    holderName
+      ? expenses
+          .filter((e) => e.partner_name === holderName)
+          .map((e) => ({
+            key: `expense-${e.id}`,
+            date: e.expense_date,
+            description: e.title || e.category || "Expense",
+            method: "expense",
+            source: "Expense",
+            type: "debit",
+            amount: e.amount,
+          }))
+      : [];
+
   // ── Received payments shown inside an account ──
   // A holder's credits are the customer payments already credited to them. The
   // secondary account additionally absorbs every receipt that is not linked to an
@@ -804,6 +849,7 @@ export default function Payments({
     new Set([
       ...salePayments.filter((p) => p.partner_name).map((p) => p.partner_name),
       ...deposits.filter((d) => d.partner_name).map((d) => d.partner_name),
+      ...expenses.filter((e) => e.partner_name).map((e) => e.partner_name),
       ...withdrawals
         .map((w) => matchPartner(w.withdrawn_by, partners)?.name || null)
         .filter(Boolean),
@@ -833,6 +879,9 @@ export default function Payments({
       ...withdrawals
         .filter((w) => matchPartner(w.withdrawn_by, partners))
         .map((w) => new Date(w.withdrawal_date).getFullYear()),
+      ...expenses
+        .filter((e) => e.partner_id)
+        .map((e) => new Date(e.expense_date).getFullYear()),
       ...purchasePayments
         .filter((pp) => pp.partner_id && (pp.reinvested_amount || 0) > 0)
         .map((pp) => new Date(pp.payment_date).getFullYear()),
@@ -879,6 +928,8 @@ export default function Payments({
       // primary account). Derived from deposits credited elsewhere, so nothing
       // is stored twice and the same money can never be counted both ways.
       ...transferOutEntries(name),
+      // Expenses this holder paid for out of their account.
+      ...expenseDebitEntries(name),
       ...withdrawals
         .filter((w) => {
           const p = matchPartner(w.withdrawn_by, partners);
@@ -998,6 +1049,10 @@ export default function Payments({
     ...e,
     source: "Deposited to partner",
   }));
+  // Expenses paid from this account in the selected year.
+  const holderExpenseDebits = effectiveHolder
+    ? expenseDebitEntries(effectiveHolder).map((e) => ({ ...e }))
+    : [];
   const holderWithdrawals = effectiveHolder
     ? withdrawals
         .filter((w) => {
@@ -1041,6 +1096,7 @@ export default function Payments({
     ...holderTransferDebits,
     ...holderWithdrawals,
     ...holderPurchaseDebits,
+    ...holderExpenseDebits,
   ];
   // ── Opening balance ──
   // The account holder may carry a manual opening balance: a snapshot of what the
@@ -1092,6 +1148,7 @@ export default function Payments({
     ...holderTransferDebits,
     ...holderWithdrawals,
     ...holderPurchaseDebits,
+    ...holderExpenseDebits,
   ]
     .filter(
       (e) => yearOf(e.date) === currentPartnerYear && afterStatementStart(e),
@@ -1200,6 +1257,15 @@ export default function Payments({
           .reduce((s, r) => s + (r.amount || 0), 0),
       ),
       color: "bg-purple-500",
+    },
+    {
+      label: "Expenses",
+      value: r2(
+        holderDebits
+          .filter((r) => r.source === "Expense")
+          .reduce((s, r) => s + (r.amount || 0), 0),
+      ),
+      color: "bg-red-500",
     },
   ].filter((s) => s.value);
 
