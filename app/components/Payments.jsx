@@ -86,6 +86,10 @@ export default function Payments({
   );
   const [editingPayment, setEditingPayment] = useState(null);
   const [editForm, setEditForm] = useState({});
+  // Raw sales rows (with discount_amount) so an edited receipt can be capped at
+  // the sale's net — a discounted sale must never be over-collected (see the
+  // Disc./Extra column in Sales.jsx: paid > net shows as a spurious "+extra").
+  const [salesRows, setSalesRows] = useState([]);
   const [partners, setPartners] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
@@ -151,7 +155,7 @@ export default function Payments({
         supabase
           .from("sales")
           .select(
-            "id, sale_group_id, customer_id, customer_name, total_amount, paid_amount, remaining_amount",
+            "id, sale_group_id, customer_id, customer_name, total_amount, discount_amount, paid_amount, remaining_amount",
           ),
         supabase
           .from("purchases")
@@ -217,6 +221,7 @@ export default function Payments({
           };
         }
       });
+      setSalesRows(salesRes.data || []);
 
       setPurchasePayments(
         (purchaseRes.data || []).map((p) => ({
@@ -307,6 +312,43 @@ export default function Payments({
     if (amount <= 0) {
       toast("Amount must be greater than 0", "error");
       return;
+    }
+    // A received (customer) payment may never exceed the sale's outstanding.
+    // Without this guard a discounted sale can be "over-collected" (the receipt
+    // is bumped up to the pre-discount total), which then shows up in the sales
+    // list as a spurious "+extra" next to the "-discount".
+    if (editingPayment.type === "received") {
+      const salesById = Object.fromEntries(salesRows.map((s) => [s.id, s]));
+      const groupKeyOf = (p) =>
+        p.sale_group_id ||
+        (p.sale_id && salesById[p.sale_id]
+          ? salesById[p.sale_id].sale_group_id || p.sale_id
+          : null);
+      const groupKey = groupKeyOf(editingPayment);
+      if (groupKey) {
+        const net = salesRows
+          .filter((s) => (s.sale_group_id || s.id) === groupKey)
+          .reduce(
+            (sum, s) =>
+              sum +
+              (Number(s.total_amount) || 0) -
+              (Number(s.discount_amount) || 0),
+            0,
+          );
+        const otherPaid = salePayments
+          .filter(
+            (p) => p.id !== editingPayment.id && groupKeyOf(p) === groupKey,
+          )
+          .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        const outstanding = Math.max(net - otherPaid, 0);
+        if (amount > outstanding + 0.005) {
+          toast(
+            `Amount exceeds the sale's outstanding of ₹${formatNumber2(outstanding)}`,
+            "error",
+          );
+          return;
+        }
+      }
     }
     try {
       const payload = {
@@ -747,6 +789,9 @@ export default function Payments({
       notes: p.notes,
       partner_id: p.partner_id || "",
       partner_name: p.partner_name || null,
+      // Kept so an edited receipt can be validated against its sale's net.
+      sale_group_id: p.sale_group_id || null,
+      sale_id: p.sale_id || null,
     }));
 
   const allPayments = [...paymentsMade, ...paymentsReceived]
