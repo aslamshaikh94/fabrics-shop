@@ -4,7 +4,6 @@ import { supabase } from "../lib/supabase";
 import {
   Plus,
   CreditCard,
-  Calendar,
   Eye,
   Trash2,
   TrendingUp,
@@ -18,9 +17,11 @@ import SaleDetailsModal from "./SaleDetailsModal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName, formatNumber2 } from "../utils/formatters";
-import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
+import { useVisibleCols } from "../hooks/useVisibleCols";
+import LoadingSpinner from "./shared/LoadingSpinner";
+import PaymentBadge from "./shared/PaymentBadge";
 
 const PAGE_SIZE = 10;
 
@@ -40,13 +41,6 @@ const ALL_SALE_COLUMNS = [
 
 const SALE_DEFAULT_VISIBLE = new Set(["customer", "date", "items", "mtrs", "total", "paid", "margin", "discExtra", "remaining", "type", "actions"]);
 
-function loadSaleVisibleCols() {
-  try {
-    const saved = localStorage.getItem("sales_visible_cols");
-    if (saved) return new Set(JSON.parse(saved));
-  } catch {}
-  return new Set(SALE_DEFAULT_VISIBLE);
-}
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
@@ -56,28 +50,15 @@ const INITIAL_PAYMENT = {
   amount: "",
   payment_date: new Date().toISOString().split("T")[0],
   payment_method: "cash",
-  partner_id: "",
+  account_id: "",
 };
-const PAYMENT_BADGES = {
-  cash: "bg-accent-100 text-accent-800",
-  credit: "bg-warning-100 text-warning-800",
-  partial: "bg-blue-100 text-blue-800",
-};
-const PAYMENT_LABELS = { cash: "Cash", credit: "Credit", partial: "Partial" };
-
-function PaymentBadge({ type }) {
-  return (
-    <span className={`badge ${PAYMENT_BADGES[type] || ""}`}>
-      {PAYMENT_LABELS[type] || type}
-    </span>
-  );
-}
 
 export default function Sales() {
   const toast = useToast();
   const [sales, setSales] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [fabrics, setFabrics] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -95,19 +76,10 @@ export default function Sales() {
   const [confirmDeletePayment, setConfirmDeletePayment] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null);
-  const [visibleCols, setVisibleCols] = useState(loadSaleVisibleCols);
-
-  useEffect(() => {
-    localStorage.setItem("sales_visible_cols", JSON.stringify([...visibleCols]));
-  }, [visibleCols]);
-
-  function toggleCol(key) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
+  const { visibleCols, setVisibleCols, toggleCol } = useVisibleCols(
+    "sales_visible_cols",
+    SALE_DEFAULT_VISIBLE,
+  );
 
   const col = (key) => visibleCols.has(key);
 
@@ -117,7 +89,7 @@ export default function Sales() {
 
   async function fetchAll() {
     try {
-      const [salesRes, customersRes, fabricsRes, partnersRes] = await Promise.all([
+      const [salesRes, customersRes, fabricsRes, accountsRes, partnersRes] = await Promise.all([
         supabase
           .from("sales")
           .select("*")
@@ -125,6 +97,7 @@ export default function Sales() {
           .order("created_at", { ascending: false }),
         supabase.from("customers").select("*").order("name"),
         supabase.from("fabrics").select("*").order("name"),
+        supabase.from("payment_accounts").select("id,name,account_type,partner:partners(name)").eq("is_active", true).order("name"),
         supabase.from("partners").select("id,name").eq("is_active", true).order("name"),
       ]);
       if (salesRes.error) throw salesRes.error;
@@ -140,6 +113,7 @@ export default function Sales() {
       setSales(salesWithCustomer);
       setCustomers(customersRes.data || []);
       setFabrics(fabricsRes.data || []);
+      setAccounts(accountsRes.data || []);
       setPartners(partnersRes.data || []);
       return salesWithCustomer;
     } catch (error) {
@@ -189,8 +163,8 @@ export default function Sales() {
       toast("Please fix the validation errors", "error");
       return;
     }
-    if (paymentData.payment_method === "upi" && !paymentData.partner_id) {
-      toast("Please select the partner whose account this credits", "error");
+    if (!paymentData.account_id) {
+      toast("Please select an account", "error");
       return;
     }
     // Hard cap: never record more than the outstanding amount (the HTML max
@@ -215,12 +189,7 @@ export default function Sales() {
         amount: amt,
         payment_date: paymentData.payment_date,
         payment_method: paymentData.payment_method,
-        // Cash is collected by the secondary account holder (Riyaz); UPI credits
-        // the account chosen in the form.
-        partner_id:
-          paymentData.payment_method === "upi"
-            ? paymentData.partner_id
-            : getCashAccountId(partners),
+        account_id: paymentData.account_id,
       }]);
       if (error) throw error;
       setPaymentData({ ...INITIAL_PAYMENT });
@@ -238,19 +207,12 @@ export default function Sales() {
       const saleIds = group.items.map((i) => i.id);
       const { data } = await supabase
         .from("sale_payments")
-        .select("*")
+        .select("*, account:payment_accounts(id,name,partner:partners(name))")
         .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: false });
-      // Resolve holder name from the partners list (client-side lookup)
-      const withPartner = (data || []).map((p) => ({
-        ...p,
-        partner_name: p.partner_id
-          ? partners.find((x) => x.id === p.partner_id)?.name
-          : null,
-      }));
       // Deduplicate: group payments (sale_group_id set) take priority, exclude old per-item rows that are already covered
-      const groupRows = withPartner.filter((p) => p.sale_group_id === group.id);
-      const legacyRows = withPartner.filter((p) => !p.sale_group_id);
+      const groupRows = (data || []).filter((p) => p.sale_group_id === group.id);
+      const legacyRows = (data || []).filter((p) => !p.sale_group_id);
       // Group legacy rows by created_at second to show as single entries
       const legacyGrouped = Object.values(legacyRows.reduce((acc, p) => {
         const key = p.created_at?.slice(0, 19) || p.id;
@@ -531,11 +493,7 @@ export default function Sales() {
   );
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600" />
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   return (
@@ -633,7 +591,14 @@ export default function Sales() {
         }}
         fabrics={fabrics}
         customers={customers}
-        partners={partners}
+        customerDues={Object.fromEntries(
+          customers.map((c) => [
+            c.id,
+            sales
+              .filter((s) => s.customer_id === c.id)
+              .reduce((sum, s) => sum + (s.remaining_amount || 0), 0),
+          ])
+        )}
       />
 
       {/* Payment History + Receive Payment Modal */}
@@ -729,11 +694,11 @@ export default function Sales() {
                         ₹{formatNumber2(p.amount)}
                       </p>
                       <p className="text-sm text-gray-500">
-                        {new Date(p.payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
+                        {formatDate(p.payment_date)}
                       </p>
-                      {p.partner_name && (
+                      {p.account && (
                         <p className="text-xs text-primary-600 font-medium mt-0.5">
-                          {p.partner_name}
+                          {p.account.name}{p.account.partner ? ` · ${p.account.partner.name}` : ""}
                         </p>
                       )}
                     </div>
@@ -811,10 +776,7 @@ export default function Sales() {
                     <select
                       value={paymentData.payment_method}
                       onChange={(e) =>
-                        setPaymentData({
-                          ...paymentData,
-                          payment_method: e.target.value,
-                        })
+                        setPaymentData({ ...paymentData, payment_method: e.target.value })
                       }
                       className="input"
                     >
@@ -825,32 +787,24 @@ export default function Sales() {
                       ))}
                     </select>
                   </div>
-                  {paymentData.payment_method === "upi" ? (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        Account Holder (Partner) *
-                      </label>
-                      <select
-                        value={paymentData.partner_id}
-                        onChange={(e) => setPaymentData({ ...paymentData, partner_id: e.target.value })}
-                        className="input"
-                        required
-                      >
-                        <option value="">— Select partner —</option>
-                        {partners.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
-                    getCashAccountName(partners) && (
-                      <p className="text-xs text-gray-500">
-                        Cash is credited to {getCashAccountName(partners)}.
-                      </p>
-                    )
-                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Account *
+                    </label>
+                    <select
+                      value={paymentData.account_id}
+                      onChange={(e) => setPaymentData({ ...paymentData, account_id: e.target.value })}
+                      className="input"
+                      required
+                    >
+                      <option value="">— Select account —</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}{a.partner ? ` (${a.partner.name})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <button type="submit" className="btn btn-accent w-full mt-3">
                   <CreditCard className="w-5 h-5 mr-2" /> Receive Payment

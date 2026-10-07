@@ -1,11 +1,9 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
-import { supabase } from "../lib/supabase";
+import { useState, useMemo } from "react";
 import {
   Plus,
   Pencil,
   Trash2,
-  X,
   Phone,
   MapPin,
   BookOpen,
@@ -15,52 +13,60 @@ import { validateSupplier, hasErrors } from "../utils/validators";
 import SupplierLedger from "./SupplierLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import EmptyState from "./shared/EmptyState";
-import { SearchInput } from "./shared/FormField";
+import FormField, { SearchInput, FormActions } from "./shared/FormField";
+import { useCrud } from "../hooks/useCrud";
+import { usePagedList } from "../hooks/usePagedList";
 
 const PAGE_SIZE = 9;
 
+const emptyForm = { name: "", phone: "", address: "", notes: "" };
+
 export default function Suppliers() {
   const toast = useToast();
-  const [suppliers, setSuppliers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: suppliers,
+    loading,
+    create,
+    update,
+    remove,
+  } = useCrud("suppliers", {
+    select: "*",
+    orderBy: { column: "created_at", ascending: false },
+  });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [page, setPage] = useState(1);
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    address: "",
-    notes: "",
-  });
+  const [formData, setFormData] = useState(emptyForm);
   const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
   const [ledgerSupplier, setLedgerSupplier] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  useEffect(() => {
-    fetchSuppliers();
-  }, []);
+  const setField = (field, value) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (formErrors[field])
+      setFormErrors((prev) => ({ ...prev, [field]: "" }));
+  };
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm]);
+  const filteredSuppliers = useMemo(
+    () =>
+      suppliers.filter(
+        (s) =>
+          s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          s.phone.includes(searchTerm),
+      ),
+    [suppliers, searchTerm],
+  );
 
-  async function fetchSuppliers() {
-    try {
-      const { data, error } = await supabase
-        .from("suppliers")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setSuppliers(data || []);
-    } catch (error) {
-      console.error("Error fetching suppliers:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { page, setPage, paginated, totalPages, total } = usePagedList(
+    filteredSuppliers,
+    PAGE_SIZE,
+    [searchTerm],
+  );
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -71,36 +77,35 @@ export default function Suppliers() {
       return;
     }
     setFormErrors({});
+    setSaving(true);
     try {
       if (editingId) {
-        const { error } = await supabase
-          .from("suppliers")
-          .update(formData)
-          .eq("id", editingId);
-        if (error) throw error;
+        await update(editingId, formData);
         toast("Supplier updated successfully");
       } else {
-        const { error } = await supabase.from("suppliers").insert([formData]);
-        if (error) throw error;
+        await create(formData);
         toast("Supplier added successfully");
       }
-      setShowForm(false);
-      setEditingId(null);
-      setFormData({ name: "", phone: "", address: "", notes: "" });
-      setFormErrors({});
-      fetchSuppliers();
+      closeForm();
     } catch (error) {
       console.error("Error saving supplier:", error);
       toast("Failed to save supplier", "error");
+    } finally {
+      setSaving(false);
     }
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingId(null);
+    setFormData(emptyForm);
+    setFormErrors({});
   }
 
   async function handleDelete(id) {
     try {
-      const { error } = await supabase.from("suppliers").delete().eq("id", id);
-      if (error) throw error;
+      await remove(id);
       toast("Supplier deleted");
-      fetchSuppliers();
     } catch (error) {
       console.error("Error deleting supplier:", error);
       toast("Cannot delete supplier with associated records", "error");
@@ -120,24 +125,7 @@ export default function Suppliers() {
     setShowForm(true);
   }
 
-  const filteredSuppliers = useMemo(() => suppliers.filter(
-    (s) =>
-      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.phone.includes(searchTerm),
-  ), [suppliers, searchTerm]);
-
-  const totalPages = Math.ceil(filteredSuppliers.length / PAGE_SIZE);
-  const paginated = filteredSuppliers.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
-  );
-
-  if (loading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+  if (loading) return <LoadingSpinner className="h-64" />;
 
   return (
     <div className="space-y-6">
@@ -149,14 +137,7 @@ export default function Suppliers() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => {
-              setShowForm(true);
-              setEditingId(null);
-              setFormData({ name: "", phone: "", address: "", notes: "" });
-            }}
-            className="btn btn-primary"
-          >
+          <button onClick={closeForm} className="btn btn-primary">
             <Plus className="w-5 h-5 mr-2" />
             Add Supplier
           </button>
@@ -169,111 +150,67 @@ export default function Suppliers() {
         placeholder="Search suppliers..."
       />
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 overflow-y-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-4 sm:p-6 m-4 sm:my-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">
-                {editingId ? "Edit Supplier" : "Add Supplier"}
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => {
-                    setFormData({ ...formData, name: e.target.value });
-                    if (formErrors.name)
-                      setFormErrors({ ...formErrors, name: "" });
-                  }}
-                  className={`input ${formErrors.name ? "border-error-400" : ""}`}
-                  placeholder="Supplier name"
-                />
-                {formErrors.name && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.name}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone
-                </label>
-                <input
-                  type="text"
-                  value={formData.phone}
-                  onChange={(e) => {
-                    setFormData({ ...formData, phone: e.target.value });
-                    if (formErrors.phone)
-                      setFormErrors({ ...formErrors, phone: "" });
-                  }}
-                  className={`input ${formErrors.phone ? "border-error-400" : ""}`}
-                  placeholder="Phone number"
-                />
-                {formErrors.phone && (
-                  <p className="text-error-600 text-sm mt-1">
-                    {formErrors.phone}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address
-                </label>
-                <input
-                  type="text"
-                  value={formData.address}
-                  onChange={(e) =>
-                    setFormData({ ...formData, address: e.target.value })
-                  }
-                  className="input"
-                  placeholder="Address"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData({ ...formData, notes: e.target.value })
-                  }
-                  className="input"
-                  rows={3}
-                  placeholder="Additional notes"
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? "Update" : "Add"} Supplier
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          setEditingId(null);
+        }}
+        title={editingId ? "Edit Supplier" : "Add Supplier"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <FormField
+            field="name"
+            label="Name"
+            required
+            value={formData.name}
+            error={formErrors.name}
+            onChange={setField}
+            placeholder="Supplier name"
+          />
+          <FormField
+            field="phone"
+            label="Phone"
+            value={formData.phone}
+            error={formErrors.phone}
+            onChange={setField}
+            placeholder="Phone number"
+          />
+          <FormField
+            field="address"
+            label="Address"
+            value={formData.address}
+            onChange={setField}
+            placeholder="Address"
+          />
+          <FormField
+            field="notes"
+            label="Notes"
+            value={formData.notes}
+            onChange={setField}
+            placeholder="Additional notes"
+          >
+            <textarea
+              value={formData.notes}
+              onChange={(e) => setField("notes", e.target.value)}
+              className="input"
+              rows={3}
+              placeholder="Additional notes"
+            />
+          </FormField>
+          <FormActions
+            onCancel={() => {
+              setShowForm(false);
+              setEditingId(null);
+            }}
+            isSubmitting={saving}
+            submitLabel={editingId ? "Update Supplier" : "Add Supplier"}
+          />
+        </form>
+      </Modal>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredSuppliers.map((supplier) => (
+        {paginated.map((supplier) => (
           <div key={supplier.id} className="card-hover p-5">
             <div className="flex items-start justify-between mb-3">
               <h3 className="font-semibold text-gray-900">{supplier.name}</h3>
@@ -326,7 +263,7 @@ export default function Suppliers() {
         currentPage={page}
         totalPages={totalPages}
         onPageChange={setPage}
-        totalItems={filteredSuppliers.length}
+        totalItems={total}
         label="suppliers"
       />
 
@@ -345,7 +282,7 @@ export default function Suppliers() {
         />
       )}
 
-      {filteredSuppliers.length === 0 && (
+      {total === 0 && (
         <EmptyState
           icon={DollarSign}
           title="No suppliers added yet"

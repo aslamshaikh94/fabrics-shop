@@ -7,6 +7,7 @@ export default function CustomerSelect({
   onChange,
   customers,
   label = "Customer",
+  enterKeyHint,
 }) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -36,6 +37,7 @@ export default function CustomerSelect({
       <div className="relative">
         <input
           type="text"
+          enterKeyHint={enterKeyHint}
           value={displayValue}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -53,7 +55,10 @@ export default function CustomerSelect({
           {value.customer_id && (
             <button
               type="button"
-              onClick={() => onChange({ ...value, customer_id: "", customer_name: "" })}
+              onClick={() => {
+                setSearch("");
+                onChange({ ...value, customer_id: "", customer_name: "" });
+              }}
               className="text-gray-400 hover:text-gray-600 p-0.5"
             >
               <X className="w-4 h-4" />

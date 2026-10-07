@@ -1,13 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
-import { supabase } from "../lib/supabase";
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  Calendar,
-  Wallet,
-} from "lucide-react";
+import { useState, useMemo } from "react";
+import { Plus, Calendar, Wallet } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -15,8 +8,11 @@ import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import EmptyState from "./shared/EmptyState";
-import { SearchInput } from "./shared/FormField";
-import { formatNumber2 } from "../utils/formatters";
+import FormField, { SearchInput, FormActions } from "./shared/FormField";
+import { Th, Td, EditDeleteActions } from "./shared/DataTable";
+import { useCrud } from "../hooks/useCrud";
+import { usePagedList } from "../hooks/usePagedList";
+import { formatDateShort, formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -29,74 +25,82 @@ const emptyForm = {
 
 export default function Withdrawals() {
   const toast = useToast();
-  const [withdrawals, setWithdrawals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: withdrawals,
+    loading,
+    create,
+    update,
+    remove,
+  } = useCrud("withdrawals", {
+    select: "*",
+    orderBy: { column: "withdrawal_date", ascending: false },
+  });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [page, setPage] = useState(1);
   const [formData, setFormData] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchWithdrawals();
-  }, []);
+  const filtered = useMemo(
+    () =>
+      withdrawals.filter((w) => {
+        const term = searchTerm.toLowerCase();
+        const matchSearch =
+          (w.reason || "").toLowerCase().includes(term) ||
+          (w.withdrawn_by || "").toLowerCase().includes(term);
+        const matchesFrom = !dateFrom || w.withdrawal_date >= dateFrom;
+        const matchesTo = !dateTo || w.withdrawal_date <= dateTo;
+        return matchSearch && matchesFrom && matchesTo;
+      }),
+    [withdrawals, searchTerm, dateFrom, dateTo],
+  );
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm, dateFrom, dateTo]);
+  const { page, setPage, paginated, totalPages, total } = usePagedList(
+    filtered,
+    PAGE_SIZE,
+    [searchTerm, dateFrom, dateTo],
+  );
 
-  async function fetchWithdrawals() {
-    try {
-      const { data, error } = await supabase
-        .from("withdrawals")
-        .select("*")
-        .order("withdrawal_date", { ascending: false });
-      if (error) throw error;
-      setWithdrawals(data || []);
-    } catch (err) {
-      console.error("Error fetching withdrawals:", err);
-    } finally {
-      setLoading(false);
-    }
+  const totalAmount = useMemo(
+    () => filtered.reduce((s, w) => s + (w.amount || 0), 0),
+    [filtered],
+  );
+
+  const setField = (field, value) =>
+    setFormData((prev) => ({ ...prev, [field]: value }));
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingId(null);
+    setFormData(emptyForm);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setSaving(true);
     try {
+      const payload = {
+        amount: parseFloat(formData.amount),
+        withdrawal_date: formData.withdrawal_date,
+        withdrawn_by: formData.withdrawn_by,
+        reason: formData.reason,
+      };
       if (editingId) {
-        const { error } = await supabase
-          .from("withdrawals")
-          .update({
-            amount: parseFloat(formData.amount),
-            withdrawal_date: formData.withdrawal_date,
-            withdrawn_by: formData.withdrawn_by,
-            reason: formData.reason,
-          })
-          .eq("id", editingId);
-        if (error) throw error;
+        await update(editingId, payload);
         toast("Withdrawal updated");
       } else {
-        const { error } = await supabase.from("withdrawals").insert([
-          {
-            amount: parseFloat(formData.amount),
-            withdrawal_date: formData.withdrawal_date,
-            withdrawn_by: formData.withdrawn_by,
-            reason: formData.reason,
-          },
-        ]);
-        if (error) throw error;
+        await create(payload);
         toast("Withdrawal added");
       }
-      setShowForm(false);
-      setEditingId(null);
-      setFormData(emptyForm);
-      fetchWithdrawals();
+      closeForm();
     } catch (err) {
       console.error("Error saving withdrawal:", err);
       toast("Failed to save withdrawal", "error");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -113,13 +117,8 @@ export default function Withdrawals() {
 
   async function handleDelete(id) {
     try {
-      const { error } = await supabase
-        .from("withdrawals")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      await remove(id);
       toast("Withdrawal deleted");
-      fetchWithdrawals();
     } catch (err) {
       console.error("Error deleting withdrawal:", err);
       toast("Failed to delete withdrawal", "error");
@@ -127,20 +126,6 @@ export default function Withdrawals() {
       setConfirmDelete(null);
     }
   }
-
-  const filtered = withdrawals.filter((w) => {
-    const term = searchTerm.toLowerCase();
-    const matchSearch =
-      (w.reason || "").toLowerCase().includes(term) ||
-      (w.withdrawn_by || "").toLowerCase().includes(term);
-    const matchesFrom = !dateFrom || w.withdrawal_date >= dateFrom;
-    const matchesTo = !dateTo || w.withdrawal_date <= dateTo;
-    return matchSearch && matchesFrom && matchesTo;
-  });
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const totalAmount = filtered.reduce((s, w) => s + (w.amount || 0), 0);
 
   if (loading) return <LoadingSpinner className="h-64" />;
 
@@ -199,79 +184,53 @@ export default function Withdrawals() {
         title={editingId ? "Edit Withdrawal" : "Add Withdrawal"}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Amount *
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              required
-              value={formData.amount}
-              onChange={(e) =>
-                setFormData({ ...formData, amount: e.target.value })
-              }
-              className="input"
-              placeholder="₹0.00"
-              onWheel={(e) => e.target.blur()}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Date
-            </label>
-            <input
-              type="date"
-              value={formData.withdrawal_date}
-              onChange={(e) =>
-                setFormData({ ...formData, withdrawal_date: e.target.value })
-              }
-              className="input w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Withdrawn By
-            </label>
-            <input
-              type="text"
-              value={formData.withdrawn_by}
-              onChange={(e) =>
-                setFormData({ ...formData, withdrawn_by: e.target.value })
-              }
-              className="input"
-              placeholder="e.g., Ahmed, Partner..."
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Reason
-            </label>
+          <FormField
+            field="amount"
+            label="Amount"
+            type="number"
+            required
+            value={formData.amount}
+            onChange={setField}
+            placeholder="₹0.00"
+          />
+          <FormField
+            field="withdrawal_date"
+            label="Date"
+            type="date"
+            value={formData.withdrawal_date}
+            onChange={setField}
+            className="w-full"
+          />
+          <FormField
+            field="withdrawn_by"
+            label="Withdrawn By"
+            value={formData.withdrawn_by}
+            onChange={setField}
+            placeholder="e.g., Ahmed, Partner..."
+          />
+          <FormField
+            field="reason"
+            label="Reason"
+            value={formData.reason}
+            onChange={setField}
+            placeholder="Purpose of withdrawal"
+          >
             <textarea
               value={formData.reason}
-              onChange={(e) =>
-                setFormData({ ...formData, reason: e.target.value })
-              }
+              onChange={(e) => setField("reason", e.target.value)}
               className="input"
               rows={2}
               placeholder="Purpose of withdrawal"
             />
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm(false);
-                setEditingId(null);
-              }}
-              className="btn btn-secondary flex-1"
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary flex-1">
-              {editingId ? "Update" : "Add"} Withdrawal
-            </button>
-          </div>
+          </FormField>
+          <FormActions
+            onCancel={() => {
+              setShowForm(false);
+              setEditingId(null);
+            }}
+            isSubmitting={saving}
+            submitLabel={editingId ? "Update Withdrawal" : "Add Withdrawal"}
+          />
         </form>
       </Modal>
 
@@ -280,68 +239,44 @@ export default function Withdrawals() {
           <table className="w-full" style={{ minWidth: "500px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Withdrawn By
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Reason
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                <Th>Amount</Th>
+                <Th>Date</Th>
+                <Th>Withdrawn By</Th>
+                <Th>Reason</Th>
+                <Th align="center">Actions</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {paginated.map((w) => (
                 <tr key={w.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3">
+                  <Td>
                     <p className="font-semibold text-red-600">
                       ₹
                       {formatNumber2(w.amount)}
                     </p>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  </Td>
+                  <Td className="whitespace-nowrap">
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(w.withdrawal_date).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "2-digit",
-                      })}
+                      {formatDateShort(w.withdrawal_date)}
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
+                  </Td>
+                  <Td>
                     <p className="text-sm text-gray-900">
                       {w.withdrawn_by || "—"}
                     </p>
-                  </td>
-                  <td className="px-4 py-3">
+                  </Td>
+                  <Td>
                     <p className="text-sm text-gray-500 max-w-xs truncate">
                       {w.reason || "—"}
                     </p>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => handleEdit(w)}
-                        className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDelete(w.id)}
-                        className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                  </Td>
+                  <Td align="center">
+                    <EditDeleteActions
+                      onEdit={() => handleEdit(w)}
+                      onDelete={() => setConfirmDelete(w.id)}
+                    />
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -353,7 +288,7 @@ export default function Withdrawals() {
         currentPage={page}
         totalPages={totalPages}
         onPageChange={setPage}
-        totalItems={filtered.length}
+        totalItems={total}
         label="withdrawals"
       />
 
@@ -365,7 +300,7 @@ export default function Withdrawals() {
         />
       )}
 
-      {filtered.length === 0 && (
+      {total === 0 && (
         <EmptyState
           icon={Wallet}
           title="No withdrawals recorded yet"
@@ -373,7 +308,6 @@ export default function Withdrawals() {
           description="Try adjusting your filters"
         />
       )}
-
     </div>
   );
 }

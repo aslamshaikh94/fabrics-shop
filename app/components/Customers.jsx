@@ -1,6 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
-import { supabase } from "../lib/supabase";
+import { useState, useMemo } from "react";
 import {
   Plus,
   Pencil,
@@ -10,8 +9,6 @@ import {
   BookOpen,
   MessageCircle,
   Users,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
@@ -19,92 +16,95 @@ import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import { useToast } from "./Toast";
 import Pagination from "./shared/Pagination";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import EmptyState from "./shared/EmptyState";
-import { SearchInput } from "./shared/FormField";
+import FormField, { SearchInput, FormActions } from "./shared/FormField";
+import { useCrud } from "../hooks/useCrud";
+import { usePagedList } from "../hooks/usePagedList";
+import { useVisibleCols } from "../hooks/useVisibleCols";
 import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 9;
 
 const ALL_COLUMNS = [
-  { key: "name",    label: "Name" },
-  { key: "phone",   label: "Phone" },
+  { key: "name", label: "Name" },
+  { key: "phone", label: "Phone" },
   { key: "address", label: "Address" },
-  { key: "notes",   label: "Notes" },
+  { key: "notes", label: "Notes" },
   { key: "balance", label: "Balance" },
   { key: "actions", label: "Actions" },
 ];
 
-const DEFAULT_VISIBLE = new Set(["name", "phone", "address", "notes", "balance", "actions"]);
+const DEFAULT_VISIBLE = new Set([
+  "name",
+  "phone",
+  "address",
+  "notes",
+  "balance",
+  "actions",
+]);
 
-function loadVisibleCols() {
-  try {
-    const saved = localStorage.getItem("customers_visible_cols");
-    if (saved) return new Set(JSON.parse(saved));
-  } catch {}
-  return new Set(DEFAULT_VISIBLE);
-}
+const emptyForm = { name: "", phone: "", address: "", notes: "" };
 
 export default function Customers() {
   const toast = useToast();
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: customers,
+    loading,
+    create,
+    update,
+    remove,
+  } = useCrud("customers", {
+    select: "*",
+    orderBy: { column: "created_at", ascending: false },
+  });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [page, setPage] = useState(1);
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    address: "",
-    notes: "",
-  });
+  const [formData, setFormData] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
   const [ledgerCustomer, setLedgerCustomer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "customers_visible_cols",
-      JSON.stringify([...visibleCols]),
-    );
-  }, [visibleCols]);
-
-  function toggleCol(key) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+  const { visibleCols, setVisibleCols, toggleCol } = useVisibleCols(
+    "customers_visible_cols",
+    DEFAULT_VISIBLE,
+  );
 
   const col = (key) => visibleCols.has(key);
 
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
+  const setField = (field, value) =>
+    setFormData((prev) => ({ ...prev, [field]: value }));
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm]);
+  // Only search in phone if searchTerm looks like a phone number (digits/min length)
+  const isPhoneSearch = /^[\d\s\-+]{2,}$/.test(searchTerm.trim());
+  const filteredCustomers = useMemo(
+    () =>
+      customers.filter((c) => {
+        const nameMatch = c.name
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase());
+        if (isPhoneSearch) {
+          const searchDigits = searchTerm.replace(/\D/g, "");
+          const phoneDigits = (c.phone || "").replace(/\D/g, "");
+          return (
+            nameMatch ||
+            (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
+          );
+        }
+        return nameMatch;
+      }),
+    [customers, searchTerm, isPhoneSearch],
+  );
 
-  async function fetchCustomers() {
-    try {
-      const { data, error } = await supabase
-        .from("customers")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setCustomers(data || []);
-    } catch (error) {
-      console.error("Error fetching customers:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { page, setPage, paginated, totalPages, total } = usePagedList(
+    filteredCustomers,
+    PAGE_SIZE,
+    [searchTerm],
+  );
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setSaving(true);
     try {
       const payload = {
         name: formData.name,
@@ -113,38 +113,31 @@ export default function Customers() {
         notes: formData.notes,
       };
       if (editingId) {
-        const { error } = await supabase
-          .from("customers")
-          .update(payload)
-          .eq("id", editingId);
-        if (error) throw error;
+        await update(editingId, payload);
         toast("Customer updated successfully");
       } else {
-        const { error } = await supabase.from("customers").insert([payload]);
-        if (error) throw error;
+        await create(payload);
         toast("Customer added successfully");
       }
-      setShowForm(false);
-      setEditingId(null);
-      setFormData({
-        name: "",
-        phone: "",
-        address: "",
-        notes: "",
-      });
-      fetchCustomers();
+      closeForm();
     } catch (error) {
       console.error("Error saving customer:", error);
       toast("Failed to save customer", "error");
+    } finally {
+      setSaving(false);
     }
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingId(null);
+    setFormData(emptyForm);
   }
 
   async function handleDelete(id) {
     try {
-      const { error } = await supabase.from("customers").delete().eq("id", id);
-      if (error) throw error;
+      await remove(id);
       toast("Customer deleted");
-      fetchCustomers();
     } catch (error) {
       console.error("Error deleting customer:", error);
       toast("Cannot delete customer with associated records", "error");
@@ -174,39 +167,7 @@ export default function Customers() {
     setShowForm(true);
   }
 
-  // Only search in phone if searchTerm looks like a phone number (digits/min length)
-  const isPhoneSearch = /^[\d\s\-+]{2,}$/.test(searchTerm.trim());
-  const filteredCustomers = useMemo(
-    () =>
-      customers.filter((c) => {
-        const nameMatch = c.name
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase());
-        if (isPhoneSearch) {
-          const searchDigits = searchTerm.replace(/\D/g, "");
-          const phoneDigits = (c.phone || "").replace(/\D/g, "");
-          return (
-            nameMatch ||
-            (searchDigits.length >= 3 && phoneDigits.includes(searchDigits))
-          );
-        }
-        return nameMatch;
-      }),
-    [customers, searchTerm, isPhoneSearch],
-  );
-
-  const totalPages = Math.ceil(filteredCustomers.length / PAGE_SIZE);
-  const paginated = filteredCustomers.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
-  );
-
-  if (loading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+  if (loading) return <LoadingSpinner className="h-64" />;
 
   return (
     <div className="space-y-6">
@@ -224,14 +185,8 @@ export default function Customers() {
           />
           <button
             onClick={() => {
+              closeForm();
               setShowForm(true);
-              setEditingId(null);
-              setFormData({
-                name: "",
-                phone: "",
-                address: "",
-                notes: "",
-              });
             }}
             className="btn btn-primary"
           >
@@ -249,79 +204,58 @@ export default function Customers() {
 
       <Modal
         open={showForm}
-        onClose={() => setShowForm(false)}
+        onClose={() => {
+          setShowForm(false);
+          setEditingId(null);
+        }}
         title={editingId ? "Edit Customer" : "Add Customer"}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Name *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
-              className="input"
-              placeholder="Customer name"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Phone
-            </label>
-            <input
-              type="text"
-              value={formData.phone}
-              onChange={(e) =>
-                setFormData({ ...formData, phone: e.target.value })
-              }
-              className="input"
-              placeholder="Phone number"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Address
-            </label>
-            <input
-              type="text"
-              value={formData.address}
-              onChange={(e) =>
-                setFormData({ ...formData, address: e.target.value })
-              }
-              className="input"
-              placeholder="Address"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Notes
-            </label>
+          <FormField
+            field="name"
+            label="Name"
+            required
+            value={formData.name}
+            onChange={setField}
+            placeholder="Customer name"
+          />
+          <FormField
+            field="phone"
+            label="Phone"
+            value={formData.phone}
+            onChange={setField}
+            placeholder="Phone number"
+          />
+          <FormField
+            field="address"
+            label="Address"
+            value={formData.address}
+            onChange={setField}
+            placeholder="Address"
+          />
+          <FormField
+            field="notes"
+            label="Notes"
+            value={formData.notes}
+            onChange={setField}
+            placeholder="Additional notes"
+          >
             <textarea
               value={formData.notes}
-              onChange={(e) =>
-                setFormData({ ...formData, notes: e.target.value })
-              }
+              onChange={(e) => setField("notes", e.target.value)}
               className="input"
               rows={3}
               placeholder="Additional notes"
             />
-          </div>
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="btn btn-secondary flex-1"
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary flex-1">
-              {editingId ? "Update" : "Add"} Customer
-            </button>
-          </div>
+          </FormField>
+          <FormActions
+            onCancel={() => {
+              setShowForm(false);
+              setEditingId(null);
+            }}
+            isSubmitting={saving}
+            submitLabel={editingId ? "Update Customer" : "Add Customer"}
+          />
         </form>
       </Modal>
 
@@ -363,7 +297,7 @@ export default function Customers() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filteredCustomers.map((customer) => (
+              {paginated.map((customer) => (
                 <tr
                   key={customer.id}
                   className="hover:bg-gray-50 transition-colors"
@@ -429,37 +363,37 @@ export default function Customers() {
                   )}
                   {col("actions") && (
                     <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => setLedgerCustomer(customer)}
-                        className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600"
-                        title="View Ledger"
-                      >
-                        <BookOpen className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(customer)}
-                        className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      {customer.current_balance > 0 && (
+                      <div className="flex items-center justify-end gap-1">
                         <button
-                          onClick={() => handleWhatsApp(customer)}
-                          className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
-                          title="Send WhatsApp reminder"
+                          onClick={() => setLedgerCustomer(customer)}
+                          className="p-1.5 hover:bg-primary-50 rounded-lg text-gray-500 hover:text-primary-600"
+                          title="View Ledger"
                         >
-                          <MessageCircle className="w-4 h-4" />
+                          <BookOpen className="w-4 h-4" />
                         </button>
-                      )}
-                      <button
-                        onClick={() => setConfirmDelete(customer.id)}
-                        className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                        <button
+                          onClick={() => handleEdit(customer)}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        {customer.current_balance > 0 && (
+                          <button
+                            onClick={() => handleWhatsApp(customer)}
+                            className="p-1.5 hover:bg-green-50 rounded-lg text-gray-500 hover:text-green-600"
+                            title="Send WhatsApp reminder"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setConfirmDelete(customer.id)}
+                          className="p-1.5 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
                   )}
                 </tr>
               ))}
@@ -472,7 +406,7 @@ export default function Customers() {
         currentPage={page}
         totalPages={totalPages}
         onPageChange={setPage}
-        totalItems={filteredCustomers.length}
+        totalItems={total}
         label="customers"
       />
 
@@ -491,7 +425,7 @@ export default function Customers() {
         />
       )}
 
-      {filteredCustomers.length === 0 && (
+      {total === 0 && (
         <EmptyState
           icon={Users}
           title="No customers added yet"

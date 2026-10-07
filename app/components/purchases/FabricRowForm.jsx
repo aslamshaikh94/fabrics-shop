@@ -1,5 +1,5 @@
 "use client";
-import { ScanLine, Plus, X } from "lucide-react";
+import { ScanLine, Plus } from "lucide-react";
 
 /**
  * Fabric row form used inside the "Add Fabrics to Purchase" modal.

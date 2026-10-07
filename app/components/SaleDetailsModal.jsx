@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Pencil,
@@ -15,26 +15,14 @@ import {
 import { uploadToBucket, buildUploadPath } from "../utils/upload";
 import Modal from "./shared/Modal";
 import ConfirmModal from "./ConfirmModal";
+import SaveSpinner from "./shared/SaveSpinner";
 import FabricSelect from "./shared/FabricSelect";
 import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
-import { formatCustomerName, formatNumber2 } from "../utils/formatters";
-import { CASH_ACCOUNT_NAME, getCashAccountId } from "../utils/cashAccount";
+import { formatCustomerName, formatDateShort, formatNumber2 } from "../utils/formatters";
+import PaymentBadge from "./shared/PaymentBadge";
 
-const PAYMENT_BADGES = {
-  cash: "bg-accent-100 text-accent-800",
-  credit: "bg-warning-100 text-warning-800",
-  partial: "bg-blue-100 text-blue-800",
-};
-const PAYMENT_LABELS = { cash: "Cash", credit: "Credit", partial: "Partial" };
-function PaymentBadge({ type }) {
-  return (
-    <span className={`badge ${PAYMENT_BADGES[type] || ""}`}>
-      {PAYMENT_LABELS[type] || type}
-    </span>
-  );
-}
 
 const EMPTY_EDIT_ITEM = {
   fabric_id: "",
@@ -57,7 +45,7 @@ const EMPTY_GROUP_FIELDS = {
   payment_type: "cash",
   initial_payment: "",
   payment_method: "cash",
-  partner_id: "",
+  account_id: "",
   discount_amount: "",
   invoice_file: null,
 };
@@ -84,6 +72,18 @@ export default function SaleDetailsModal({
   });
   const [savingGroupFields, setSavingGroupFields] = useState(false);
   const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+
+  useEffect(() => {
+    if (open) {
+      supabase
+        .from("payment_accounts")
+        .select("id,name,partner:partners(name)")
+        .eq("is_active", true)
+        .order("name")
+        .then(({ data }) => setAccounts(data || []));
+    }
+  }, [open]);
 
   if (!open || !group) return null;
 
@@ -239,10 +239,9 @@ export default function SaleDetailsModal({
       const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
       if (
         totalPay > 0 &&
-        editGroupFields.payment_method === "upi" &&
-        !editGroupFields.partner_id
+        !editGroupFields.account_id
       ) {
-        toast("Please select the partner whose account this credits", "error");
+        toast("Please select an account", "error");
         setSavingGroupFields(false);
         return;
       }
@@ -262,17 +261,12 @@ export default function SaleDetailsModal({
         await supabase.from("sale_payments").insert([{
           sale_group_id: group.id,
           amount: totalPay,
-          // Keep a later collection on its own date (credit sales); otherwise the
-          // initial payment follows the sale date (including date corrections).
           payment_date:
             firstPay && firstPay.payment_date !== group.sale_date
               ? firstPay.payment_date
               : editGroupFields.sale_date,
           payment_method: editGroupFields.payment_method,
-          partner_id:
-            editGroupFields.payment_method === "upi"
-              ? editGroupFields.partner_id
-              : editGroupFields.partner_id || getCashAccountId(partnersList),
+          account_id: editGroupFields.account_id || null,
         }]);
       }
       onSaleUpdated();
@@ -347,7 +341,7 @@ export default function SaleDetailsModal({
     try {
       const { data } = await supabase
         .from("sale_payments")
-        .select("amount, payment_method, partner_id, payment_date, created_at")
+        .select("amount, payment_method, account_id, payment_date, created_at")
         .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: true })
         .order("created_at", { ascending: true });
@@ -377,7 +371,7 @@ export default function SaleDetailsModal({
       payment_method: ["cash", "upi"].includes(firstPay?.payment_method)
         ? firstPay.payment_method
         : "cash",
-      partner_id: firstPay?.partner_id || "",
+      account_id: firstPay?.account_id || "",
       discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
@@ -386,7 +380,7 @@ export default function SaleDetailsModal({
 
   return (
     <>
-      <Modal open={open} onClose={onClose} maxWidth="max-w-3xl">
+      <Modal open={open} onClose={onClose} size="3xl">
         <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -394,11 +388,7 @@ export default function SaleDetailsModal({
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {formatCustomerName(group)} •{" "}
-              {new Date(group.sale_date).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "2-digit",
-              })}
+              {formatDateShort(group.sale_date)}
             </p>
           </div>
           <button
@@ -467,11 +457,7 @@ export default function SaleDetailsModal({
             </p>
             <p className="text-sm text-gray-900">
               <Calendar className="w-3.5 h-3.5 inline mr-1 mb-0.5 text-gray-400" />
-              {new Date(group.sale_date).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "2-digit",
-              })}
+              {formatDateShort(group.sale_date)}
             </p>
             {group.items[0]?.invoice_url ? (
               <a
@@ -737,7 +723,6 @@ export default function SaleDetailsModal({
         open={showEditSaleInfo}
         onClose={() => setShowEditSaleInfo(false)}
         title="Edit Sale Info"
-        maxWidth="max-w-lg"
       >
         <div className="space-y-4">
           <CustomerSelect
@@ -828,35 +813,22 @@ export default function SaleDetailsModal({
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Account Holder (Partner)
-                  {editGroupFields.payment_method === "upi" ? " *" : ""}
+                  Account{totalPay > 0 ? " *" : ""}
                 </label>
                 <select
-                  value={editGroupFields.partner_id}
+                  value={editGroupFields.account_id}
                   onChange={(e) =>
-                    setEditGroupFields({
-                      ...editGroupFields,
-                      partner_id: e.target.value,
-                    })
+                    setEditGroupFields({ ...editGroupFields, account_id: e.target.value })
                   }
                   className="input bg-white"
-                  required={editGroupFields.payment_method === "upi"}
                 >
-                  <option value="">
-                    {editGroupFields.payment_method === "upi"
-                      ? "— Select partner —"
-                      : `— Default (${CASH_ACCOUNT_NAME} — cash account) —`}
-                  </option>
-                  {partnersList.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                  <option value="">— Select account —</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.partner ? ` (${a.partner.name})` : ""}
+                    </option>
                   ))}
                 </select>
-                {editGroupFields.payment_method === "cash" && (
-                  <p className="mt-1 text-[11px] text-gray-500">
-                    Cash is collected by {CASH_ACCOUNT_NAME}, so it credits that
-                    account unless you choose someone else.
-                  </p>
-                )}
               </div>
             </div>
 
@@ -904,31 +876,7 @@ export default function SaleDetailsModal({
               disabled={savingGroupFields}
               className="btn btn-primary flex-1"
             >
-              {savingGroupFields ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : (
+              {savingGroupFields ? <SaveSpinner /> : (
                 "Save Changes"
               )}
             </button>
@@ -943,7 +891,6 @@ export default function SaleDetailsModal({
           setNewItemForm({ ...EMPTY_NEW_ITEM });
         }}
         title="Add Item to Sale"
-        maxWidth="max-w-lg"
       >
         <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
           <p className="text-sm text-blue-900">
@@ -953,11 +900,7 @@ export default function SaleDetailsModal({
             </span>{" "}
             on{" "}
             <span className="font-semibold">
-              {new Date(group.sale_date).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "2-digit",
-              })}
+              {formatDateShort(group.sale_date)}
             </span>
           </p>
         </div>

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import {
   X,
@@ -10,15 +10,15 @@ import {
 } from "lucide-react";
 import {
   validateSale,
-  hasErrors,
   validateCurrentItem,
 } from "../utils/validators";
 import { uploadToBucket, buildUploadPath } from "../utils/upload";
 import BarcodeScanner from "./BarcodeScanner";
+import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
+import SaveSpinner from "./shared/SaveSpinner";
 import { formatCurrency, formatNumber2 } from "../utils/formatters";
-import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -45,7 +45,7 @@ function makeEmptyForm() {
     payment_type: "cash",
     initial_payment: "",
     payment_method: "cash",
-    partner_id: "",
+    account_id: "",
     discount_amount: "",
     invoice_file: null,
   };
@@ -66,14 +66,24 @@ export default function SaleForm({
   const [editingId, setEditingId] = useState(initialEditingId);
   const [formData, setFormData] = useState(makeEmptyForm);
   const [formErrors, setFormErrors] = useState({});
-  const [customerSearch, setCustomerSearch] = useState("");
-  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+
   const [activeFabricDropdown, setActiveFabricDropdown] = useState(null);
   const [fabricSearch, setFabricSearch] = useState("");
   const [scanningItemIdx, setScanningItemIdx] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [itemJustAdded, setItemJustAdded] = useState(false);
-  const customerDropdownRef = useRef(null);
+  const [accounts, setAccounts] = useState([]);
+
+  useEffect(() => {
+    if (open) {
+      supabase
+        .from("payment_accounts")
+        .select("id,name,partner:partners(name)")
+        .eq("is_active", true)
+        .order("name")
+        .then(({ data }) => setAccounts(data || []));
+    }
+  }, [open]);
 
   useEffect(() => {
     setEditingId(initialEditingId);
@@ -110,12 +120,6 @@ export default function SaleForm({
 
   useEffect(() => {
     function handleClickOutside(event) {
-      if (
-        customerDropdownRef.current &&
-        !customerDropdownRef.current.contains(event.target)
-      ) {
-        setShowCustomerDropdown(false);
-      }
       if (!event.target.closest(".fabric-dropdown-container")) {
         setActiveFabricDropdown(null);
       }
@@ -288,22 +292,12 @@ export default function SaleForm({
             ? "cash"
             : "partial";
 
-      if (
-        initialPayment > 0 &&
-        formData.payment_method === "upi" &&
-        !formData.partner_id
-      ) {
-        toast("Please select the partner whose account this credits", "error");
+      if (initialPayment > 0 && !formData.account_id) {
+        toast("Please select an account", "error");
         return;
       }
 
-      // A customer paying cash hands the money to the secondary account holder
-      // (Riyaz), so cash payments credit that account automatically. UPI money
-      // arrives directly, so it credits the partner chosen in the form.
-      const creditPartnerId =
-        formData.payment_method === "upi"
-          ? formData.partner_id || null
-          : getCashAccountId(partnersList);
+      const creditAccountId = formData.account_id || null;
 
       // Auto-create customer for walk-in with a name
       let customerId = formData.customer_id;
@@ -409,7 +403,7 @@ export default function SaleForm({
                 amount: netTotal,
                 payment_date: formData.sale_date,
                 payment_method: formData.payment_method,
-                partner_id: creditPartnerId,
+                account_id: creditAccountId,
               },
             ]);
           if (payErr) throw payErr;
@@ -422,7 +416,7 @@ export default function SaleForm({
                 amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
                 payment_method: formData.payment_method,
-                partner_id: creditPartnerId,
+                account_id: creditAccountId,
               },
             ]);
           if (payErr) throw payErr;
@@ -475,7 +469,7 @@ export default function SaleForm({
               amount: totalPay,
               payment_date: formData.sale_date,
               payment_method: formData.payment_method,
-              partner_id: creditPartnerId,
+              account_id: creditAccountId,
             }]);
             if (payErr) throw payErr;
           }
@@ -526,7 +520,7 @@ export default function SaleForm({
       payment_type: sale.payment_type,
       initial_payment: sale.paid_amount > 0 ? sale.paid_amount.toString() : "",
       payment_method: "cash",
-      partner_id: "",
+      account_id: "",
       discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
@@ -546,7 +540,6 @@ export default function SaleForm({
     if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return;
     e.preventDefault();
     // Auto-close any open search dropdowns
-    setShowCustomerDropdown(false);
     setActiveFabricDropdown(null);
     const fields = Array.from(
       e.currentTarget.querySelectorAll("input, select, textarea"),
@@ -574,74 +567,18 @@ export default function SaleForm({
 
         <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} className="space-y-4">
           {/* Customer Section */}
-          <div className="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Customer
-            </span>
-            <div className="relative" ref={customerDropdownRef}>
-              <div className="relative">
-                <input
-                  type="text"
-                  enterKeyHint="next"
-                  value={showCustomerDropdown ? customerSearch : formData.customer_name || ""}
-                  onChange={(e) => {
-                    setCustomerSearch(e.target.value);
-                    setFormData({ ...formData, customer_id: "", customer_name: e.target.value });
-                    setShowCustomerDropdown(true);
-                  }}
-                  onFocus={() => {
-                    setCustomerSearch(formData.customer_name || "");
-                    setShowCustomerDropdown(true);
-                  }}
-                  className="input bg-white pr-10"
-                  placeholder="Customer name (or leave blank for walk-in)"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  {formData.customer_id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormData({ ...formData, customer_id: "", customer_name: "" });
-                        setCustomerSearch("");
-                      }}
-                      className="text-gray-400 hover:text-gray-600 p-0.5"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCustomerDropdown ? "rotate-180" : ""}`} />
-                </div>
-              </div>
-              {showCustomerDropdown && (
-                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-                  {allCustomers
-                    .filter((c) => c.name.toLowerCase().includes(customerSearch.toLowerCase()))
-                    .map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => {
-                          setFormData({ ...formData, customer_id: c.id, customer_name: c.name });
-                          setCustomerSearch(c.name);
-                          setShowCustomerDropdown(false);
-                        }}
-                        className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm ${
-                          formData.customer_id === c.id ? "bg-primary-50 text-primary-700 font-medium" : ""
-                        }`}
-                      >
-                        {c.name}
-                      </button>
-                    ))}
-                  {customerSearch && !allCustomers.some((c) => c.name.toLowerCase() === customerSearch.toLowerCase()) && (
-                    <div className="px-3 py-2 text-xs text-gray-400 italic">New customer "{customerSearch}" will be created</div>
-                  )}
-                </div>
-              )}
-            </div>
-            {formData.customer_id && (
-              <p className="text-xs text-accent-600 font-medium">✓ Linked to existing customer</p>
-            )}
-          </div>
+          <CustomerSelect
+            value={{
+              customer_id: formData.customer_id,
+              customer_name: formData.customer_name || "",
+            }}
+            onChange={(v) =>
+              setFormData({ ...formData, ...v })
+            }
+            customers={allCustomers}
+            label="Customer"
+            enterKeyHint="next"
+          />
 
           {/* Fabric Items Section */}
           <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-gray-50">
@@ -976,31 +913,21 @@ export default function SaleForm({
                   <option value="upi">UPI</option>
                 </select>
               </div>
-              {formData.payment_method === "upi" ? (
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Account Holder (Partner) *</label>
-                  <select
-                    value={formData.partner_id}
-                    onChange={(e) =>
-                      setFormData({ ...formData, partner_id: e.target.value })
-                    }
-                    className="input bg-white"
-                    required
-                  >
-                    <option value="">— Select partner —</option>
-                    {partnersList.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                getCashAccountName(partnersList) && (
-                  <p className="text-xs text-gray-500">
-                    Cash is collected by {getCashAccountName(partnersList)} and
-                    credited to that account.
-                  </p>
-                )
-              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Account *</label>
+                <select
+                  value={formData.account_id}
+                  onChange={(e) => setFormData({ ...formData, account_id: e.target.value })}
+                  className="input bg-white"
+                >
+                  <option value="">— Select account —</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.partner ? ` (${a.partner.name})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1074,31 +1001,7 @@ export default function SaleForm({
               disabled={saving}
               className="btn btn-primary flex-1"
             >
-              {saving ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : editingId ? (
+              {saving ? <SaveSpinner /> : editingId ? (
                 "Update Sale"
               ) : (
                 "Record Sale"

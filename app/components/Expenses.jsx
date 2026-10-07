@@ -1,14 +1,8 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { supabase } from "../lib/supabase";
 import {
   Plus,
-  Trash2,
-  X,
   Calendar,
-  Pencil,
-  Paperclip,
-  FileText,
   ExternalLink,
   Receipt,
   CheckCircle2,
@@ -24,8 +18,15 @@ import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import FileViewer from "./shared/FileViewer";
 import EmptyState from "./shared/EmptyState";
-import { SearchInput } from "./shared/FormField";
-import { formatNumber2 } from "../utils/formatters";
+import FormField, {
+  SearchInput,
+  FormActions,
+  FileUploadField,
+} from "./shared/FormField";
+import { Th, Td, EditDeleteActions } from "./shared/DataTable";
+import { supabase } from "../lib/supabase";
+import { usePagedList } from "../hooks/usePagedList";
+import { formatDateShort, formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -66,7 +67,6 @@ export default function Expenses() {
   const [filterMonth, setFilterMonth] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [page, setPage] = useState(1);
   const [formData, setFormData] = useState(emptyForm);
   const [formErrors, setFormErrors] = useState({});
   const [paymentProofFile, setPaymentProofFile] = useState(null);
@@ -75,14 +75,11 @@ export default function Expenses() {
   const [viewProofUrl, setViewProofUrl] = useState(null);
   const [togglingClear, setTogglingClear] = useState(null);
 
-  useEffect(() => {
-    fetchExpenses();
-    fetchPartners();
-  }, []);
-
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm, filterCategory, filterMonth, dateFrom, dateTo]);
+  const setField = (field, value) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (formErrors[field])
+      setFormErrors((prev) => ({ ...prev, [field]: "" }));
+  };
 
   async function fetchExpenses() {
     try {
@@ -112,6 +109,64 @@ export default function Expenses() {
       console.error("Error fetching partners:", err);
     }
   }
+
+  const filtered = useMemo(
+    () =>
+      expenses.filter((e) => {
+        const matchSearch =
+          e.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          e.notes?.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchCat = filterCategory === "all" || e.category === filterCategory;
+        const matchMonth = !filterMonth || e.expense_date.startsWith(filterMonth);
+        const matchesFrom = !dateFrom || e.expense_date >= dateFrom;
+        const matchesTo = !dateTo || e.expense_date <= dateTo;
+        return matchSearch && matchCat && matchMonth && matchesFrom && matchesTo;
+      }),
+    [expenses, searchTerm, filterCategory, filterMonth, dateFrom, dateTo],
+  );
+
+  const { page, setPage, paginated, totalPages, total } = usePagedList(
+    filtered,
+    PAGE_SIZE,
+    [searchTerm, filterCategory, filterMonth, dateFrom, dateTo],
+  );
+
+  const totalFiltered = useMemo(
+    () => filtered.reduce((s, e) => s + (e.amount || 0), 0),
+    [filtered],
+  );
+  const totalAll = useMemo(
+    () => expenses.reduce((s, e) => s + (e.amount || 0), 0),
+    [expenses],
+  );
+  // Pending reimbursement only counts money someone paid out of their own pocket.
+  // An expense paid straight from an account has already left that account's
+  // balance, so reimbursing it would pay the same money twice.
+  const totalUncleared = useMemo(
+    () =>
+      expenses
+        .filter((e) => !e.cleared && !e.partner_id)
+        .reduce((s, e) => s + (e.amount || 0), 0),
+    [expenses],
+  );
+
+  const categoryColors = {
+    Rent: "bg-blue-100 text-blue-800",
+    Electricity: "bg-yellow-100 text-yellow-800",
+    "Staff Salary": "bg-purple-100 text-purple-800",
+    Transport: "bg-green-100 text-green-800",
+    Packaging: "bg-orange-100 text-orange-800",
+    Maintenance: "bg-red-100 text-red-800",
+    Marketing: "bg-pink-100 text-pink-800",
+    Other: "bg-gray-100 text-gray-800",
+  };
+
+  useEffect(() => {
+    fetchExpenses();
+    fetchPartners();
+  }, []);
+
+  if (loading) return <LoadingSpinner className="h-64" />;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -267,47 +322,6 @@ export default function Expenses() {
     }
   }
 
-  const filtered = useMemo(() => expenses.filter((e) => {
-    const matchSearch =
-      e.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.notes?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchCat = filterCategory === "all" || e.category === filterCategory;
-    const matchMonth = !filterMonth || e.expense_date.startsWith(filterMonth);
-    const matchesFrom = !dateFrom || e.expense_date >= dateFrom;
-    const matchesTo = !dateTo || e.expense_date <= dateTo;
-    return matchSearch && matchCat && matchMonth && matchesFrom && matchesTo;
-  }), [expenses, searchTerm, filterCategory, filterMonth, dateFrom, dateTo]);
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const totalFiltered = useMemo(() => filtered.reduce((s, e) => s + (e.amount || 0), 0), [filtered]);
-  const totalAll = useMemo(() => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
-  // Pending reimbursement only counts money someone paid out of their own pocket.
-  // An expense paid straight from an account has already left that account's
-  // balance, so reimbursing it would pay the same money twice.
-  const totalUncleared = useMemo(() => expenses
-    .filter((e) => !e.cleared && !e.partner_id)
-    .reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
-
-  const categoryColors = {
-    Rent: "bg-blue-100 text-blue-800",
-    Electricity: "bg-yellow-100 text-yellow-800",
-    "Staff Salary": "bg-purple-100 text-purple-800",
-    Transport: "bg-green-100 text-green-800",
-    Packaging: "bg-orange-100 text-orange-800",
-    Maintenance: "bg-red-100 text-red-800",
-    Marketing: "bg-pink-100 text-pink-800",
-    Other: "bg-gray-100 text-gray-800",
-  };
-
-  if (loading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -406,39 +420,29 @@ export default function Expenses() {
         title={editingId ? "Edit Expense" : "Add Expense"}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Title *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.title}
-              onChange={(e) => {
-                setFormData({ ...formData, title: e.target.value });
-                if (formErrors.title)
-                  setFormErrors({ ...formErrors, title: "" });
-              }}
-              className={`input ${formErrors.title ? "border-error-400" : ""}`}
-              placeholder="e.g., Monthly Rent"
-            />
-            {formErrors.title && (
-              <p className="text-error-600 text-sm mt-1">{formErrors.title}</p>
-            )}
-          </div>
+          <FormField
+            field="title"
+            label="Title"
+            required
+            value={formData.title}
+            error={formErrors.title}
+            onChange={setField}
+            placeholder="e.g., Monthly Rent"
+          />
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category
-              </label>
+            <FormField
+              field="category"
+              label="Category"
+              value={formData.category}
+              error={formErrors.category}
+              onChange={setField}
+            >
               <select
                 value={formData.category}
-                onChange={(e) => {
-                  setFormData({ ...formData, category: e.target.value });
-                  if (formErrors.category)
-                    setFormErrors({ ...formErrors, category: "" });
-                }}
-                className={`input ${formErrors.category ? "border-error-400" : ""}`}
+                onChange={(e) => setField("category", e.target.value)}
+                className={`input ${
+                  formErrors.category ? "border-error-400" : ""
+                }`}
               >
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
@@ -446,199 +450,102 @@ export default function Expenses() {
                   </option>
                 ))}
               </select>
-              {formErrors.category && (
-                <p className="text-error-600 text-sm mt-1">
-                  {formErrors.category}
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Amount *
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={formData.amount}
-                onChange={(e) => {
-                  setFormData({ ...formData, amount: e.target.value });
-                  if (formErrors.amount)
-                    setFormErrors({ ...formErrors, amount: "" });
-                }}
-                className={`input ${formErrors.amount ? "border-error-400" : ""}`}
-                placeholder="₹0.00"
-                onWheel={(e) => e.target.blur()}
-              />
-              {formErrors.amount && (
-                <p className="text-error-600 text-sm mt-1">
-                  {formErrors.amount}
-                </p>
-              )}
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Date
-            </label>
-            <input
-              type="date"
-              value={formData.expense_date}
-              onChange={(e) =>
-                setFormData({ ...formData, expense_date: e.target.value })
-              }
-              className={`input w-full ${formErrors.expense_date ? "border-error-400" : ""}`}
-            />
-            {formErrors.expense_date && (
-              <p className="text-error-600 text-sm mt-1">
-                {formErrors.expense_date}
-              </p>
-            )}
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Paid By
-            </label>
-            <input
-              type="text"
-              value={formData.paid_by}
-              onChange={(e) =>
-                setFormData({ ...formData, paid_by: e.target.value })
-              }
-              className="input"
-              placeholder="e.g., Ahmed, Owner..."
+            </FormField>
+            <FormField
+              field="amount"
+              label="Amount"
+              type="number"
+              required
+              value={formData.amount}
+              error={formErrors.amount}
+              onChange={setField}
+              placeholder="₹0.00"
             />
           </div>
+          <FormField
+            field="expense_date"
+            label="Date"
+            type="date"
+            value={formData.expense_date}
+            error={formErrors.expense_date}
+            onChange={setField}
+            className="w-full"
+          />
+          <FormField
+            field="paid_by"
+            label="Paid By"
+            value={formData.paid_by}
+            onChange={setField}
+            placeholder="e.g., Ahmed, Owner..."
+          />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Paid From Account
-            </label>
-            <select
+            <FormField
+              field="partner_id"
+              label="Paid From Account"
               value={formData.partner_id}
-              onChange={(e) =>
-                setFormData({ ...formData, partner_id: e.target.value })
-              }
-              className="input"
+              onChange={setField}
             >
-              <option value="">— Out of pocket (no account) —</option>
-              {partners.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              <select
+                value={formData.partner_id}
+                onChange={(e) => setField("partner_id", e.target.value)}
+                className="input"
+              >
+                <option value="">— Out of pocket (no account) —</option>
+                {partners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
             <p className="mt-1 text-xs text-gray-500">
               {formData.partner_id
                 ? "This amount will be deducted from the selected account's balance."
                 : "No account selected — nothing is deducted from any account balance."}
             </p>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Notes
-            </label>
+          <FormField
+            field="notes"
+            label="Notes"
+            value={formData.notes}
+            onChange={setField}
+            placeholder="Optional notes"
+          >
             <textarea
               value={formData.notes}
-              onChange={(e) =>
-                setFormData({ ...formData, notes: e.target.value })
-              }
+              onChange={(e) => setField("notes", e.target.value)}
               className="input"
               rows={2}
               placeholder="Optional notes"
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Payment Proof (Receipt / Bill)
-            </label>
-            <label
-              className={`flex items-center gap-2 cursor-pointer border border-dashed rounded-lg p-3 hover:border-primary-400 hover:bg-primary-50 transition-colors ${proofError ? "border-error-400 bg-error-50" : "border-gray-300"}`}
-            >
-              <Paperclip className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-500 flex-1 truncate">
-                {paymentProofFile
-                  ? paymentProofFile.name
-                  : editingId &&
-                      expenses.find((p) => p.id === editingId)
-                        ?.payment_proof_url
-                    ? "Replace existing proof"
-                    : "Upload receipt / bill (PDF, image)"}
-              </span>
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                className="hidden"
-                onChange={(e) => {
-                  setPaymentProofFile(e.target.files[0] || null);
-                  if (e.target.files[0]) setProofError("");
-                }}
-              />
-            </label>
-            {proofError && (
-              <p className="text-error-600 text-sm mt-1">{proofError}</p>
-            )}
-            {editingId &&
-              expenses.find((p) => p.id === editingId)?.payment_proof_url &&
-              !paymentProofFile && (
-                <a
-                  href={
-                    expenses.find((p) => p.id === editingId).payment_proof_url
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-primary-600 hover:underline mt-1 flex items-center gap-1"
-                >
-                  <FileText className="w-3 h-3" /> View current proof
-                </a>
-              )}
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm(false);
-                setEditingId(null);
-              }}
-              className="btn btn-secondary flex-1"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={uploading}
-              className="btn btn-primary flex-1"
-            >
-              {uploading ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : editingId ? (
-                "Update Expense"
-              ) : (
-                "Add Expense"
-              )}
-            </button>
-          </div>
+          </FormField>
+          <FileUploadField
+            label="Payment Proof (Receipt / Bill)"
+            file={paymentProofFile}
+            onFileChange={(f) => {
+              setPaymentProofFile(f);
+              if (f) setProofError("");
+            }}
+            error={proofError}
+            onErrorClear={() => setProofError("")}
+            existingUrl={
+              editingId
+                ? expenses.find((p) => p.id === editingId)
+                    ?.payment_proof_url || ""
+                : ""
+            }
+            idleText="Upload receipt / bill (PDF, image)"
+            replaceText="Replace existing proof"
+            linkText="View current proof"
+          />
+          <FormActions
+            onCancel={() => {
+              setShowForm(false);
+              setEditingId(null);
+            }}
+            isSubmitting={uploading}
+            submitLabel={editingId ? "Update Expense" : "Add Expense"}
+          />
         </form>
       </Modal>
 
@@ -648,36 +555,24 @@ export default function Expenses() {
           <table className="w-full" style={{ minWidth: "620px" }}>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Title
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Category
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Proof
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Reimbursed
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Action
-                </th>
+                <Th>Title</Th>
+                <Th>Category</Th>
+                <Th>Date</Th>
+                <Th align="right">Amount</Th>
+                <Th align="center">Proof</Th>
+                <Th align="center">Reimbursed</Th>
+                <Th align="center">Action</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {paginated.map((expense) => (
                 <tr
                   key={expense.id}
-                  className={`hover:bg-gray-50 transition-colors ${expense.cleared ? "opacity-60" : ""}`}
+                  className={`hover:bg-gray-50 transition-colors ${
+                    expense.cleared ? "opacity-60" : ""
+                  }`}
                 >
-                  <td className="px-4 py-3">
+                  <Td>
                     <p className="font-medium text-gray-900">{expense.title}</p>
                     {expense.paid_by && (
                       <p className="text-xs text-primary-600 mt-0.5">
@@ -696,28 +591,29 @@ export default function Expenses() {
                         {expense.notes}
                       </p>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
+                  </Td>
+                  <Td>
                     <span
-                      className={`badge ${categoryColors[expense.category] || categoryColors.Other}`}
+                      className={`badge ${
+                        categoryColors[expense.category] || categoryColors.Other
+                      }`}
                     >
                       {expense.category}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  </Td>
+                  <Td className="whitespace-nowrap">
                     <div className="flex items-center gap-1 text-gray-600 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(expense.expense_date).toLocaleDateString(
-                        "en-GB",
-                        { day: "numeric", month: "short", year: "2-digit" },
-                      )}
+                      {formatDateShort(expense.expense_date)}
                     </div>
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-red-600 text-sm">
-                    ₹
-                    {formatNumber2(expense.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-center">
+                  </Td>
+                  <Td align="right">
+                    <span className="font-semibold text-red-600 text-sm">
+                      ₹
+                      {formatNumber2(expense.amount)}
+                    </span>
+                  </Td>
+                  <Td align="center">
                     {expense.payment_proof_url ? (
                       <button
                         onClick={() =>
@@ -732,8 +628,8 @@ export default function Expenses() {
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-center">
+                  </Td>
+                  <Td align="center">
                     <div className="flex flex-col items-center gap-1">
                       {expense.partner_id ? (
                         // Paid from an account: nothing to reimburse, so the
@@ -770,34 +666,17 @@ export default function Expenses() {
                       )}
                       {expense.cleared && expense.cleared_at && (
                         <span className="text-[10px] text-gray-400">
-                          {new Date(expense.cleared_at).toLocaleDateString(
-                            "en-GB",
-                            {
-                              day: "numeric",
-                              month: "short",
-                              year: "2-digit",
-                            },
-                          )}
+                          {formatDateShort(expense.cleared_at)}
                         </span>
                       )}
                     </div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => handleEdit(expense)}
-                        className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDelete(expense.id)}
-                        className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                  </Td>
+                  <Td align="center">
+                    <EditDeleteActions
+                      onEdit={() => handleEdit(expense)}
+                      onDelete={() => setConfirmDelete(expense.id)}
+                    />
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -809,7 +688,7 @@ export default function Expenses() {
         currentPage={page}
         totalPages={totalPages}
         onPageChange={setPage}
-        totalItems={filtered.length}
+        totalItems={total}
         label="expenses"
       />
 
@@ -821,7 +700,7 @@ export default function Expenses() {
         />
       )}
 
-      {filtered.length === 0 && (
+      {total === 0 && (
         <EmptyState
           icon={Receipt}
           title="No expenses recorded yet"

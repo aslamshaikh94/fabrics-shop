@@ -13,7 +13,6 @@ import {
   FileText,
   FileUp,
   ShoppingBag,
-  ScanLine,
   Package,
   Loader2,
 } from "lucide-react";
@@ -36,18 +35,21 @@ import BarcodeScanner from "./BarcodeScanner";
 import FabricRowForm from "./purchases/FabricRowForm";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
+import SaveSpinner from "./shared/SaveSpinner";
+import LoadingSpinner from "./shared/LoadingSpinner";
+import FabricRowTotals from "./shared/FabricRowTotals";
 import { extractPdfText, parseFabricEntries } from "../utils/pdfExtractor";
 import {
   DEFAULT_GST_RATE,
   purchaseBreakdown,
-  round2,
 } from "../utils/purchaseTotals";
 import { fetchAllRows } from "../utils/pagedQuery";
 import {
   isPurchaseItemsUnavailable,
   mergePurchaseFabrics,
 } from "../utils/purchaseItems";
-import { formatINR, formatNumber2 } from "../utils/formatters";
+import { formatINR, formatDateShort, formatNumber2 } from "../utils/formatters";
+import { useVisibleCols } from "../hooks/useVisibleCols";
 
 const PAGE_SIZE = 10;
 
@@ -67,13 +69,6 @@ const ALL_PURCHASE_COLUMNS = [
 
 const PURCHASE_DEFAULT_VISIBLE = new Set(["purchaseNo", "supplier", "date", "total", "paid", "remaining", "status", "actions"]);
 
-function loadPurchaseVisibleCols() {
-  try {
-    const saved = localStorage.getItem("purchases_visible_cols");
-    if (saved) return new Set(JSON.parse(saved));
-  } catch {}
-  return new Set(PURCHASE_DEFAULT_VISIBLE);
-}
 
 const INITIAL_FORM = {
   supplier_id: "",
@@ -179,23 +174,10 @@ export default function Purchases() {
   const [formData, setFormData] = useState({ ...INITIAL_FORM });
   const [paymentData, setPaymentData] = useState({ ...INITIAL_PAYMENT });
   const [partners, setPartners] = useState([]);
-  const [visibleCols, setVisibleCols] = useState(loadPurchaseVisibleCols);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "purchases_visible_cols",
-      JSON.stringify([...visibleCols]),
-    );
-  }, [visibleCols]);
-
-  function toggleCol(key) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+  const { visibleCols, setVisibleCols, toggleCol } = useVisibleCols(
+    "purchases_visible_cols",
+    PURCHASE_DEFAULT_VISIBLE,
+  );
 
   const col = (key) => visibleCols.has(key);
 
@@ -1067,11 +1049,7 @@ export default function Purchases() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   return (
@@ -1301,31 +1279,7 @@ export default function Purchases() {
               disabled={uploading}
               className="btn btn-primary flex-1"
             >
-              {uploading ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : editingId ? (
+              {uploading ? <SaveSpinner /> : editingId ? (
                 "Update Purchase"
               ) : (
                 "Add Purchase"
@@ -1648,41 +1602,11 @@ export default function Purchases() {
                           placeholder="Barcode"
                         />
                       </div>
-                      {(() => {
-                        const mtrs = parseFloat(row.total_meters) || 0;
-                        const rate =
-                          parseFloat(row.purchase_price_per_meter) || 0;
-                        const disc = parseFloat(row.discount_amount) || 0;
-                        const total = mtrs * rate;
-                        const net = total - disc;
-                        return (
-                          <div className="flex gap-3 text-[11px] text-gray-500">
-                            <span>
-                              Amt:{" "}
-                              <strong>
-                                ₹
-                                {formatNumber2(total)}
-                              </strong>
-                            </span>
-                            {disc > 0 && (
-                              <span>
-                                Disc:{" "}
-                                <strong>
-                                  -₹
-                                  {formatNumber2(disc)}
-                                </strong>
-                              </span>
-                            )}
-                            <span>
-                              Net:{" "}
-                              <strong>
-                                ₹
-                                {formatNumber2(net)}
-                              </strong>
-                            </span>
-                          </div>
-                        );
-                      })()}
+                      <FabricRowTotals
+                        meters={row.total_meters}
+                        rate={row.purchase_price_per_meter}
+                        discount={row.discount_amount}
+                      />
                       <div className="flex gap-2 justify-end">
                         <button
                           type="button"
@@ -1843,31 +1767,7 @@ export default function Purchases() {
               disabled={savingFabrics}
               className="btn btn-primary flex-1"
             >
-              {savingFabrics ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : (
+              {savingFabrics ? <SaveSpinner /> : (
                 "Add Fabrics"
               )}
             </button>
@@ -2118,28 +2018,11 @@ export default function Purchases() {
                               placeholder="Barcode"
                             />
                           </div>
-                          {(() => {
-                            const mtrs =
-                              parseFloat(
-                                editingDetailFabricData?.total_meters,
-                              ) || 0;
-                            const rate =
-                              parseFloat(
-                                editingDetailFabricData?.purchase_price_per_meter,
-                              ) || 0;
-                            const total = mtrs * rate;
-                            return (
-                              <div className="flex gap-3 text-[11px] text-gray-500">
-                                <span>
-                                  Amt:{" "}
-                                  <strong>
-                                    ₹
-                                    {formatNumber2(total)}
-                                  </strong>
-                                </span>
-                              </div>
-                            );
-                          })()}
+                          <FabricRowTotals
+                            meters={editingDetailFabricData?.total_meters}
+                            rate={editingDetailFabricData?.purchase_price_per_meter}
+                            showNet={false}
+                          />
                           <div className="flex gap-2 justify-end">
                             <button
                               type="button"
@@ -2289,14 +2172,7 @@ export default function Purchases() {
                             {formatNumber2(payment.amount)}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {new Date(payment.payment_date).toLocaleDateString(
-                              "en-GB",
-                              {
-                                day: "numeric",
-                                month: "short",
-                                year: "2-digit",
-                              },
-                            )}
+                            {formatDateShort(payment.payment_date)}
                           </p>
                           {payment.reinvested_amount > 0 && (
                             <p className="text-xs text-emerald-600 mt-0.5">
@@ -2469,14 +2345,7 @@ export default function Purchases() {
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-1 text-gray-600 text-sm">
                         <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                        {new Date(purchase.purchase_date).toLocaleDateString(
-                          "en-GB",
-                          {
-                            day: "numeric",
-                            month: "short",
-                            year: "2-digit",
-                          },
-                        )}
+                        {formatDateShort(purchase.purchase_date)}
                       </div>
                     </td>
                   )}

@@ -23,7 +23,9 @@ import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
 import EmptyState from "./shared/EmptyState";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import { SearchInput } from "./shared/FormField";
+import { useVisibleCols } from "../hooks/useVisibleCols";
 
 const PAGE_SIZE = 10;
 
@@ -41,13 +43,6 @@ const ALL_COLUMNS = [
 
 const DEFAULT_VISIBLE = new Set(["qty", "supplier", "dateAdded", "total", "buyPrice", "totalPrice", "available"]);
 
-function loadVisibleCols() {
-  try {
-    const saved = localStorage.getItem("fabrics_visible_cols");
-    if (saved) return new Set(JSON.parse(saved));
-  } catch {}
-  return new Set(DEFAULT_VISIBLE);
-}
 
 const emptyRow = {
   name: "",
@@ -93,21 +88,11 @@ export default function Fabrics() {
   const [linkingPurchase, setLinkingPurchase] = useState(false);
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
-  const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
+  const { visibleCols, setVisibleCols, toggleCol } = useVisibleCols(
+    "fabrics_visible_cols",
+    DEFAULT_VISIBLE,
+  );
   const purchaseLookupTimer = useRef(null);
-
-  useEffect(() => {
-    localStorage.setItem("fabrics_visible_cols", JSON.stringify([...visibleCols]));
-  }, [visibleCols]);
-
-  function toggleCol(key) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
 
   const col = (key) => visibleCols.has(key);
 
@@ -456,11 +441,7 @@ export default function Fabrics() {
   const lowStock = fabrics.filter((f) => f.available_meters < 2);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   return (

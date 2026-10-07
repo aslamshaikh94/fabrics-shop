@@ -1,12 +1,24 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import {
   fetchAllRows,
   fetchAllRowsTolerant,
 } from "../utils/pagedQuery";
 import { buildSoldMeters } from "../utils/soldMeters";
-import { formatINRMasked, formatMonthName } from "../utils/formatters";
+import {
+  formatINRMasked,
+  formatDateShort,
+  formatMonthName,
+  MONTHS,
+  pctChange,
+} from "../utils/formatters";
+import {
+  netSaleAmount,
+  monthKeyOf,
+  buildYearRange,
+} from "../utils/periods";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import {
   TrendingUp,
   TrendingDown,
@@ -17,31 +29,6 @@ import {
   Receipt,
 } from "lucide-react";
 import { useShowAmount } from "./ShowAmountProvider";
-
-function pctChange(curr, prev) {
-  if (!prev) return null;
-  const diff = ((curr - prev) / prev) * 100;
-  return {
-    value: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`,
-    up: diff >= 0,
-    good: diff >= 0,
-  };
-}
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 
 export default function Dashboard() {
   const { showAmount } = useShowAmount();
@@ -83,11 +70,13 @@ export default function Dashboard() {
   const fetchStats = useCallback(async () => {
     try {
       const now = new Date();
-      const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
-      const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
+      const thisMonth = monthKeyOf(now);
+      const prevMonth = monthKeyOf(
+        new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      );
+      const nextMonth = monthKeyOf(
+        new Date(now.getFullYear(), now.getMonth() + 1, 1),
+      );
 
       const [
         salesRes,
@@ -173,11 +162,9 @@ export default function Dashboard() {
 
       // Build available years
       if (yearsRes.data?.length) {
-        const firstYear = new Date(yearsRes.data[0].sale_date).getFullYear();
-        const currentYear = new Date().getFullYear();
-        const years = [];
-        for (let y = firstYear; y <= currentYear; y++) years.push(y);
-        setAvailableYears(years.reverse());
+        setAvailableYears(
+          buildYearRange(yearsRes.data[0].sale_date),
+        );
       }
 
       // Build customer name lookup
@@ -219,12 +206,12 @@ export default function Dashboard() {
       // net sales = total_amount - discount_amount to stay consistent with margin.
       const currSales =
         thisMoSales.data?.reduce(
-          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          (s, r) => s + netSaleAmount(r),
           0,
         ) || 0;
       const prevSales =
         prevMoSales.data?.reduce(
-          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          (s, r) => s + netSaleAmount(r),
           0,
         ) || 0;
       const currProfit =
@@ -371,13 +358,7 @@ export default function Dashboard() {
     fetchStats();
   }, [fetchStats]);
 
-  // Fetch period stats when selection changes
-  useEffect(() => {
-    if (loading) return;
-    fetchPeriodStats();
-  }, [selectedPeriod, selectedYear, selectedMonth]);
-
-  async function fetchPeriodStats() {
+  const fetchPeriodStats = useCallback(async () => {
     try {
       let startDate, endDate;
       const now = new Date();
@@ -446,7 +427,7 @@ export default function Dashboard() {
         // Sales are stored pre-discount, so net them for a revenue figure that
         // matches the margin-based gross profit below.
         sales: periodSales.reduce(
-          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          (s, r) => s + netSaleAmount(r),
           0,
         ),
         // Gross profit only — this project has no net-profit concept.
@@ -462,14 +443,16 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Error fetching period stats:", err);
     }
-  }
+  }, [selectedPeriod, selectedYear, selectedMonth]);
+
+  // Fetch period stats when selection changes
+  useEffect(() => {
+    if (loading) return;
+    fetchPeriodStats();
+  }, [fetchPeriodStats, loading]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   if (error) {
@@ -560,7 +543,8 @@ export default function Dashboard() {
                   ) : (
                     <TrendingDown className="w-3 h-3" />
                   )}
-                  {card.change.value} vs last month
+                  {card.change.up ? "+" : "-"}
+                      {card.change.value}% vs last month
                 </p>
               )}
               {card.subtitle && (
@@ -886,11 +870,7 @@ export default function Dashboard() {
                     {formatINRMasked(group.total_amount, showAmount)}
                   </p>
                   <p className="text-xs text-gray-400">
-                    {new Date(group.sale_date).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "2-digit",
-                    })}
+                    {formatDateShort(group.sale_date)}
                   </p>
                 </div>
               </div>
