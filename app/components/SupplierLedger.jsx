@@ -8,7 +8,7 @@ export default function SupplierLedger({ supplier, onClose }) {
   const fetchData = useCallback(async () => {
     const purchasesRes = await supabase
       .from("purchases")
-      .select("*")
+      .select("id, total_amount, paid_amount, purchase_date, notes")
       .eq("supplier_id", supplier.id)
       .order("purchase_date", { ascending: true });
     const allPurchases = purchasesRes.data || [];
@@ -18,7 +18,7 @@ export default function SupplierLedger({ supplier, onClose }) {
     if (purchaseIds.length > 0) {
       const paymentsRes = await supabase
         .from("purchase_payments")
-        .select("*")
+        .select("id, purchase_id, amount, payment_date, payment_method")
         .in("purchase_id", purchaseIds)
         .order("payment_date", { ascending: true });
       relatedPayments = paymentsRes.data || [];

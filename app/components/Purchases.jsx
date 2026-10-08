@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -30,15 +31,12 @@ import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
-import FileViewer from "./shared/FileViewer";
-import BarcodeScanner from "./BarcodeScanner";
 import FabricRowForm from "./purchases/FabricRowForm";
 import EmptyState from "./shared/EmptyState";
 import { SearchInput } from "./shared/FormField";
 import SaveSpinner from "./shared/SaveSpinner";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import FabricRowTotals from "./shared/FabricRowTotals";
-import { extractPdfText, parseFabricEntries } from "../utils/pdfExtractor";
 import {
   DEFAULT_GST_RATE,
   purchaseBreakdown,
@@ -52,6 +50,14 @@ import { formatINR, formatDateShort, formatNumber2 } from "../utils/formatters";
 import { useVisibleCols } from "../hooks/useVisibleCols";
 
 const PAGE_SIZE = 10;
+
+// Camera scanner (+ @zxing) and invoice viewer only load when opened.
+const BarcodeScanner = dynamic(() => import("./BarcodeScanner"), {
+  ssr: false,
+});
+const FileViewer = dynamic(() => import("./shared/FileViewer"), {
+  ssr: false,
+});
 
 const ALL_PURCHASE_COLUMNS = [
   { key: "purchaseNo", label: "Purchase #" },
@@ -215,19 +221,19 @@ export default function Purchases() {
           fetchAllRows((from, to) =>
             supabase
               .from("purchases")
-              .select("*")
+              .select("id, supplier_id, purchase_number, purchase_date, total_amount, paid_amount, fabric_amount, other_charges, gst_rate, gst_amount, notes, invoice_url, status, created_at")
               .order("purchase_date", { ascending: false })
               .range(from, to),
           ),
           fetchAllRows((from, to) =>
             supabase
               .from("suppliers")
-              .select("*")
+              .select("id, name")
               .order("name")
               .range(from, to),
           ),
           fetchAllRows((from, to) =>
-            supabase.from("fabrics").select("*").order("name").range(from, to),
+            supabase.from("fabrics").select("id, name, barcode, available_meters, purchase_price_per_meter, purchase_id").order("name").range(from, to),
           ),
           fetchAllRows((from, to) =>
             supabase
@@ -266,12 +272,12 @@ export default function Purchases() {
         fetchAllRows((from, to) =>
           supabase
             .from("purchases")
-            .select("*")
+            .select("id, supplier_id, purchase_number, purchase_date, total_amount, paid_amount, fabric_amount, other_charges, gst_rate, gst_amount, notes, invoice_url, status, created_at")
             .order("purchase_date", { ascending: false })
             .range(from, to),
         ),
         fetchAllRows((from, to) =>
-          supabase.from("suppliers").select("*").order("name").range(from, to),
+          supabase.from("suppliers").select("id, name").order("name").range(from, to),
         ),
       ]);
       const supplierMap = Object.fromEntries(
@@ -493,7 +499,7 @@ export default function Purchases() {
     try {
       const { data } = await supabase
         .from("purchase_payments")
-        .select("*")
+        .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
         .eq("purchase_id", purchaseId)
         .order("payment_date", { ascending: false });
       setPayments(data || []);
@@ -505,8 +511,8 @@ export default function Purchases() {
   async function fetchPurchaseFabrics(purchaseId) {
     try {
       const [fabricsRes, itemsRes] = await Promise.all([
-        supabase.from("fabrics").select("*").eq("purchase_id", purchaseId),
-        supabase.from("purchase_items").select("*").eq("purchase_id", purchaseId),
+        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode, discount_amount").eq("purchase_id", purchaseId),
+        supabase.from("purchase_items").select("id, description, meters, rate, hsn").eq("purchase_id", purchaseId),
       ]);
       if (fabricsRes.error) throw fabricsRes.error;
       // purchase_items is a legacy invoice-lines table; it may not exist on
@@ -558,11 +564,11 @@ export default function Purchases() {
     Promise.all([
       supabase
         .from("purchase_payments")
-        .select("*")
+        .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
         .eq("purchase_id", purchase.id)
         .order("payment_date", { ascending: false }),
-      supabase.from("fabrics").select("*").eq("purchase_id", purchase.id),
-      supabase.from("purchase_items").select("*").eq("purchase_id", purchase.id),
+      supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode, discount_amount").eq("purchase_id", purchase.id),
+      supabase.from("purchase_items").select("id, description, meters, rate, hsn").eq("purchase_id", purchase.id),
     ])
       .then(([paymentsRes, fabricsRes, itemsRes]) => {
         if (paymentsRes.error)
@@ -607,13 +613,13 @@ export default function Purchases() {
       const [paymentsRes, fabricsRes, itemsRes] = await Promise.all([
         supabase
           .from("purchase_payments")
-          .select("*")
+          .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
           .eq("purchase_id", purchase.id)
           .order("payment_date", { ascending: false }),
-        supabase.from("fabrics").select("*").eq("purchase_id", purchase.id),
+        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode, discount_amount").eq("purchase_id", purchase.id),
         supabase
           .from("purchase_items")
-          .select("*")
+          .select("id, description, meters, rate, hsn")
           .eq("purchase_id", purchase.id),
       ]);
       setPayments(paymentsRes.data || []);
@@ -640,7 +646,7 @@ export default function Purchases() {
     // Fetch fabrics list for auto-suggest
     supabase
       .from("fabrics")
-      .select("*")
+      .select("id, name, barcode, available_meters, purchase_price_per_meter")
       .order("name")
       .then((res) => {
         setFabrics(res.data || []);
@@ -769,20 +775,12 @@ export default function Purchases() {
     }
     setPdfExtracting(true);
     try {
-      console.log("PDF upload: starting extraction for", file.name, file.size);
-      const text = await extractPdfText(file);
-      console.log("PDF extracted text length:", text.length);
-      console.log("PDF first 1000 chars:", text.slice(0, 1000));
-      console.log(
-        "PDF lines (first 40):",
-        text
-          .split("\n")
-          .slice(0, 40)
-          .map((l, i) => `${i}: ${l}`)
-          .join("\n"),
+      // pdfjs-dist is deferred until a PDF is actually uploaded.
+      const { extractPdfText, parseFabricEntries } = await import(
+        "../utils/pdfExtractor"
       );
+      const text = await extractPdfText(file);
       const entries = parseFabricEntries(text);
-      console.log("PDF parsed entries:", entries);
       if (entries.length === 0) {
         toast(
           `Could not extract fabric data from this PDF. Found ${text.length} chars of text but no fabric rows matched.`,
@@ -1014,9 +1012,10 @@ export default function Purchases() {
   );
 
   const totalPages = Math.ceil(filteredPurchases.length / PAGE_SIZE);
-  const paginated = filteredPurchases.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
+  const paginated = useMemo(
+    () =>
+      filteredPurchases.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredPurchases, page],
   );
 
   const purchaseTotals = useMemo(
@@ -2712,11 +2711,13 @@ export default function Purchases() {
         </div>
       )}
 
-      <FileViewer
-        url={viewInvoiceUrl}
-        onClose={() => setViewInvoiceUrl(null)}
-        title="Invoice / Bill"
-      />
+      {viewInvoiceUrl && (
+        <FileViewer
+          url={viewInvoiceUrl}
+          onClose={() => setViewInvoiceUrl(null)}
+          title="Invoice / Bill"
+        />
+      )}
     </div>
   );
 }

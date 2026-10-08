@@ -445,11 +445,11 @@ export default function Dashboard() {
     }
   }, [selectedPeriod, selectedYear, selectedMonth]);
 
-  // Fetch period stats when selection changes
+  // Fetch period stats when selection changes (after initial load)
   useEffect(() => {
     if (loading) return;
     fetchPeriodStats();
-  }, [fetchPeriodStats, loading]);
+  }, [fetchPeriodStats]);
 
   if (loading) {
     return <LoadingSpinner className="h-64" />;

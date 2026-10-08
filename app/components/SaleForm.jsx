@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import {
   X,
@@ -13,12 +14,16 @@ import {
   validateCurrentItem,
 } from "../utils/validators";
 import { uploadToBucket, buildUploadPath } from "../utils/upload";
-import BarcodeScanner from "./BarcodeScanner";
 import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
 import SaveSpinner from "./shared/SaveSpinner";
 import { formatCurrency, formatNumber2 } from "../utils/formatters";
+
+// Camera scanner (+ @zxing) only loads when the scan button is tapped.
+const BarcodeScanner = dynamic(() => import("./BarcodeScanner"), {
+  ssr: false,
+});
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -98,7 +103,7 @@ export default function SaleForm({
   async function fetchSaleForEditing(id) {
     const { data, error } = await supabase
       .from("sales")
-      .select("*")
+      .select("id, customer_id, customer_name, fabric_id, fabric_name, meters, price_per_meter, cost_price_per_meter, sale_date, payment_type, paid_amount, discount_amount, notes")
       .eq("id", id)
       .single();
 
@@ -107,7 +112,7 @@ export default function SaleForm({
       if (data.customer_id) {
         const { data: customerData } = await supabase
           .from("customers")
-          .select("*")
+          .select("id, name")
           .eq("id", data.customer_id)
           .single();
         data.customer = customerData || null;

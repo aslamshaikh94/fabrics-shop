@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import dynamic from "next/dynamic";
 import {
   Plus,
   Pencil,
@@ -10,7 +11,6 @@ import {
   MessageCircle,
   Users,
 } from "lucide-react";
-import CustomerLedger from "./CustomerLedger";
 import ConfirmModal from "./ConfirmModal";
 import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
@@ -25,6 +25,11 @@ import { useVisibleCols } from "../hooks/useVisibleCols";
 import { formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 9;
+
+// Ledger dialog only loads when a customer row is opened.
+const CustomerLedger = dynamic(() => import("./CustomerLedger"), {
+  ssr: false,
+});
 
 const ALL_COLUMNS = [
   { key: "name", label: "Name" },
@@ -55,7 +60,7 @@ export default function Customers() {
     update,
     remove,
   } = useCrud("customers", {
-    select: "*",
+    select: "id, name, phone, address, notes, current_balance, created_at",
     orderBy: { column: "created_at", ascending: false },
   });
   const [showForm, setShowForm] = useState(false);

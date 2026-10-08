@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -80,23 +80,28 @@ export default function Shell({ children }) {
     setDark(isDark);
   }, []);
 
-  const navItems = ALL_NAV.filter((item) => !item.adminOnly || isAdmin);
-  const bottomNavItems = BOTTOM_NAV.filter(
-    (item) => !item.adminOnly || isAdmin,
+  const navItems = useMemo(
+    () => ALL_NAV.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin],
+  );
+  const bottomNavItems = useMemo(
+    () => BOTTOM_NAV.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin],
   );
 
-  const allowedIds = navItems.map((n) => n.id);
+  const allowedIds = useMemo(() => navItems.map((n) => n.id), [navItems]);
   const pathSegment = pathname.split("/")[1] || "";
-  const activePage = allowedIds.includes(pathSegment)
-    ? pathSegment
-    : "dashboard";
+  const activePage = useMemo(
+    () => (allowedIds.includes(pathSegment) ? pathSegment : "dashboard"),
+    [allowedIds, pathSegment],
+  );
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("theme", dark ? "dark" : "light");
   }, [dark]);
 
-  const navSections = [
+  const navSections = useMemo(() => [
     {
       label: null,
       items: navItems.filter((n) => ["dashboard", "quicksale"].includes(n.id)),
@@ -122,7 +127,7 @@ export default function Shell({ children }) {
     },
     { label: "Insights", items: navItems.filter((n) => n.id === "reports") },
     { label: "System", items: navItems.filter((n) => n.id === "backup") },
-  ];
+  ], [navItems]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">

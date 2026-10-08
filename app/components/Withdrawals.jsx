@@ -32,7 +32,7 @@ export default function Withdrawals() {
     update,
     remove,
   } = useCrud("withdrawals", {
-    select: "*",
+    select: "id, amount, withdrawal_date, withdrawn_by, reason, created_at",
     orderBy: { column: "withdrawal_date", ascending: false },
   });
   const [showForm, setShowForm] = useState(false);

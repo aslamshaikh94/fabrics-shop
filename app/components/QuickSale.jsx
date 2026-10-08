@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import {
   ScanLine,
@@ -10,12 +11,16 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
 import SaveSpinner from "./shared/SaveSpinner";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import { formatNumber2 } from "../utils/formatters";
 import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
+
+// Camera scanner (+ @zxing) only loads when the scan button is tapped.
+const BarcodeScanner = dynamic(() => import("./BarcodeScanner"), {
+  ssr: false,
+});
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -57,7 +62,7 @@ export default function QuickSale() {
 
   async function fetchData() {
     const [fabRes, partRes] = await Promise.all([
-      supabase.from("fabrics").select("*").order("name"),
+      supabase.from("fabrics").select("id, name, barcode, available_meters, purchase_price_per_meter, selling_price_per_meter").order("name"),
       supabase.from("partners").select("id, name").eq("is_active", true).order("name"),
     ]);
     setFabrics(fabRes.data || []);
@@ -127,12 +132,11 @@ export default function QuickSale() {
     setActiveItemIdx(items.length);
   }
 
-  const filteredFabrics =
-    search.length > 1
-      ? fabrics.filter((f) =>
-          f.name.toLowerCase().includes(search.toLowerCase()),
-        )
-      : [];
+  const filteredFabrics = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (q.length <= 1) return [];
+    return fabrics.filter((f) => f.name.toLowerCase().includes(q));
+  }, [fabrics, search]);
 
   const subtotal = items.reduce(
     (sum, item) =>

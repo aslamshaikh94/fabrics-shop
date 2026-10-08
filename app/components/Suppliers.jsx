@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import dynamic from "next/dynamic";
 import {
   Plus,
   Pencil,
@@ -10,7 +11,6 @@ import {
   DollarSign,
 } from "lucide-react";
 import { validateSupplier, hasErrors } from "../utils/validators";
-import SupplierLedger from "./SupplierLedger";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import Modal from "./shared/Modal";
@@ -23,6 +23,11 @@ import { usePagedList } from "../hooks/usePagedList";
 
 const PAGE_SIZE = 9;
 
+// Ledger dialog only loads when a supplier row is opened.
+const SupplierLedger = dynamic(() => import("./SupplierLedger"), {
+  ssr: false,
+});
+
 const emptyForm = { name: "", phone: "", address: "", notes: "" };
 
 export default function Suppliers() {
@@ -34,7 +39,7 @@ export default function Suppliers() {
     update,
     remove,
   } = useCrud("suppliers", {
-    select: "*",
+    select: "id, name, phone, address, notes, created_at",
     orderBy: { column: "created_at", ascending: false },
   });
   const [showForm, setShowForm] = useState(false);

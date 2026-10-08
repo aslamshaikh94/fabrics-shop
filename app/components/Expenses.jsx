@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
 import {
   Plus,
   Calendar,
@@ -16,7 +17,6 @@ import DateRangeFilter from "./DateRangeFilter";
 import Modal from "./shared/Modal";
 import Pagination from "./shared/Pagination";
 import LoadingSpinner from "./shared/LoadingSpinner";
-import FileViewer from "./shared/FileViewer";
 import EmptyState from "./shared/EmptyState";
 import FormField, {
   SearchInput,
@@ -29,6 +29,11 @@ import { usePagedList } from "../hooks/usePagedList";
 import { formatDateShort, formatNumber2 } from "../utils/formatters";
 
 const PAGE_SIZE = 10;
+
+// Proof viewer only loads when a receipt is opened.
+const FileViewer = dynamic(() => import("./shared/FileViewer"), {
+  ssr: false,
+});
 
 const CATEGORIES = [
   "Rent",
@@ -81,11 +86,11 @@ export default function Expenses() {
       setFormErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
-  async function fetchExpenses() {
+  const fetchExpenses = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("expenses")
-        .select("*")
+        .select("id, title, category, amount, expense_date, paid_by, partner_id, cleared, cleared_at, notes, payment_proof_url, created_at")
         .order("expense_date", { ascending: false });
       if (error) throw error;
       setExpenses(data || []);
@@ -94,9 +99,9 @@ export default function Expenses() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  async function fetchPartners() {
+  const fetchPartners = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("partners")
@@ -108,7 +113,7 @@ export default function Expenses() {
     } catch (err) {
       console.error("Error fetching partners:", err);
     }
-  }
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -164,7 +169,7 @@ export default function Expenses() {
   useEffect(() => {
     fetchExpenses();
     fetchPartners();
-  }, []);
+  }, [fetchExpenses, fetchPartners]);
 
   if (loading) return <LoadingSpinner className="h-64" />;
 
@@ -717,11 +722,13 @@ export default function Expenses() {
         />
       )}
 
-      <FileViewer
-        url={viewProofUrl}
-        onClose={() => setViewProofUrl(null)}
-        title="Payment Proof"
-      />
+      {viewProofUrl && (
+        <FileViewer
+          url={viewProofUrl}
+          onClose={() => setViewProofUrl(null)}
+          title="Payment Proof"
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Search,
@@ -138,11 +138,11 @@ export default function Payments({
       ] = await Promise.all([
         supabase
           .from("purchase_payments")
-          .select("*, purchase_id")
+          .select("id, purchase_id, partner_id, amount, reinvested_amount, payment_date, payment_method, reference_number, notes")
           .order("payment_date", { ascending: false }),
         supabase
           .from("sale_payments")
-          .select("*, sale_id")
+          .select("id, sale_id, sale_group_id, partner_id, amount, payment_date, payment_method, reference_number, notes")
           .order("payment_date", { ascending: false }),
         supabase.from("suppliers").select("id, name"),
         supabase.from("customers").select("id, name"),
@@ -156,14 +156,14 @@ export default function Payments({
           .select(
             "id, supplier_id, total_amount, paid_amount, remaining_amount",
           ),
-        supabase.from("partners").select("*").order("name"),
+        supabase.from("partners").select("id, name, share_percentage, is_active, opening_balance, opening_balance_date").order("name"),
         supabase
           .from("cash_deposits")
-          .select("*")
+          .select("id, partner_id, amount, deposit_date, method, notes")
           .order("deposit_date", { ascending: false }),
         supabase
           .from("withdrawals")
-          .select("*")
+          .select("id, amount, withdrawal_date, withdrawn_by, reason")
           .order("withdrawal_date", { ascending: false }),
         supabase
           .from("expenses")
@@ -550,92 +550,130 @@ export default function Payments({
     }
   }
 
-  const filterByDate = (dateStr) => {
-    const date = new Date(dateStr);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const paymentsMade = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    switch (dateFilter) {
-      case "today": {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        return d.getTime() === today.getTime();
+    const filterByDate = (dateStr) => {
+      const date = new Date(dateStr);
+      switch (dateFilter) {
+        case "today": {
+          const d = new Date(date);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime() === today.getTime();
+        }
+        case "week": {
+          const w = new Date(today);
+          w.setDate(w.getDate() - 7);
+          return date >= w;
+        }
+        case "month": {
+          const m = new Date(today);
+          m.setMonth(m.getMonth() - 1);
+          return date >= m;
+        }
+        case "custom":
+          if (customDateStart && date < new Date(customDateStart)) return false;
+          if (customDateEnd && date > new Date(customDateEnd)) return false;
+          return true;
+        default:
+          return true;
       }
-      case "week": {
-        const w = new Date(today);
-        w.setDate(w.getDate() - 7);
-        return date >= w;
+    };
+    return purchasePayments
+      .filter((p) => filterByDate(p.payment_date))
+      .map((p) => ({
+        id: p.id,
+        type: "paid",
+        amount: p.amount,
+        date: p.payment_date,
+        method: p.payment_method,
+        reference: p.reference_number,
+        party: p.purchase?.suppliers?.name || "Unknown",
+        notes: p.notes,
+      }));
+  }, [purchasePayments, dateFilter, customDateStart, customDateEnd]);
+
+  const paymentsReceived = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const filterByDate = (dateStr) => {
+      const date = new Date(dateStr);
+      switch (dateFilter) {
+        case "today": {
+          const d = new Date(date);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime() === today.getTime();
+        }
+        case "week": {
+          const w = new Date(today);
+          w.setDate(w.getDate() - 7);
+          return date >= w;
+        }
+        case "month": {
+          const m = new Date(today);
+          m.setMonth(m.getMonth() - 1);
+          return date >= m;
+        }
+        case "custom":
+          if (customDateStart && date < new Date(customDateStart)) return false;
+          if (customDateEnd && date > new Date(customDateEnd)) return false;
+          return true;
+        default:
+          return true;
       }
-      case "month": {
-        const m = new Date(today);
-        m.setMonth(m.getMonth() - 1);
-        return date >= m;
-      }
-      case "custom":
-        if (customDateStart && date < new Date(customDateStart)) return false;
-        if (customDateEnd && date > new Date(customDateEnd)) return false;
+    };
+    return salePayments
+      .filter((p) => filterByDate(p.payment_date))
+      .map((p) => ({
+        id: p.id,
+        type: "received",
+        amount: p.amount,
+        date: p.payment_date,
+        method: p.payment_method,
+        reference: p.reference_number,
+        party: p.sale?.customers?.name || "Walk-in",
+        notes: p.notes,
+        partner_id: p.partner_id || "",
+        partner_name: p.partner_name || null,
+        sale_group_id: p.sale_group_id || null,
+        sale_id: p.sale_id || null,
+      }));
+  }, [salePayments, dateFilter, customDateStart, customDateEnd]);
+
+  const allPayments = useMemo(() =>
+    [...paymentsMade, ...paymentsReceived]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .filter((p) => {
+        if (paymentTypeFilter !== "all" && p.type !== paymentTypeFilter)
+          return false;
+        if (holderFilter === "__untracked__") {
+          if (p.type !== "received" || p.partner_name) return false;
+        } else if (
+          holderFilter !== "all" &&
+          (p.partner_name || "") !== holderFilter
+        )
+          return false;
+        if (searchTerm)
+          return p.party.toLowerCase().includes(searchTerm.toLowerCase());
         return true;
-      default:
-        return true;
-    }
-  };
-
-  const paymentsMade = purchasePayments
-    .filter((p) => filterByDate(p.payment_date))
-    .map((p) => ({
-      id: p.id,
-      type: "paid",
-      amount: p.amount,
-      date: p.payment_date,
-      method: p.payment_method,
-      reference: p.reference_number,
-      party: p.purchase?.suppliers?.name || "Unknown",
-      notes: p.notes,
-    }));
-
-  const paymentsReceived = salePayments
-    .filter((p) => filterByDate(p.payment_date))
-    .map((p) => ({
-      id: p.id,
-      type: "received",
-      amount: p.amount,
-      date: p.payment_date,
-      method: p.payment_method,
-      reference: p.reference_number,
-      party: p.sale?.customers?.name || "Walk-in",
-      notes: p.notes,
-      partner_id: p.partner_id || "",
-      partner_name: p.partner_name || null,
-      // Kept so an edited receipt can be validated against its sale's net.
-      sale_group_id: p.sale_group_id || null,
-      sale_id: p.sale_id || null,
-    }));
-
-  const allPayments = [...paymentsMade, ...paymentsReceived]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .filter((p) => {
-      if (paymentTypeFilter !== "all" && p.type !== paymentTypeFilter)
-        return false;
-      if (holderFilter === "__untracked__") {
-        // Customer payments collected but not credited to an account holder
-        if (p.type !== "received" || p.partner_name) return false;
-      } else if (
-        holderFilter !== "all" &&
-        (p.partner_name || "") !== holderFilter
-      )
-        return false;
-      if (searchTerm)
-        return p.party.toLowerCase().includes(searchTerm.toLowerCase());
-      return true;
-    });
+      }),
+  [paymentsMade, paymentsReceived, paymentTypeFilter, holderFilter, searchTerm]);
 
   const totalPages = Math.ceil(allPayments.length / PAGE_SIZE);
-  const paginatedPayments = allPayments.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
+  const paginatedPayments = useMemo(
+    () => allPayments.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [allPayments, page],
   );
 
-  const totalPaid = paymentsMade.reduce((sum, p) => sum + p.amount, 0);
-  const totalReceived = paymentsReceived.reduce((sum, p) => sum + p.amount, 0);
+  const totalPaid = useMemo(
+    () => paymentsMade.reduce((sum, p) => sum + p.amount, 0),
+    [paymentsMade],
+  );
+  const totalReceived = useMemo(
+    () => paymentsReceived.reduce((sum, p) => sum + p.amount, 0),
+    [paymentsReceived],
+  );
   const netFlow = totalReceived - totalPaid;
 
   // ── Account holders (partners) ──

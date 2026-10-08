@@ -95,7 +95,7 @@ export default function PartnersPage() {
       await fetchYears();
       const { data } = await supabase
         .from("partners")
-        .select("*")
+        .select("id, name, share_percentage, is_active")
         .eq("is_active", true)
         .order("created_at");
       const loaded = data || [];
@@ -120,7 +120,7 @@ export default function PartnersPage() {
     try {
       const { data } = await supabase
         .from("partners")
-        .select("*")
+        .select("id, name, share_percentage, is_active")
         .eq("is_active", true)
         .order("created_at");
       const loaded = data || [];

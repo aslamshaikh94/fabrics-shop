@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -12,8 +13,6 @@ import {
 import { validatePayment, hasErrors } from "../utils/validators";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
-import SaleForm from "./SaleForm";
-import SaleDetailsModal from "./SaleDetailsModal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
 import { formatDate, formatCustomerName, formatNumber2 } from "../utils/formatters";
@@ -22,6 +21,13 @@ import { SearchInput } from "./shared/FormField";
 import { useVisibleCols } from "../hooks/useVisibleCols";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import PaymentBadge from "./shared/PaymentBadge";
+
+// SaleForm pulls BarcodeScanner + FileUpload: only load when the modal opens.
+const SaleForm = dynamic(() => import("./SaleForm"), { ssr: false });
+// Details modal is only needed after a row is clicked.
+const SaleDetailsModal = dynamic(() => import("./SaleDetailsModal"), {
+  ssr: false,
+});
 
 const PAGE_SIZE = 10;
 
@@ -83,20 +89,16 @@ export default function Sales() {
 
   const col = (key) => visibleCols.has(key);
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
-
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     try {
       const [salesRes, customersRes, fabricsRes, accountsRes, partnersRes] = await Promise.all([
         supabase
           .from("sales")
-          .select("*")
+          .select("id, sale_group_id, customer_id, customer_name, fabric_id, fabric_name, meters, price_per_meter, cost_price_per_meter, total_amount, discount_amount, paid_amount, remaining_amount, margin, payment_type, sale_date, notes, invoice_url, created_at")
           .order("sale_date", { ascending: false })
           .order("created_at", { ascending: false }),
-        supabase.from("customers").select("*").order("name"),
-        supabase.from("fabrics").select("*").order("name"),
+        supabase.from("customers").select("id, name").order("name"),
+        supabase.from("fabrics").select("id, name, available_meters, purchase_price_per_meter, selling_price_per_meter").order("name"),
         supabase.from("payment_accounts").select("id,name,account_type,partner:partners(name)").eq("is_active", true).order("name"),
         supabase.from("partners").select("id,name").eq("is_active", true).order("name"),
       ]);
@@ -125,17 +127,17 @@ export default function Sales() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [toast]);
 
-  async function fetchSales() {
+  const fetchSales = useCallback(async () => {
     try {
       const [salesRes, customersRes] = await Promise.all([
         supabase
           .from("sales")
-          .select("*")
+          .select("id, sale_group_id, customer_id, customer_name, fabric_id, fabric_name, meters, price_per_meter, cost_price_per_meter, total_amount, discount_amount, paid_amount, remaining_amount, margin, payment_type, sale_date, notes, invoice_url, created_at")
           .order("sale_date", { ascending: false })
           .order("created_at", { ascending: false }),
-        supabase.from("customers").select("*").order("name"),
+        supabase.from("customers").select("id, name").order("name"),
       ]);
       if (salesRes.error) throw salesRes.error;
       if (customersRes.error) throw customersRes.error;
@@ -153,7 +155,11 @@ export default function Sales() {
       console.error("Error fetching sales:", error?.message || error);
       return [];
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
 
   async function handlePaymentSubmit(e) {
     e.preventDefault();
@@ -207,7 +213,7 @@ export default function Sales() {
       const saleIds = group.items.map((i) => i.id);
       const { data } = await supabase
         .from("sale_payments")
-        .select("*, account:payment_accounts(id,name,partner:partners(name))")
+        .select("id, sale_id, sale_group_id, amount, payment_date, payment_method, reference_number, created_at, account:payment_accounts(id,name,partner:partners(name))")
         .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: false });
       // Deduplicate: group payments (sale_group_id set) take priority, exclude old per-item rows that are already covered
@@ -487,10 +493,24 @@ export default function Sales() {
   }, []);
 
   const totalPages = Math.ceil(groupedArray.length / PAGE_SIZE);
-  const paginated = groupedArray.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
+  const paginated = useMemo(
+    () => groupedArray.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [groupedArray, page],
   );
+
+  const customerDues = useMemo(() => {
+    const dues = new Map();
+    for (const s of sales) {
+      if (!s.customer_id) continue;
+      dues.set(
+        s.customer_id,
+        (dues.get(s.customer_id) || 0) + (s.remaining_amount || 0),
+      );
+    }
+    return Object.fromEntries(
+      customers.map((c) => [c.id, dues.get(c.id) || 0]),
+    );
+  }, [customers, sales]);
 
   if (loading) {
     return <LoadingSpinner className="h-64" />;
@@ -581,25 +601,20 @@ export default function Sales() {
         )}
       </div>
 
-      <SaleForm
-        open={showForm}
-        onClose={handleCloseSaleForm}
-        editingId={editingId}
-        onSaved={() => {
-          fetchSales();
-          setPage(1);
-        }}
-        fabrics={fabrics}
-        customers={customers}
-        customerDues={Object.fromEntries(
-          customers.map((c) => [
-            c.id,
-            sales
-              .filter((s) => s.customer_id === c.id)
-              .reduce((sum, s) => sum + (s.remaining_amount || 0), 0),
-          ])
-        )}
-      />
+      {showForm && (
+        <SaleForm
+          open={showForm}
+          onClose={handleCloseSaleForm}
+          editingId={editingId}
+          onSaved={() => {
+            fetchSales();
+            setPage(1);
+          }}
+          fabrics={fabrics}
+          customers={customers}
+          customerDues={customerDues}
+        />
+      )}
 
       {/* Payment History + Receive Payment Modal */}
       {!!selectedSale && (
@@ -980,16 +995,18 @@ export default function Sales() {
         label="sales groups"
       />
 
-      <SaleDetailsModal
-        open={!!selectedGroupForDetails}
-        onClose={handleCloseDetails}
-        group={selectedGroupForDetails}
-        fabrics={fabrics}
-        customers={customers}
-        partners={partners}
-        onSaleUpdated={handleSaleUpdated}
-        onViewPayments={handleViewPayments}
-      />
+      {selectedGroupForDetails && (
+        <SaleDetailsModal
+          open={!!selectedGroupForDetails}
+          onClose={handleCloseDetails}
+          group={selectedGroupForDetails}
+          fabrics={fabrics}
+          customers={customers}
+          partners={partners}
+          onSaleUpdated={handleSaleUpdated}
+          onViewPayments={handleViewPayments}
+        />
+      )}
 
       {confirmDeletePayment && (
         <ConfirmModal

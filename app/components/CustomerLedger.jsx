@@ -9,12 +9,12 @@ export default function CustomerLedger({ customer, onClose }) {
     const [salesRes, paymentsRes] = await Promise.all([
       supabase
         .from("sales")
-        .select("*")
+        .select("id, sale_group_id, total_amount, discount_amount, paid_amount, sale_date, notes")
         .eq("customer_id", customer.id)
         .order("sale_date", { ascending: false }),
       supabase
         .from("sale_payments")
-        .select("*, sale:sales(customer_id)")
+        .select("id, sale_id, sale_group_id, amount, payment_date, payment_method")
         .order("payment_date", { ascending: false }),
     ]);
     const allSales = salesRes.data || [];
