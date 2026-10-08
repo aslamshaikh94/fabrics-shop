@@ -5,22 +5,11 @@ import {
   matchPartner,
   partnerNameForWithdrawal,
 } from "../../utils/partnerWithdrawal";
-import { formatINR } from "../../utils/formatters";
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+import {
+  formatINR,
+  formatDateShort,
+  MONTHS,
+} from "../../utils/formatters";
 const partnerColors = [
   { chart: "#3b82f6" },
   { chart: "#8b5cf6" },
@@ -130,11 +119,7 @@ export default function WithdrawalTable({
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex items-center gap-1 text-sm text-gray-600">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {new Date(w.withdrawal_date).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "2-digit",
-                      })}
+                      {formatDateShort(w.withdrawal_date)}
                     </div>
                   </td>
                   <td className="px-4 py-2.5">

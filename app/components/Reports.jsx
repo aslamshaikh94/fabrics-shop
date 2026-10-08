@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import { useShowAmount } from "./ShowAmountProvider";
 import {
@@ -12,19 +13,15 @@ import {
   formatINR,
   formatINRMasked,
   formatINRCompact,
+  MONTHS,
+  pctChange,
 } from "../utils/formatters";
 import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+  netSaleAmount,
+  currentMonthKey,
+  getAvailableYears,
+} from "../utils/periods";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import {
   TrendingUp,
   TrendingDown,
@@ -34,34 +31,25 @@ import {
   Users,
   Package,
   MessageCircle,
-  AlertTriangle,
   Percent,
 } from "lucide-react";
 import Pagination from "./shared/Pagination";
+
+// recharts is ~300KB — only load it when the Analytics charts render.
+const ReportsCharts = dynamic(() => import("./reports/ReportsCharts"), {
+  ssr: false,
+  loading: () => (
+    <div className="card p-4">
+      <div className="animate-pulse bg-gray-200 rounded-lg h-[220px]" />
+    </div>
+  ),
+});
 
 // Rows per page in the Stock tab's Fabric-wise table. Matches the other
 // paginated tables in the app.
 const STOCK_PAGE_SIZE = 10;
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-function pctChange(curr, prev) {
-  if (!prev) return null;
-  const diff = ((curr - prev) / prev) * 100;
-  return { value: Math.abs(diff).toFixed(1), up: diff >= 0 };
-}
+
 
 // Dev-only diagnostic: compares purchases vs fabrics vs sales and shows where
 // the Bought / Sold / In-Stock numbers on the Stock tab come from.
@@ -228,42 +216,17 @@ export default function Reports() {
     new Date().getFullYear(),
   ]);
   const [filterMode, setFilterMode] = useState("year"); // "year" | "custom"
-  const [customFrom, setCustomFrom] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
-  const [customTo, setCustomTo] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
+  const [customFrom, setCustomFrom] = useState(currentMonthKey);
+  const [customTo, setCustomTo] = useState(currentMonthKey);
   const [chartView, setChartView] = useState("all");
   const [rankView, setRankView] = useState("revenue");
   const { showAmount } = useShowAmount();
 
-  useEffect(() => {
-    fetchYears();
-    fetchAlerts();
+  const fetchYears = useCallback(async () => {
+    setAvailableYears(await getAvailableYears());
   }, []);
-  useEffect(() => {
-    fetchAll();
-  }, [year, filterMode, customFrom, customTo]);
 
-  async function fetchYears() {
-    const { data } = await supabase
-      .from("sales")
-      .select("sale_date")
-      .order("sale_date", { ascending: true })
-      .limit(1);
-    const firstYear = data?.length
-      ? new Date(data[0].sale_date).getFullYear()
-      : new Date().getFullYear();
-    const currentYear = new Date().getFullYear();
-    const years = [];
-    for (let y = firstYear; y <= currentYear; y++) years.push(y);
-    setAvailableYears(years.reverse());
-  }
-
-  async function fetchAlerts() {
+  const fetchAlerts = useCallback(async () => {
     try {
       const [custRes, supRes, stockRes, customersRes, suppliersRes] =
         await Promise.all([
@@ -334,9 +297,9 @@ export default function Reports() {
     } catch (err) {
       console.error("Error fetching alerts:", err);
     }
-  }
+  }, []);
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const startDate =
@@ -468,7 +431,7 @@ export default function Reports() {
         const prevMargin = prevSales.reduce((s, r) => s + (r.margin || 0), 0);
         setPrevSummary({
           totalSales: prevSales.reduce(
-            (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          (s, r) => s + netSaleAmount(r),
             0,
           ),
           totalProfit: prevMargin,
@@ -487,7 +450,7 @@ export default function Reports() {
       sales.forEach((s) => {
         const m = new Date(s.sale_date).getMonth();
         monthly[m].sales +=
-          (s.total_amount || 0) - (s.discount_amount || 0);
+          netSaleAmount(s);
         monthly[m].profit += s.margin || 0;
       });
       purchases.forEach((p) => {
@@ -499,7 +462,7 @@ export default function Reports() {
       setSummary({
         // total_amount is stored pre-discount; net it out so sales/profit match
         totalSales: sales.reduce(
-          (s, r) => s + ((r.total_amount || 0) - (r.discount_amount || 0)),
+          (s, r) => s + netSaleAmount(r),
           0,
         ),
         totalProfit: totalMargin,
@@ -522,7 +485,7 @@ export default function Reports() {
         const name = customer?.name || "Walk-in";
         if (!custMap[name]) custMap[name] = { name, revenue: 0, pending: 0 };
         custMap[name].revenue +=
-          (s.total_amount || 0) - (s.discount_amount || 0);
+          netSaleAmount(s);
         custMap[name].pending += s.remaining_amount || 0;
       });
       setTopCustomers(Object.values(custMap));
@@ -532,7 +495,7 @@ export default function Reports() {
       sales.forEach((s) => {
         const name = s.fabric_name || "Unknown";
         if (!fabricMap[name]) fabricMap[name] = { name, revenue: 0, meters: 0 };
-        fabricMap[name].revenue += (s.total_amount || 0) - (s.discount_amount || 0);
+        fabricMap[name].revenue += netSaleAmount(s);
         fabricMap[name].meters += s.meters || 0;
       });
       setTopFabrics(Object.values(fabricMap));
@@ -605,12 +568,24 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [year, filterMode, customFrom, customTo]);
 
-  const totalAlerts =
-    alerts.pendingCustomers.length +
-    alerts.pendingSuppliers.length +
-    alerts.lowStock.length;
+  useEffect(() => {
+    fetchYears();
+    fetchAlerts();
+  }, [fetchYears, fetchAlerts]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  const totalAlerts = useMemo(
+    () =>
+      alerts.pendingCustomers.length +
+      alerts.pendingSuppliers.length +
+      alerts.lowStock.length,
+    [alerts],
+  );
 
   // ── Stock tab aggregates (lifetime snapshot from fabrics + all-time sales) ──
   // All values are at each fabric's BUYING PRICE, so they reconcile exactly:
@@ -765,11 +740,7 @@ export default function Reports() {
   ];
 
   if (loading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
 
   return (
     <div className="space-y-5">
@@ -923,87 +894,11 @@ export default function Reports() {
                 ))}
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart
-                data={monthlyData}
-                margin={{ top: 5, right: 5, left: 0, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                <YAxis
-                  tick={{ fontSize: 10 }}
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                  width={42}
-                />
-                <Tooltip formatter={(v) => formatINRMasked(v, showAmount)} />
-                <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                {(chartView === "all" || chartView === "sales") && (
-                  <Line
-                    type="monotone"
-                    dataKey="sales"
-                    name="Sales"
-                    stroke="#2563eb"
-                    strokeWidth={2}
-                    dot={{ r: 2 }}
-                  />
-                )}
-                {(chartView === "all" || chartView === "profit") && (
-                  <Line
-                    type="monotone"
-                    dataKey="profit"
-                    name="Profit"
-                    stroke="#16a34a"
-                    strokeWidth={2}
-                    dot={{ r: 2 }}
-                  />
-                )}
-                {(chartView === "all" || chartView === "purchases") && (
-                  <Line
-                    type="monotone"
-                    dataKey="purchases"
-                    name="Purchases"
-                    stroke="#d97706"
-                    strokeWidth={2}
-                    dot={{ r: 2 }}
-                  />
-                )}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Monthly Bar Chart */}
-          <div className="card p-4">
-            <h2 className="font-semibold text-gray-900 mb-4">
-              Monthly Sales vs Purchases
-            </h2>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart
-                data={monthlyData}
-                margin={{ top: 5, right: 5, left: 0, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                <YAxis
-                  tick={{ fontSize: 10 }}
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                  width={42}
-                />
-                <Tooltip formatter={(v) => formatINRMasked(v, showAmount)} />
-                <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                <Bar
-                  dataKey="sales"
-                  name="Sales"
-                  fill="#2563eb"
-                  radius={[3, 3, 0, 0]}
-                />
-                <Bar
-                  dataKey="purchases"
-                  name="Purchases"
-                  fill="#d97706"
-                  radius={[3, 3, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            <ReportsCharts
+              monthlyData={monthlyData}
+              chartView={chartView}
+              showAmount={showAmount}
+            />
           </div>
         </div>
       )}

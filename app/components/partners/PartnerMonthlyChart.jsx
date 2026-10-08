@@ -12,20 +12,6 @@ import {
   Legend,
 } from "recharts";
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 const partnerColors = [
   { chart: "#3b82f6" },
   { chart: "#8b5cf6" },

@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import {
   Plus,
@@ -11,7 +12,6 @@ import {
   ScanLine,
   Trash,
 } from "lucide-react";
-import BarcodeScanner from "./BarcodeScanner";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
@@ -23,9 +23,16 @@ import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
 import EmptyState from "./shared/EmptyState";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import { SearchInput } from "./shared/FormField";
+import { useVisibleCols } from "../hooks/useVisibleCols";
 
 const PAGE_SIZE = 10;
+
+// Camera scanner (+ @zxing) only loads when the scan button is tapped.
+const BarcodeScanner = dynamic(() => import("./BarcodeScanner"), {
+  ssr: false,
+});
 
 const ALL_COLUMNS = [
   { key: "qty",        label: "Qty" },
@@ -41,13 +48,6 @@ const ALL_COLUMNS = [
 
 const DEFAULT_VISIBLE = new Set(["qty", "supplier", "dateAdded", "total", "buyPrice", "totalPrice", "available"]);
 
-function loadVisibleCols() {
-  try {
-    const saved = localStorage.getItem("fabrics_visible_cols");
-    if (saved) return new Set(JSON.parse(saved));
-  } catch {}
-  return new Set(DEFAULT_VISIBLE);
-}
 
 const emptyRow = {
   name: "",
@@ -93,21 +93,11 @@ export default function Fabrics() {
   const [linkingPurchase, setLinkingPurchase] = useState(false);
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
-  const [visibleCols, setVisibleCols] = useState(loadVisibleCols);
+  const { visibleCols, setVisibleCols, toggleCol } = useVisibleCols(
+    "fabrics_visible_cols",
+    DEFAULT_VISIBLE,
+  );
   const purchaseLookupTimer = useRef(null);
-
-  useEffect(() => {
-    localStorage.setItem("fabrics_visible_cols", JSON.stringify([...visibleCols]));
-  }, [visibleCols]);
-
-  function toggleCol(key) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
 
   const col = (key) => visibleCols.has(key);
 
@@ -123,12 +113,12 @@ export default function Fabrics() {
         fetchAllRows((from, to) =>
           supabase
             .from("fabrics")
-            .select("*")
+            .select("id, name, total_meters, available_meters, purchase_price_per_meter, selling_price_per_meter, supplier_id, purchase_id, barcode, quantity, created_at")
             .order("created_at", { ascending: false })
             .range(from, to),
         ),
         fetchAllRows((from, to) =>
-          supabase.from("suppliers").select("*").order("name").range(from, to),
+          supabase.from("suppliers").select("id, name").order("name").range(from, to),
         ),
       ]);
       setSuppliers(suppliersRows);
@@ -177,7 +167,7 @@ export default function Fabrics() {
   async function fetchSuppliers() {
     try {
       const rows = await fetchAllRows((from, to) =>
-        supabase.from("suppliers").select("*").order("name").range(from, to),
+        supabase.from("suppliers").select("id, name").order("name").range(from, to),
       );
       setSuppliers(rows);
     } catch (err) {
@@ -435,7 +425,7 @@ export default function Fabrics() {
     setShowForm(true);
   }
 
-  const filtered = fabrics.filter((f) => {
+  const filtered = useMemo(() => fabrics.filter((f) => {
     const q = searchTerm.toLowerCase().trim();
     const matchesSearch = !q ||
       f.name.toLowerCase().includes(q) ||
@@ -448,19 +438,21 @@ export default function Fabrics() {
     const matchesTo =
       !dateTo || (f.created_at && f.created_at <= dateTo + "T23:59:59");
     return matchesSearch && matchesSupplier && matchesFrom && matchesTo;
-  });
+  }), [fabrics, searchTerm, filterSupplier, dateFrom, dateTo]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paginated = useMemo(
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filtered, page],
+  );
 
-  const lowStock = fabrics.filter((f) => f.available_meters < 2);
+  const lowStock = useMemo(
+    () => fabrics.filter((f) => f.available_meters < 2),
+    [fabrics],
+  );
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   return (

@@ -37,6 +37,7 @@ const Modal = memo(function Modal({
     sm: "max-w-sm",
     md: "max-w-lg",
     lg: "max-w-2xl",
+    "3xl": "max-w-3xl",
     xl: "max-w-4xl",
     full: "max-w-full mx-4",
   };

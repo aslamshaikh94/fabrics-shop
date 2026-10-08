@@ -48,11 +48,6 @@ export function parseFabricEntries(text) {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // Log ALL lines for debugging
-  console.log("=== ALL EXTRACTED LINES ===");
-  lines.forEach((l, i) => console.log(`${i}: "${l}"`));
-  console.log("=== END ===");
-
   const entries = [];
 
   // Find all MTR lines
@@ -62,7 +57,6 @@ export function parseFabricEntries(text) {
       mtrLines.push(i);
     }
   }
-  console.log("MTR lines at indices:", mtrLines);
 
   // For each MTR line, look backwards to find the product info
   for (const mtrIdx of mtrLines) {
@@ -74,11 +68,8 @@ export function parseFabricEntries(text) {
 
     const qty = parseFloat(qtyMatch[1].replace(/,/g, ""));
     if (!qty || qty <= 0 || qty > 10000) {
-      console.log(`  Skipping MTR line ${mtrIdx}: invalid qty ${qty}`);
       continue;
     }
-
-    console.log(`\nProcessing MTR at line ${mtrIdx}: qty=${qty}`);
 
     // Look backwards up to 5 lines to find product name and amount
     let productName = null;
@@ -92,19 +83,15 @@ export function parseFabricEntries(text) {
       const prevLine = lines[mtrIdx - lookback];
       const prevNum = parseFloat(prevLine.replace(/,/g, ""));
 
-      console.log(`  Lookback ${lookback}: "${prevLine}" (num=${prevNum})`);
-
       if (!isNaN(prevNum) && prevNum > 0) {
         // This could be the amount
         if (!amount) {
           amount = prevNum;
-          console.log(`    -> Found amount: ${amount}`);
         }
       } else if (/[a-zA-Z]/.test(prevLine)) {
         // This has text - could be product name
         if (!productName) {
           productName = prevLine;
-          console.log(`    -> Found product name: "${productName}"`);
         }
       }
     }
@@ -121,9 +108,6 @@ export function parseFabricEntries(text) {
 
       if (name.length >= 2) {
         const rate = Math.round((amount / qty) * 100) / 100;
-        console.log(
-          `  -> Extracted: name="${name}", qty=${qty}, amount=${amount}, rate=${rate}`,
-        );
 
         if (rate > 0) {
           entries.push({
@@ -134,11 +118,8 @@ export function parseFabricEntries(text) {
           });
         }
       }
-    } else {
-      console.log(`  -> Could not find product info for MTR at line ${mtrIdx}`);
     }
   }
 
-  console.log(`\nTotal entries found: ${entries.length}`);
   return entries;
 }

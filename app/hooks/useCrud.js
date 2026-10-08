@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, safeQuery, withRetry } from "../lib/supabase";
-import { uploadToBucket, buildUploadPath } from "../utils/upload";
+import { supabase, safeQuery } from "../lib/supabase";
 
 /**
  * Reusable hook for common CRUD operations on a Supabase table.
@@ -21,6 +20,13 @@ export function useCrud(table, options = {}) {
     onError,
   } = options;
 
+  const orderByRef = useRef(orderBy);
+  const filterRef = useRef(filter);
+  const onErrorRef = useRef(onError);
+  orderByRef.current = orderBy;
+  filterRef.current = filter;
+  onErrorRef.current = onError;
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -33,8 +39,8 @@ export function useCrud(table, options = {}) {
     setError(null);
     try {
       let query = supabase.from(table).select(select);
-      if (filter) {
-        for (const [key, value] of Object.entries(filter)) {
+      if (filterRef.current) {
+        for (const [key, value] of Object.entries(filterRef.current)) {
           if (value && typeof value === "object" && value.operator) {
             query = query[value.operator](key, value.value);
           } else {
@@ -42,16 +48,16 @@ export function useCrud(table, options = {}) {
           }
         }
       }
-      if (orderBy) {
-        query = query.order(orderBy.column, {
-          ascending: orderBy.ascending !== false,
+      if (orderByRef.current) {
+        query = query.order(orderByRef.current.column, {
+          ascending: orderByRef.current.ascending !== false,
         });
       }
       const result = await safeQuery(query);
       if (mountedRef.current) {
         if (result.error) {
           setError(result.error);
-          onError?.(result.error);
+          onErrorRef.current?.(result.error);
         } else {
           setData(result.data || []);
         }
@@ -59,12 +65,12 @@ export function useCrud(table, options = {}) {
     } catch (err) {
       if (mountedRef.current) {
         setError(err.message || "Error fetching data");
-        onError?.(err);
+        onErrorRef.current?.(err);
       }
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [table, select, orderBy, filter, onError]);
+  }, [table, select]);
 
   useEffect(() => {
     fetchAll();
@@ -121,63 +127,5 @@ export function useCrud(table, options = {}) {
     create,
     update,
     remove,
-  };
-}
-
-/**
- * Hook for file uploads to Supabase storage
- */
-export function useFileUpload(bucket) {
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const upload = useCallback(
-    async (file, pathPrefix = "") => {
-      if (!file) return "";
-      setUploading(true);
-      setError(null);
-      try {
-        const path = buildUploadPath(pathPrefix, file);
-        const { url, error: uploadError, infraMessage } =
-          await uploadToBucket(bucket, file, path);
-        if (!url) {
-          // Surface the specific infra cause (missing bucket vs. rejected by
-          // storage policies) instead of masking both as one problem.
-          const msg = infraMessage || "Upload failed";
-          setError(msg);
-          const err = new Error(msg);
-          err.cause = uploadError;
-          throw err;
-        }
-        return url;
-      } catch (err) {
-        setError(err.message || "Upload failed");
-        throw err;
-      } finally {
-        setUploading(false);
-      }
-    },
-    [bucket],
-  );
-
-  const removeFile = useCallback(
-    async (url) => {
-      if (!url) return;
-      try {
-        const path = url.split("/").pop();
-        await supabase.storage.from(bucket).remove([path]);
-      } catch (err) {
-        console.error("Error removing file:", err);
-      }
-    },
-    [bucket],
-  );
-
-  return {
-    upload,
-    removeFile,
-    uploading,
-    error,
-    clearError: () => setError(null),
   };
 }

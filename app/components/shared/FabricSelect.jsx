@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronDown, ScanLine } from "lucide-react";
 
 export default function FabricSelect({
@@ -26,9 +26,11 @@ export default function FabricSelect({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filtered = fabrics.filter((f) =>
-    f.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return fabrics;
+    return fabrics.filter((f) => f.name.toLowerCase().includes(q));
+  }, [fabrics, search]);
 
   return (
     <div ref={ref} className={`relative ${containerClass}`}>

@@ -124,3 +124,32 @@ export function formatDateTime(value) {
 export function formatMonthName(value = new Date()) {
   return new Date(value).toLocaleDateString("en-GB", { month: "long" });
 }
+
+/** "Jan".."Dec" — month labels for pickers, table rows and chart axes. */
+export const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * Percent change between current and previous period values.
+ * Returns null when there is no previous value.
+ * `value` is the magnitude as a 1-decimal string (no sign, no "%");
+ * `up` says the direction, `good` defaults to "up = good" (callers flip it
+ * for metrics where growth is bad, e.g. "to collect").
+ */
+export function pctChange(curr, prev) {
+  if (!prev) return null;
+  const diff = ((curr - prev) / prev) * 100;
+  return { value: Math.abs(diff).toFixed(1), up: diff >= 0, good: diff >= 0 };
+}

@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabase";
 import {
   ScanLine,
@@ -10,10 +11,16 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import BarcodeScanner from "./BarcodeScanner";
 import { useToast } from "./Toast";
+import SaveSpinner from "./shared/SaveSpinner";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import { formatNumber2 } from "../utils/formatters";
 import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
+
+// Camera scanner (+ @zxing) only loads when the scan button is tapped.
+const BarcodeScanner = dynamic(() => import("./BarcodeScanner"), {
+  ssr: false,
+});
 
 function generateUUID() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -55,7 +62,7 @@ export default function QuickSale() {
 
   async function fetchData() {
     const [fabRes, partRes] = await Promise.all([
-      supabase.from("fabrics").select("*").order("name"),
+      supabase.from("fabrics").select("id, name, barcode, available_meters, purchase_price_per_meter, selling_price_per_meter").order("name"),
       supabase.from("partners").select("id, name").eq("is_active", true).order("name"),
     ]);
     setFabrics(fabRes.data || []);
@@ -125,12 +132,11 @@ export default function QuickSale() {
     setActiveItemIdx(items.length);
   }
 
-  const filteredFabrics =
-    search.length > 1
-      ? fabrics.filter((f) =>
-          f.name.toLowerCase().includes(search.toLowerCase()),
-        )
-      : [];
+  const filteredFabrics = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (q.length <= 1) return [];
+    return fabrics.filter((f) => f.name.toLowerCase().includes(q));
+  }, [fabrics, search]);
 
   const subtotal = items.reduce(
     (sum, item) =>
@@ -254,11 +260,7 @@ export default function QuickSale() {
   }
 
   if (loading)
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
 
   return (
     <div className="max-w-lg mx-auto space-y-5">
@@ -586,31 +588,7 @@ export default function QuickSale() {
               disabled={saving}
               className="btn btn-primary w-full py-3 text-base"
             >
-              {saving ? (
-                <>
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 inline"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Saving...
-                </>
-              ) : (
+              {saving ? <SaveSpinner /> : (
                 `Record Sale — ₹${formatNumber2(netTotal)}`
               )}
             </button>

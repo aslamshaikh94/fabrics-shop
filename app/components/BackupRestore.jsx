@@ -6,9 +6,7 @@ import {
   Database,
   AlertTriangle,
   CheckCircle,
-  Clock,
   Info,
-  X,
   FileJson,
 } from "lucide-react";
 import { formatDateTime } from "../utils/formatters";

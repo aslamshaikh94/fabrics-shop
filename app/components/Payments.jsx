@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   Search,
@@ -23,8 +23,15 @@ import {
 
 import { useToast } from "./Toast";
 import ConfirmModal from "./ConfirmModal";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import { matchPartner } from "../utils/partnerWithdrawal";
-import { formatINR, formatNumber2 } from "../utils/formatters";
+import {
+  formatINR,
+  formatDateShort,
+  formatDateLong,
+  formatNumber2,
+  MONTHS,
+} from "../utils/formatters";
 import {
   CASH_ACCOUNT_NAME,
   getCashAccountId,
@@ -34,20 +41,7 @@ import {
 
 const PAGE_SIZE = 10;
 
-const MONTH_LABELS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+
 
 // Round to 2 decimals (money safe)
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -144,11 +138,11 @@ export default function Payments({
       ] = await Promise.all([
         supabase
           .from("purchase_payments")
-          .select("*, purchase_id")
+          .select("id, purchase_id, partner_id, amount, reinvested_amount, payment_date, payment_method, reference_number, notes")
           .order("payment_date", { ascending: false }),
         supabase
           .from("sale_payments")
-          .select("*, sale_id")
+          .select("id, sale_id, sale_group_id, partner_id, amount, payment_date, payment_method, reference_number, notes")
           .order("payment_date", { ascending: false }),
         supabase.from("suppliers").select("id, name"),
         supabase.from("customers").select("id, name"),
@@ -162,14 +156,14 @@ export default function Payments({
           .select(
             "id, supplier_id, total_amount, paid_amount, remaining_amount",
           ),
-        supabase.from("partners").select("*").order("name"),
+        supabase.from("partners").select("id, name, share_percentage, is_active, opening_balance, opening_balance_date").order("name"),
         supabase
           .from("cash_deposits")
-          .select("*")
+          .select("id, partner_id, amount, deposit_date, method, notes")
           .order("deposit_date", { ascending: false }),
         supabase
           .from("withdrawals")
-          .select("*")
+          .select("id, amount, withdrawal_date, withdrawn_by, reason")
           .order("withdrawal_date", { ascending: false }),
         supabase
           .from("expenses")
@@ -393,6 +387,10 @@ export default function Payments({
   // derived in the ledger from the fact that the secondary account holder is
   // holding the cash being deposited.
   function openDepositForm() {
+    const currentHolder =
+      trackerPartner && holderNames.includes(trackerPartner)
+        ? trackerPartner
+        : holdersWithActivity[0] || holderNames[0] || null;
     setDepositForm({
       id: null,
       amount: "",
@@ -400,7 +398,7 @@ export default function Payments({
       method: "upi",
       partner_id:
         getPrimaryAccountPartner(partners)?.id ||
-        partners.find((p) => p.name === effectiveHolder)?.id ||
+        partners.find((p) => p.name === currentHolder)?.id ||
         "",
       notes: "",
     });
@@ -552,274 +550,130 @@ export default function Payments({
     }
   }
 
-  async function fetchSupplierSummary() {
-    try {
-      const [purchasesRes, suppliersRes] = await Promise.all([
-        supabase
-          .from("purchases")
-          .select("supplier_id, total_amount, paid_amount, remaining_amount"),
-        supabase.from("suppliers").select("id, name"),
-      ]);
-
-      const supplierNames = Object.fromEntries(
-        (suppliersRes.data || []).map((s) => [s.id, s.name]),
-      );
-
-      const data = purchasesRes.data || [];
-      const map = {};
-      data.forEach((p) => {
-        const name = supplierNames[p.supplier_id] || "Unknown";
-        if (!map[name]) map[name] = { name, total: 0, paid: 0, pending: 0 };
-        map[name].total += p.total_amount || 0;
-        map[name].paid += p.paid_amount || 0;
-        map[name].pending += Math.max(
-          (p.total_amount || 0) - (p.paid_amount || 0),
-          0,
-        );
-      });
-      setSupplierSummary(
-        Object.values(map).sort((a, b) => b.pending - a.pending),
-      );
-    } catch (err) {
-      console.error("Error fetching supplier summary:", err);
-    }
-  }
-
-  async function fetchPayments() {
-    try {
-      const [
-        purchaseRes,
-        saleRes,
-        suppliersRes,
-        customersRes,
-        salesRes,
-        partnersRes,
-        depositsRes,
-        withdrawalsRes,
-        expensesRes,
-      ] = await Promise.all([
-        supabase
-          .from("purchase_payments")
-          .select("*, purchase_id")
-          .order("payment_date", { ascending: false }),
-        supabase
-          .from("sale_payments")
-          .select("*")
-          .order("payment_date", { ascending: false }),
-        supabase.from("purchases").select("id, supplier_id"),
-        supabase.from("customers").select("id, name"),
-        supabase
-          .from("sales")
-          .select("id, sale_group_id, customer_id, customer_name"),
-        supabase.from("partners").select("*").order("name"),
-        supabase
-          .from("cash_deposits")
-          .select("*")
-          .order("deposit_date", { ascending: false }),
-        supabase
-          .from("withdrawals")
-          .select("*")
-          .order("withdrawal_date", { ascending: false }),
-        supabase
-          .from("expenses")
-          .select("id, title, category, amount, expense_date, partner_id")
-          .order("expense_date", { ascending: false }),
-      ]);
-
-      const partnerMap = Object.fromEntries(
-        (partnersRes.data || []).map((p) => [p.id, p.name]),
-      );
-      setPartners(partnersRes.data || []);
-      setWithdrawals(withdrawalsRes.data || []);
-      setExpenses(
-        (expensesRes.data || []).map((e) => ({
-          ...e,
-          partner_name: e.partner_id ? partnerMap[e.partner_id] || "Unknown" : null,
-        })),
-      );
-      setDeposits(
-        (depositsRes.data || []).map((d) => ({
-          ...d,
-          partner_name: d.partner_id
-            ? partnerMap[d.partner_id] || "Unknown"
-            : null,
-        })),
-      );
-
-      const purchasePaymentsData = purchaseRes.data || [];
-      const salePaymentsData = saleRes.data || [];
-      const purchases = (suppliersRes.data || []).reduce((map, p) => {
-        map[p.id] = p.supplier_id;
-        return map;
-      }, {});
-      const sales = (salesRes.data || []).reduce((map, s) => {
-        map[s.id] = {
-          customer_id: s.customer_id,
-          customer_name: s.customer_name,
-        };
-        return map;
-      }, {});
-      const salesByGroup = {};
-      (salesRes.data || []).forEach((s) => {
-        if (s.sale_group_id && !salesByGroup[s.sale_group_id]) {
-          salesByGroup[s.sale_group_id] = {
-            customer_id: s.customer_id,
-            customer_name: s.customer_name,
-          };
-        }
-      });
-
-      // Build customer name lookup from the customers table
-      const customerNames = Object.fromEntries(
-        (customersRes.data || []).map((c) => [c.id, c.name]),
-      );
-
-      // Get all unique supplier IDs
-      const supplierIds = [
-        ...new Set(
-          purchasePaymentsData
-            .map((p) => purchases[p.purchase_id])
-            .filter(Boolean),
-        ),
-      ];
-
-      // Fetch supplier names
-      const supplierNamesRes =
-        supplierIds.length > 0
-          ? await supabase
-              .from("suppliers")
-              .select("id, name")
-              .in("id", supplierIds)
-          : { data: [] };
-
-      const supplierNames = Object.fromEntries(
-        (supplierNamesRes.data || []).map((s) => [s.id, s.name]),
-      );
-
-      // Attach resolved names to payment records
-      const enrichedPurchasePayments = purchasePaymentsData.map((p) => ({
-        ...p,
-        purchase: {
-          suppliers: {
-            name: supplierNames[purchases[p.purchase_id]] || "Unknown",
-          },
-        },
-      }));
-      const enrichedSalePayments = salePaymentsData.map((s) => {
-        const saleInfo =
-          sales[s.sale_id] || salesByGroup[s.sale_group_id] || {};
-        // First try customer_name from the sale record itself (for walk-in sales with custom names)
-        const name = saleInfo.customer_name
-          ? saleInfo.customer_name
-          : saleInfo.customer_id
-            ? customerNames[saleInfo.customer_id] || "Walk-in"
-            : "Walk-in";
-        return {
-          ...s,
-          sale: {
-            customers: { name },
-          },
-          partner_name: s.partner_id
-            ? partnerMap[s.partner_id] || "Unknown"
-            : null,
-        };
-      });
-
-      setPurchasePayments(enrichedPurchasePayments);
-      setSalePayments(enrichedSalePayments);
-    } catch (error) {
-      console.error("Error fetching payments:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const filterByDate = (dateStr) => {
-    const date = new Date(dateStr);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const paymentsMade = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    switch (dateFilter) {
-      case "today": {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        return d.getTime() === today.getTime();
+    const filterByDate = (dateStr) => {
+      const date = new Date(dateStr);
+      switch (dateFilter) {
+        case "today": {
+          const d = new Date(date);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime() === today.getTime();
+        }
+        case "week": {
+          const w = new Date(today);
+          w.setDate(w.getDate() - 7);
+          return date >= w;
+        }
+        case "month": {
+          const m = new Date(today);
+          m.setMonth(m.getMonth() - 1);
+          return date >= m;
+        }
+        case "custom":
+          if (customDateStart && date < new Date(customDateStart)) return false;
+          if (customDateEnd && date > new Date(customDateEnd)) return false;
+          return true;
+        default:
+          return true;
       }
-      case "week": {
-        const w = new Date(today);
-        w.setDate(w.getDate() - 7);
-        return date >= w;
+    };
+    return purchasePayments
+      .filter((p) => filterByDate(p.payment_date))
+      .map((p) => ({
+        id: p.id,
+        type: "paid",
+        amount: p.amount,
+        date: p.payment_date,
+        method: p.payment_method,
+        reference: p.reference_number,
+        party: p.purchase?.suppliers?.name || "Unknown",
+        notes: p.notes,
+      }));
+  }, [purchasePayments, dateFilter, customDateStart, customDateEnd]);
+
+  const paymentsReceived = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const filterByDate = (dateStr) => {
+      const date = new Date(dateStr);
+      switch (dateFilter) {
+        case "today": {
+          const d = new Date(date);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime() === today.getTime();
+        }
+        case "week": {
+          const w = new Date(today);
+          w.setDate(w.getDate() - 7);
+          return date >= w;
+        }
+        case "month": {
+          const m = new Date(today);
+          m.setMonth(m.getMonth() - 1);
+          return date >= m;
+        }
+        case "custom":
+          if (customDateStart && date < new Date(customDateStart)) return false;
+          if (customDateEnd && date > new Date(customDateEnd)) return false;
+          return true;
+        default:
+          return true;
       }
-      case "month": {
-        const m = new Date(today);
-        m.setMonth(m.getMonth() - 1);
-        return date >= m;
-      }
-      case "custom":
-        if (customDateStart && date < new Date(customDateStart)) return false;
-        if (customDateEnd && date > new Date(customDateEnd)) return false;
+    };
+    return salePayments
+      .filter((p) => filterByDate(p.payment_date))
+      .map((p) => ({
+        id: p.id,
+        type: "received",
+        amount: p.amount,
+        date: p.payment_date,
+        method: p.payment_method,
+        reference: p.reference_number,
+        party: p.sale?.customers?.name || "Walk-in",
+        notes: p.notes,
+        partner_id: p.partner_id || "",
+        partner_name: p.partner_name || null,
+        sale_group_id: p.sale_group_id || null,
+        sale_id: p.sale_id || null,
+      }));
+  }, [salePayments, dateFilter, customDateStart, customDateEnd]);
+
+  const allPayments = useMemo(() =>
+    [...paymentsMade, ...paymentsReceived]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .filter((p) => {
+        if (paymentTypeFilter !== "all" && p.type !== paymentTypeFilter)
+          return false;
+        if (holderFilter === "__untracked__") {
+          if (p.type !== "received" || p.partner_name) return false;
+        } else if (
+          holderFilter !== "all" &&
+          (p.partner_name || "") !== holderFilter
+        )
+          return false;
+        if (searchTerm)
+          return p.party.toLowerCase().includes(searchTerm.toLowerCase());
         return true;
-      default:
-        return true;
-    }
-  };
-
-  const paymentsMade = purchasePayments
-    .filter((p) => filterByDate(p.payment_date))
-    .map((p) => ({
-      id: p.id,
-      type: "paid",
-      amount: p.amount,
-      date: p.payment_date,
-      method: p.payment_method,
-      reference: p.reference_number,
-      party: p.purchase?.suppliers?.name || "Unknown",
-      notes: p.notes,
-    }));
-
-  const paymentsReceived = salePayments
-    .filter((p) => filterByDate(p.payment_date))
-    .map((p) => ({
-      id: p.id,
-      type: "received",
-      amount: p.amount,
-      date: p.payment_date,
-      method: p.payment_method,
-      reference: p.reference_number,
-      party: p.sale?.customers?.name || "Walk-in",
-      notes: p.notes,
-      partner_id: p.partner_id || "",
-      partner_name: p.partner_name || null,
-      // Kept so an edited receipt can be validated against its sale's net.
-      sale_group_id: p.sale_group_id || null,
-      sale_id: p.sale_id || null,
-    }));
-
-  const allPayments = [...paymentsMade, ...paymentsReceived]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .filter((p) => {
-      if (paymentTypeFilter !== "all" && p.type !== paymentTypeFilter)
-        return false;
-      if (holderFilter === "__untracked__") {
-        // Customer payments collected but not credited to an account holder
-        if (p.type !== "received" || p.partner_name) return false;
-      } else if (
-        holderFilter !== "all" &&
-        (p.partner_name || "") !== holderFilter
-      )
-        return false;
-      if (searchTerm)
-        return p.party.toLowerCase().includes(searchTerm.toLowerCase());
-      return true;
-    });
+      }),
+  [paymentsMade, paymentsReceived, paymentTypeFilter, holderFilter, searchTerm]);
 
   const totalPages = Math.ceil(allPayments.length / PAGE_SIZE);
-  const paginatedPayments = allPayments.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE,
+  const paginatedPayments = useMemo(
+    () => allPayments.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [allPayments, page],
   );
 
-  const totalPaid = paymentsMade.reduce((sum, p) => sum + p.amount, 0);
-  const totalReceived = paymentsReceived.reduce((sum, p) => sum + p.amount, 0);
+  const totalPaid = useMemo(
+    () => paymentsMade.reduce((sum, p) => sum + p.amount, 0),
+    [paymentsMade],
+  );
+  const totalReceived = useMemo(
+    () => paymentsReceived.reduce((sum, p) => sum + p.amount, 0),
+    [paymentsReceived],
+  );
   const netFlow = totalReceived - totalPaid;
 
   // ── Account holders (partners) ──
@@ -1244,7 +1098,7 @@ export default function Payments({
     ...holderCredits,
     ...yearDeposits.map((d) => ({ date: d.deposit_date, amount: d.amount })),
   ];
-  const holderMonthRows = MONTH_LABELS.map((label, i) => {
+  const holderMonthRows = MONTHS.map((label, i) => {
     const credit = holderYearCredits
       .filter((e) => new Date(e.date).getMonth() === i)
       .reduce((s, e) => s + (e.amount || 0), 0);
@@ -1503,11 +1357,7 @@ export default function Payments({
   );
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600"></div>
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   return (
@@ -2089,14 +1939,7 @@ export default function Payments({
                                     {e.description}
                                   </p>
                                   <p className="text-xs text-gray-400">
-                                    {new Date(e.date).toLocaleDateString(
-                                      "en-GB",
-                                      {
-                                        day: "numeric",
-                                        month: "short",
-                                        year: "2-digit",
-                                      },
-                                    )}
+                                    {formatDateShort(e.date)}
                                   </p>
                                 </div>
                                 <span
@@ -2270,7 +2113,7 @@ export default function Payments({
                             colSpan={2}
                           >
                             {openingSnapshotInYear
-                              ? `Opening balance (as of ${new Date(manualOpeningDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })})`
+                              ? `Opening balance (as of ${formatDateLong(manualOpeningDate)})`
                               : `Opening balance (before ${currentPartnerYear})`}
                             {openingSnapshotInYear && (
                               <span className="block text-xs font-normal text-gray-400">
@@ -2290,11 +2133,7 @@ export default function Payments({
                       {statementRows.map((r) => (
                         <tr key={r.key} className="hover:bg-gray-50">
                           <td className="px-4 py-2.5 text-sm text-gray-600 whitespace-nowrap">
-                            {new Date(r.date).toLocaleDateString("en-GB", {
-                              day: "numeric",
-                              month: "short",
-                              year: "2-digit",
-                            })}
+                            {formatDateShort(r.date)}
                           </td>
                           <td className="px-4 py-2.5 text-sm text-gray-900">
                             {r.description}
@@ -2613,14 +2452,7 @@ export default function Payments({
                         <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5" />
-                            {new Date(payment.date).toLocaleDateString(
-                              "en-GB",
-                              {
-                                day: "numeric",
-                                month: "short",
-                                year: "2-digit",
-                              },
-                            )}
+                            {formatDateShort(payment.date)}
                           </span>
                           <span className="badge bg-gray-200 text-gray-700 uppercase">
                             {payment.method}
@@ -3149,11 +2981,7 @@ export default function Payments({
                         {p.sale?.customers?.name || "Walk-in"}
                       </span>
                       <span className="text-xs text-gray-400 whitespace-nowrap">
-                        {new Date(p.payment_date).toLocaleDateString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          year: "2-digit",
-                        })}
+                        {formatDateShort(p.payment_date)}
                       </span>
                       <span className="text-sm font-medium text-gray-900 whitespace-nowrap">
                         {formatINR(p.amount)}

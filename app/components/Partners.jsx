@@ -1,24 +1,23 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import dynamic from "next/dynamic";
 import {
   TrendingUp,
   DollarSign,
   Users,
-  Wallet,
   ShoppingBag,
   RefreshCw,
-  Calendar,
   Plus,
-  Trash2,
   UserPlus,
-  Pencil,
 } from "lucide-react";
 import { useToast } from "./Toast";
+import LoadingSpinner from "./shared/LoadingSpinner";
 import Modal from "./shared/Modal";
 import ConfirmModal from "./ConfirmModal";
 import { matchPartner } from "../utils/partnerWithdrawal";
+import { formatINRCompact, MONTHS } from "../utils/formatters";
+import { netSaleAmount, getAvailableYears } from "../utils/periods";
 
 // Dynamically import heavy sub-components (recharts is only loaded when needed)
 const PartnerMonthlyChart = dynamic(
@@ -55,27 +54,7 @@ const WithdrawalTable = dynamic(() => import("./partners/WithdrawalTable"), {
   ),
 });
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 
-function fmtShort(n) {
-  n = Number(n || 0);
-  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
-  return `₹${n}`;
-}
 
 export default function PartnersPage() {
   const toast = useToast();
@@ -116,7 +95,7 @@ export default function PartnersPage() {
       await fetchYears();
       const { data } = await supabase
         .from("partners")
-        .select("*")
+        .select("id, name, share_percentage, is_active")
         .eq("is_active", true)
         .order("created_at");
       const loaded = data || [];
@@ -134,25 +113,14 @@ export default function PartnersPage() {
   }, [year]);
 
   async function fetchYears() {
-    const { data } = await supabase
-      .from("sales")
-      .select("sale_date")
-      .order("sale_date", { ascending: true })
-      .limit(1);
-    const firstYear = data?.length
-      ? new Date(data[0].sale_date).getFullYear()
-      : new Date().getFullYear();
-    const currentYear = new Date().getFullYear();
-    const years = [];
-    for (let y = firstYear; y <= currentYear; y++) years.push(y);
-    setAvailableYears(years.reverse());
+    setAvailableYears(await getAvailableYears());
   }
 
   async function fetchPartners() {
     try {
       const { data } = await supabase
         .from("partners")
-        .select("*")
+        .select("id, name, share_percentage, is_active")
         .eq("is_active", true)
         .order("created_at");
       const loaded = data || [];
@@ -197,7 +165,7 @@ export default function PartnersPage() {
         const m = new Date(s.sale_date).getMonth();
         // total_amount is stored pre-discount, so net it for consistency
         monthly[m].sales +=
-          (s.total_amount || 0) - (s.discount_amount || 0);
+          netSaleAmount(s);
         monthly[m].grossProfit += s.margin || 0;
       });
 
@@ -413,11 +381,7 @@ export default function PartnersPage() {
   });
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-200 border-t-primary-600" />
-      </div>
-    );
+    return <LoadingSpinner className="h-64" />;
   }
 
   return (
@@ -502,7 +466,7 @@ export default function PartnersPage() {
                 </div>
               </div>
               <p className="text-lg font-bold text-blue-700">
-                {fmtShort(currentMonthData.sales)}
+                {formatINRCompact(currentMonthData.sales)}
               </p>
             </div>
             <div className="card p-4">
@@ -515,7 +479,7 @@ export default function PartnersPage() {
                 </div>
               </div>
               <p className="text-lg font-bold text-green-700">
-                {fmtShort(currentMonthData.grossProfit)}
+                {formatINRCompact(currentMonthData.grossProfit)}
               </p>
             </div>
             <div className="card p-4">
@@ -528,7 +492,7 @@ export default function PartnersPage() {
                 </div>
               </div>
               <p className="text-lg font-bold text-indigo-700">
-                {fmtShort(summary.totalSales)}
+                {formatINRCompact(summary.totalSales)}
               </p>
             </div>
             <div className="card p-4">
@@ -541,7 +505,7 @@ export default function PartnersPage() {
                 </div>
               </div>
               <p className="text-lg font-bold text-emerald-700">
-                {fmtShort(summary.grossProfit)}
+                {formatINRCompact(summary.grossProfit)}
               </p>
             </div>
           </div>
