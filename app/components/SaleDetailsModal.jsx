@@ -813,7 +813,7 @@ export default function SaleDetailsModal({
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Account{totalPay > 0 ? " *" : ""}
+                  Account{(parseFloat(editGroupFields.initial_payment) || 0) > 0 ? " *" : ""}
                 </label>
                 <select
                   value={editGroupFields.account_id}
