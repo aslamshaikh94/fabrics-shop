@@ -50,7 +50,7 @@ function makeEmptyForm() {
     payment_type: "cash",
     initial_payment: "",
     payment_method: "cash",
-    account_id: "",
+    partner_id: "",
     discount_amount: "",
     invoice_file: null,
   };
@@ -82,8 +82,8 @@ export default function SaleForm({
   useEffect(() => {
     if (open) {
       supabase
-        .from("payment_accounts")
-        .select("id,name,partner:partners(name)")
+        .from("partners")
+        .select("id,name")
         .eq("is_active", true)
         .order("name")
         .then(({ data }) => setAccounts(data || []));
@@ -297,12 +297,12 @@ export default function SaleForm({
             ? "cash"
             : "partial";
 
-      if (initialPayment > 0 && !formData.account_id) {
+      if (initialPayment > 0 && !formData.partner_id) {
         toast("Please select an account", "error");
         return;
       }
 
-      const creditAccountId = formData.account_id || null;
+      const creditPartnerId = formData.partner_id || null;
 
       // Auto-create customer for walk-in with a name
       let customerId = formData.customer_id;
@@ -408,7 +408,7 @@ export default function SaleForm({
                 amount: netTotal,
                 payment_date: formData.sale_date,
                 payment_method: formData.payment_method,
-                account_id: creditAccountId,
+                partner_id: creditPartnerId,
               },
             ]);
           if (payErr) throw payErr;
@@ -421,7 +421,7 @@ export default function SaleForm({
                 amount: Math.min(initialPayment, netTotal),
                 payment_date: formData.sale_date,
                 payment_method: formData.payment_method,
-                account_id: creditAccountId,
+                partner_id: creditPartnerId,
               },
             ]);
           if (payErr) throw payErr;
@@ -474,7 +474,7 @@ export default function SaleForm({
               amount: totalPay,
               payment_date: formData.sale_date,
               payment_method: formData.payment_method,
-              account_id: creditAccountId,
+              partner_id: creditPartnerId,
             }]);
             if (payErr) throw payErr;
           }
@@ -525,7 +525,7 @@ export default function SaleForm({
       payment_type: sale.payment_type,
       initial_payment: sale.paid_amount > 0 ? sale.paid_amount.toString() : "",
       payment_method: "cash",
-      account_id: "",
+      partner_id: "",
       discount_amount: sale.discount_amount?.toString() || "",
       invoice_file: null,
     });
@@ -921,14 +921,14 @@ export default function SaleForm({
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Account *</label>
                 <select
-                  value={formData.account_id}
-                  onChange={(e) => setFormData({ ...formData, account_id: e.target.value })}
+                  value={formData.partner_id}
+                  onChange={(e) => setFormData({ ...formData, partner_id: e.target.value })}
                   className="input bg-white"
                 >
                   <option value="">— Select account —</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name}{a.partner ? ` (${a.partner.name})` : ""}
+                      {a.name}
                     </option>
                   ))}
                 </select>
