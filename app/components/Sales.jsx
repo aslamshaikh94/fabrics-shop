@@ -56,7 +56,7 @@ const INITIAL_PAYMENT = {
   amount: "",
   payment_date: new Date().toISOString().split("T")[0],
   payment_method: "cash",
-  account_id: "",
+  partner_id: "",
 };
 
 export default function Sales() {
@@ -99,7 +99,7 @@ export default function Sales() {
           .order("created_at", { ascending: false }),
         supabase.from("customers").select("id, name").order("name"),
         supabase.from("fabrics").select("id, name, available_meters, purchase_price_per_meter, selling_price_per_meter").order("name"),
-        supabase.from("payment_accounts").select("id,name,account_type,partner:partners(name)").eq("is_active", true).order("name"),
+        supabase.from("partners").select("id,name").eq("is_active", true).order("name"),
         supabase.from("partners").select("id,name").eq("is_active", true).order("name"),
       ]);
       if (salesRes.error) throw salesRes.error;
@@ -169,7 +169,7 @@ export default function Sales() {
       toast("Please fix the validation errors", "error");
       return;
     }
-    if (!paymentData.account_id) {
+    if (!paymentData.partner_id) {
       toast("Please select an account", "error");
       return;
     }
@@ -195,7 +195,7 @@ export default function Sales() {
         amount: amt,
         payment_date: paymentData.payment_date,
         payment_method: paymentData.payment_method,
-        account_id: paymentData.account_id,
+        partner_id: paymentData.partner_id,
       }]);
       if (error) throw error;
       setPaymentData({ ...INITIAL_PAYMENT });
@@ -213,7 +213,7 @@ export default function Sales() {
       const saleIds = group.items.map((i) => i.id);
       const { data } = await supabase
         .from("sale_payments")
-        .select("id, sale_id, sale_group_id, amount, payment_date, payment_method, reference_number, created_at, account:payment_accounts(id,name,partner:partners(name))")
+        .select("id, sale_id, sale_group_id, amount, payment_date, payment_method, reference_number, created_at, partner:partners(id,name)")
         .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: false });
       // Deduplicate: group payments (sale_group_id set) take priority, exclude old per-item rows that are already covered
@@ -711,9 +711,9 @@ export default function Sales() {
                       <p className="text-sm text-gray-500">
                         {formatDate(p.payment_date)}
                       </p>
-                      {p.account && (
+                      {p.partner && (
                         <p className="text-xs text-primary-600 font-medium mt-0.5">
-                          {p.account.name}{p.account.partner ? ` · ${p.account.partner.name}` : ""}
+                          {p.partner.name}
                         </p>
                       )}
                     </div>
@@ -807,15 +807,15 @@ export default function Sales() {
                       Account *
                     </label>
                     <select
-                      value={paymentData.account_id}
-                      onChange={(e) => setPaymentData({ ...paymentData, account_id: e.target.value })}
+                      value={paymentData.partner_id}
+                      onChange={(e) => setPaymentData({ ...paymentData, partner_id: e.target.value })}
                       className="input"
                       required
                     >
                       <option value="">— Select account —</option>
                       {accounts.map((a) => (
                         <option key={a.id} value={a.id}>
-                          {a.name}{a.partner ? ` (${a.partner.name})` : ""}
+                          {a.name}
                         </option>
                       ))}
                     </select>
