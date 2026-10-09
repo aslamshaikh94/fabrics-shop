@@ -45,7 +45,7 @@ const EMPTY_GROUP_FIELDS = {
   payment_type: "cash",
   initial_payment: "",
   payment_method: "cash",
-  account_id: "",
+  partner_id: "",
   discount_amount: "",
   invoice_file: null,
 };
@@ -77,8 +77,8 @@ export default function SaleDetailsModal({
   useEffect(() => {
     if (open) {
       supabase
-        .from("payment_accounts")
-        .select("id,name,partner:partners(name)")
+        .from("partners")
+        .select("id,name")
         .eq("is_active", true)
         .order("name")
         .then(({ data }) => setAccounts(data || []));
@@ -237,10 +237,7 @@ export default function SaleDetailsModal({
           .eq("id", saleId);
       }
       const totalPay = derivedPaymentType === "cash" ? totalNet : (initialPay > 0 ? Math.min(initialPay, totalNet) : 0);
-      if (
-        totalPay > 0 &&
-        !editGroupFields.account_id
-      ) {
+      if (totalPay > 0 && !editGroupFields.partner_id) {
         toast("Please select an account", "error");
         setSavingGroupFields(false);
         return;
@@ -266,7 +263,7 @@ export default function SaleDetailsModal({
               ? firstPay.payment_date
               : editGroupFields.sale_date,
           payment_method: editGroupFields.payment_method,
-          account_id: editGroupFields.account_id || null,
+          partner_id: editGroupFields.partner_id || null,
         }]);
       }
       onSaleUpdated();
@@ -341,7 +338,7 @@ export default function SaleDetailsModal({
     try {
       const { data } = await supabase
         .from("sale_payments")
-        .select("amount, payment_method, account_id, payment_date, created_at")
+        .select("amount, payment_method, partner_id, payment_date, created_at")
         .or(`sale_group_id.eq.${group.id},sale_id.in.(${saleIds.join(",")})`)
         .order("payment_date", { ascending: true })
         .order("created_at", { ascending: true });
@@ -371,7 +368,7 @@ export default function SaleDetailsModal({
       payment_method: ["cash", "upi"].includes(firstPay?.payment_method)
         ? firstPay.payment_method
         : "cash",
-      account_id: firstPay?.account_id || "",
+      partner_id: firstPay?.partner_id || "",
       discount_amount: (group.items[0]?.discount_amount || 0).toString(),
       invoice_file: null,
     });
@@ -816,16 +813,16 @@ export default function SaleDetailsModal({
                   Account{(parseFloat(editGroupFields.initial_payment) || 0) > 0 ? " *" : ""}
                 </label>
                 <select
-                  value={editGroupFields.account_id}
+                  value={editGroupFields.partner_id}
                   onChange={(e) =>
-                    setEditGroupFields({ ...editGroupFields, account_id: e.target.value })
+                    setEditGroupFields({ ...editGroupFields, partner_id: e.target.value })
                   }
                   className="input bg-white"
                 >
                   <option value="">— Select account —</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name}{a.partner ? ` (${a.partner.name})` : ""}
+                      {a.name}
                     </option>
                   ))}
                 </select>
