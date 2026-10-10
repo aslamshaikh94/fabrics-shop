@@ -511,7 +511,7 @@ export default function Purchases() {
   async function fetchPurchaseFabrics(purchaseId) {
     try {
       const [fabricsRes, itemsRes] = await Promise.all([
-        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode, discount_amount").eq("purchase_id", purchaseId),
+        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode").eq("purchase_id", purchaseId),
         supabase.from("purchase_items").select("id, description, meters, rate, hsn").eq("purchase_id", purchaseId),
       ]);
       if (fabricsRes.error) throw fabricsRes.error;
@@ -567,7 +567,7 @@ export default function Purchases() {
         .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
         .eq("purchase_id", purchase.id)
         .order("payment_date", { ascending: false }),
-      supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode, discount_amount").eq("purchase_id", purchase.id),
+      supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode").eq("purchase_id", purchase.id),
       supabase.from("purchase_items").select("id, description, meters, rate, hsn").eq("purchase_id", purchase.id),
     ])
       .then(([paymentsRes, fabricsRes, itemsRes]) => {
@@ -616,7 +616,7 @@ export default function Purchases() {
           .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
           .eq("purchase_id", purchase.id)
           .order("payment_date", { ascending: false }),
-        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode, discount_amount").eq("purchase_id", purchase.id),
+        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode").eq("purchase_id", purchase.id),
         supabase
           .from("purchase_items")
           .select("id, description, meters, rate, hsn")
