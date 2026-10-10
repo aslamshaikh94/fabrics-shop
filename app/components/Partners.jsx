@@ -163,9 +163,7 @@ export default function PartnersPage() {
 
       sales.forEach((s) => {
         const m = new Date(s.sale_date).getMonth();
-        // total_amount is stored pre-discount, so net it for consistency
-        monthly[m].sales +=
-          netSaleAmount(s);
+        monthly[m].sales += netSaleAmount(s);
         monthly[m].grossProfit += s.margin || 0;
       });
 

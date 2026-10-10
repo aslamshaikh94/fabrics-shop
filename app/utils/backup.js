@@ -56,6 +56,10 @@ const TABLE_COLUMNS = {
     "updated_at",
     "invoice_url",
     "purchase_number",
+    "fabric_amount",
+    "other_charges",
+    "gst_rate",
+    "gst_amount",
   ],
   purchase_items: [
     "id",
@@ -64,6 +68,7 @@ const TABLE_COLUMNS = {
     "hsn",
     "meters",
     "rate",
+    // "amount" is GENERATED ALWAYS AS (meters * rate) — never insert it
     "created_at",
   ],
   purchase_payments: [
@@ -172,6 +177,21 @@ function sanitizeRecord(record, tableName) {
     if (key in record) {
       sanitized[key] = record[key];
     }
+  }
+  // Never insert GENERATED columns — the DB computes them automatically.
+  // purchase_items.amount = meters * rate (GENERATED ALWAYS AS STORED)
+  if (tableName === "purchase_items") {
+    delete sanitized.amount;
+  }
+  // sales: total_amount, remaining_amount, margin are GENERATED — Step 5 restores them via UPDATE
+  if (tableName === "sales") {
+    delete sanitized.total_amount;
+    delete sanitized.remaining_amount;
+    delete sanitized.margin;
+  }
+  // purchases: remaining_amount is GENERATED — restored via UPDATE in Step 5
+  if (tableName === "purchases") {
+    delete sanitized.remaining_amount;
   }
   return sanitized;
 }

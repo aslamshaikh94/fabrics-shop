@@ -1,6 +1,8 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@config "../tailwind.config.js";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @keyframes slide-in {
   from {
@@ -132,7 +134,7 @@ input[type="date"] {
   }
 
   .card-hover {
-    @apply card hover:shadow-md hover:border-gray-200 dark:hover:border-gray-600 transition-all duration-200;
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden dark:bg-gray-800 dark:border-gray-700 hover:shadow-md hover:border-gray-200 dark:hover:border-gray-600 transition-all duration-200;
   }
 
   .badge {

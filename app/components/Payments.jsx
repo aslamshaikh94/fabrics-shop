@@ -124,6 +124,23 @@ export default function Payments({
 
   async function fetchAll() {
     try {
+      // Fetch partners separately with a column fallback so a missing
+      // opening_balance column never crashes the entire page load.
+      let partnersData = [];
+      {
+        let r = await supabase
+          .from("partners")
+          .select("id, name, share_percentage, is_active, opening_balance, opening_balance_date")
+          .order("name");
+        if (r.error?.message?.includes("column")) {
+          r = await supabase
+            .from("partners")
+            .select("id, name, share_percentage, is_active")
+            .order("name");
+        }
+        partnersData = r.data || [];
+      }
+
       const [
         purchaseRes,
         saleRes,
@@ -131,7 +148,6 @@ export default function Payments({
         customersRes,
         salesRes,
         purchasesRes,
-        partnersRes,
         depositsRes,
         withdrawalsRes,
         expensesRes,
@@ -156,7 +172,6 @@ export default function Payments({
           .select(
             "id, supplier_id, total_amount, paid_amount, remaining_amount",
           ),
-        supabase.from("partners").select("id, name, share_percentage, is_active, opening_balance, opening_balance_date").order("name"),
         supabase
           .from("cash_deposits")
           .select("id, partner_id, amount, deposit_date, method, notes")
@@ -172,9 +187,9 @@ export default function Payments({
       ]);
 
       const partnerMap = Object.fromEntries(
-        (partnersRes.data || []).map((p) => [p.id, p.name]),
+        partnersData.map((p) => [p.id, p.name]),
       );
-      setPartners(partnersRes.data || []);
+      setPartners(partnersData);
       setWithdrawals(withdrawalsRes.data || []);
       setExpenses(
         (expensesRes.data || []).map((e) => ({
