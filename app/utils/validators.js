@@ -146,7 +146,7 @@ export const validateSupplier = (formData) => {
     errors.name = "Name is required";
   if (
     formData.phone &&
-    !/^[0-9\-\+\s]{10,}$/.test(formData.phone.replace(/\D/g, ""))
+    !/^[0-9+\s-]{10,}$/.test(formData.phone.replace(/\D/g, ""))
   ) {
     errors.phone = "Phone number must be valid";
   }
@@ -159,7 +159,7 @@ export const validateCustomer = (formData) => {
     errors.name = "Name is required";
   if (
     formData.phone &&
-    !/^[0-9\-\+\s]{10,}$/.test(formData.phone.replace(/\D/g, ""))
+    !/^[0-9+\s-]{10,}$/.test(formData.phone.replace(/\D/g, ""))
   ) {
     errors.phone = "Phone number must be valid";
   }

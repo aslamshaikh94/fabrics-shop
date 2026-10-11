@@ -14,7 +14,9 @@ export function useVisibleCols(storageKey, defaultCols) {
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) return new Set(JSON.parse(saved));
-    } catch {}
+    } catch {
+      // Corrupt/invalid saved prefs — fall back to defaults below.
+    }
     return new Set(defaultCols);
   });
 

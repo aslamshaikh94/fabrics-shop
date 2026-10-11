@@ -23,7 +23,9 @@ This file encodes long-term project decisions. Follow it in every task.
 
 ## Tech stack
 
-- Next.js 15 (App Router), React 19, Tailwind CSS, Supabase, recharts.
+- Next.js 16 (App Router), React 19, Tailwind CSS, Supabase, recharts.
 - Pages in `app/(app)/<page>/page.js` map to components in `app/components/`.
 - Shared logic in `app/utils/`; DB schema in `supabase/migrations/`.
-- Commands: `npm run dev`, `npm run build`, `npm start`. (No ESLint config yet.)
+- Commands: `npm run dev`, `npm run build`, `npm start`, `npm run lint`.
+- Linting uses ESLint flat config (`eslint.config.mjs`). Next 16 removed the
+  built-in `next lint`, so `npm run lint` runs `eslint app` directly.
