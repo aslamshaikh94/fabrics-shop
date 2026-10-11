@@ -10,7 +10,6 @@ import {
 import { buildSoldMeters } from "../utils/soldMeters";
 import {
   formatDate,
-  formatINR,
   formatINRMasked,
   formatINRCompact,
   MONTHS,
@@ -278,6 +277,8 @@ export default function Reports() {
   const [dailyLoading, setDailyLoading] = useState(false);
   // Free-form month to add to the comparison (older than the last 12 months).
   const [customMonth, setCustomMonth] = useState("");
+  // Day-by-day table page (15 day-rows at a time) so it stays usable on mobile.
+  const [dailyPage, setDailyPage] = useState(1);
   const { showAmount } = useShowAmount();
 
   // The last 12 months, shown as one-tap toggle chips.
@@ -285,6 +286,7 @@ export default function Reports() {
 
   // Toggle a month in/out of the comparison selection.
   const toggleMonth = useCallback((key) => {
+    setDailyPage(1);
     setSelectedMonths((prev) =>
       prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
     );
@@ -1049,10 +1051,10 @@ export default function Reports() {
         <div className="space-y-5">
           {/* Controls */}
           <div className="card p-4 space-y-4">
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">Metric:</span>
-                <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-gray-600">Metric</span>
+                <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50">
                   {[
                     ["sales", "Sales"],
                     ["profit", "Profit"],
@@ -1061,7 +1063,7 @@ export default function Reports() {
                       key={val}
                       type="button"
                       onClick={() => setCompareMetric(val)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
                         compareMetric === val
                           ? "bg-white text-gray-900 shadow-sm"
                           : "text-gray-500 hover:text-gray-700"
@@ -1073,9 +1075,9 @@ export default function Reports() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">View:</span>
-                <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-gray-600">View</span>
+                <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50">
                   {[
                     ["daily", "Daily"],
                     ["monthly", "Monthly"],
@@ -1084,7 +1086,7 @@ export default function Reports() {
                       key={val}
                       type="button"
                       onClick={() => setCompareMode(val)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
                         compareMode === val
                           ? "bg-white text-gray-900 shadow-sm"
                           : "text-gray-500 hover:text-gray-700"
@@ -1098,28 +1100,37 @@ export default function Reports() {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <span className="text-sm font-medium text-gray-700">
-                  Select months to compare ({selectedMonths.length})
+                  Select months ({selectedMonths.length})
                 </span>
                 <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => setSelectedMonths(recentMonthKeys(3))}
+                    onClick={() => {
+                      setDailyPage(1);
+                      setSelectedMonths(recentMonthKeys(3));
+                    }}
                     className="text-xs text-primary-600 hover:underline"
                   >
                     Last 3
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelectedMonths(recentMonthKeys(6))}
+                    onClick={() => {
+                      setDailyPage(1);
+                      setSelectedMonths(recentMonthKeys(6));
+                    }}
                     className="text-xs text-primary-600 hover:underline"
                   >
                     Last 6
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelectedMonths([])}
+                    onClick={() => {
+                      setDailyPage(1);
+                      setSelectedMonths([]);
+                    }}
                     className="text-xs text-gray-500 hover:underline"
                   >
                     Clear
@@ -1166,6 +1177,7 @@ export default function Reports() {
                   disabled={!customMonth || selectedMonths.includes(customMonth)}
                   onClick={() => {
                     if (customMonth && !selectedMonths.includes(customMonth)) {
+                      setDailyPage(1);
                       setSelectedMonths((prev) => [...prev, customMonth]);
                       setCustomMonth("");
                     }
@@ -1220,7 +1232,7 @@ export default function Reports() {
           ) : (
             <>
               {/* Summary Cards — totals across all selected months */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 {(() => {
                   const monthTotals = dailySeries.map((s) => ({
                     ...s,
@@ -1264,7 +1276,7 @@ export default function Reports() {
               </div>
 
               {/* Comparison Chart */}
-              <div className="card p-4">
+              <div className="card p-3 sm:p-4">
                 <h2 className="font-semibold text-gray-900 mb-4">
                   {compareMode === "daily" ? "Daily" : "Monthly"}{" "}
                   {compareMetric === "profit" ? "Gross Profit" : "Sales"} Comparison
@@ -1278,7 +1290,7 @@ export default function Reports() {
               </div>
 
               {/* Monthly Comparison Table — rows = months */}
-              <div className="card p-4">
+              <div className="card p-3 sm:p-4">
                 <h2 className="font-semibold text-gray-900 mb-4">Monthly Comparison</h2>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -1323,7 +1335,7 @@ export default function Reports() {
               </div>
 
               {/* Daily Comparison Table — rows = days, columns = months */}
-              <div className="card p-4">
+              <div className="card p-3 sm:p-4">
                 <h2 className="font-semibold text-gray-900 mb-4">
                   Day-by-day {compareMetric === "profit" ? "Gross Profit" : "Sales"}
                 </h2>
@@ -1331,51 +1343,87 @@ export default function Reports() {
                   {(() => {
                     const maxDay = Math.max(...dailySeries.map((s) => s.data.length), 0);
                     const metricKey = compareMetric; // "sales" | "profit"
+                    // Page the day rows (15 at a time) so 31 days don't create an
+                    // endless scroll on mobile. All math uses full-series indices
+                    // so paging never shifts which row you're looking at.
+                    const perPage = 15;
+                    const totalPages = Math.ceil(maxDay / perPage) || 1;
+                    const page = Math.min(dailyPage, totalPages);
+                    const startIdx = (page - 1) * perPage;
+                    const pageDays = Array.from(
+                      { length: Math.min(perPage, maxDay - startIdx) },
+                      (_, i) => startIdx + i
+                    );
                     return (
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-gray-200 text-left text-gray-500 text-xs uppercase">
-                            <th className="pb-2 pr-4">Day</th>
-                            {dailySeries.map((s) => (
-                              <th key={s.monthKey} className="pb-2 pr-4 text-right whitespace-nowrap">
-                                <span
-                                  className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
-                                  style={{ backgroundColor: s.color }}
-                                />
-                                {s.label}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Array.from({ length: maxDay }, (_, i) => (
-                            <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
-                              <td className="py-2 pr-4 font-medium text-gray-900">{i + 1}</td>
-                              {dailySeries.map((s) => {
-                                const d = s.data[i];
-                                return (
-                                  <td key={s.monthKey} className="py-2 pr-4 text-right text-gray-700">
-                                    {d ? formatINRMasked(d[metricKey], showAmount) : "—"}
-                                  </td>
-                                );
-                              })}
+                      <>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-gray-200 text-left text-gray-500 text-xs uppercase">
+                              <th className="pb-2 pr-4">Day</th>
+                              {dailySeries.map((s) => (
+                                <th key={s.monthKey} className="pb-2 pr-4 text-right whitespace-nowrap">
+                                  <span
+                                    className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
+                                    style={{ backgroundColor: s.color }}
+                                  />
+                                  {s.label}
+                                </th>
+                              ))}
                             </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="border-t-2 border-gray-200 font-semibold text-gray-900">
-                            <td className="py-2 pr-4">Total</td>
-                            {dailySeries.map((s) => (
-                              <td key={s.monthKey} className="py-2 pr-4 text-right whitespace-nowrap">
-                                {formatINRMasked(
-                                  s.data.reduce((a, d) => a + d[metricKey], 0),
-                                  showAmount
-                                )}
-                              </td>
+                          </thead>
+                          <tbody>
+                            {pageDays.map((i) => (
+                              <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                                <td className="py-2 pr-4 font-medium text-gray-900">{i + 1}</td>
+                                {dailySeries.map((s) => {
+                                  const d = s.data[i];
+                                  return (
+                                    <td key={s.monthKey} className="py-2 pr-4 text-right text-gray-700 whitespace-nowrap">
+                                      {d ? formatINRMasked(d[metricKey], showAmount) : "—"}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
                             ))}
-                          </tr>
-                        </tfoot>
-                      </table>
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-gray-200 font-semibold text-gray-900">
+                              <td className="py-2 pr-4">Total</td>
+                              {dailySeries.map((s) => (
+                                <td key={s.monthKey} className="py-2 pr-4 text-right whitespace-nowrap">
+                                  {formatINRMasked(
+                                    s.data.reduce((a, d) => a + d[metricKey], 0),
+                                    showAmount
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          </tfoot>
+                        </table>
+                        {totalPages > 1 && (
+                          <div className="flex items-center justify-between pt-3 text-xs text-gray-500">
+                            <button
+                              type="button"
+                              onClick={() => setDailyPage((p) => Math.max(1, p - 1))}
+                              disabled={page <= 1}
+                              className="px-3 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              Prev
+                            </button>
+                            <span>
+                              Days {startIdx + 1}–{startIdx + pageDays.length} of {maxDay}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setDailyPage((p) => Math.min(totalPages, p + 1))}
+                              disabled={page >= totalPages}
+                              className="px-3 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        )}
+                      </>
                     );
                   })()}
                 </div>
