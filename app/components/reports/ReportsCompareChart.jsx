@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import {
   BarChart,
   Bar,
@@ -31,10 +32,22 @@ export default function ReportsCompareChart({
   metric = "sales",
   showAmount,
 }) {
+  // Track viewport width so we can thin the X-axis ticks and shrink the height
+  // on phones — 31 day labels simply don't fit side-by-side on a small screen.
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const update = () => setIsNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
   const tick = { fontSize: 10 };
   const tip = (v) => formatINRMasked(v, showAmount);
   const axisFmt = (v) => `₹${(v / 1000).toFixed(0)}k`;
   const active = series.filter((s) => s.data?.length);
+  const height = isNarrow ? 240 : 280;
 
   if (active.length === 0) {
     return (
@@ -51,10 +64,13 @@ export default function ReportsCompareChart({
       value: s.data.reduce((sum, d) => sum + (d[metric] || 0), 0),
     }));
     return (
-      <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart
+          data={data}
+          margin={{ top: 5, right: 8, left: isNarrow ? -8 : 0, bottom: 5 }}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-          <XAxis dataKey="label" tick={tick} />
+          <XAxis dataKey="label" tick={tick} interval={0} />
           <YAxis tick={tick} tickFormatter={axisFmt} width={46} />
           <Tooltip formatter={tip} />
           <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
@@ -83,13 +99,25 @@ export default function ReportsCompareChart({
   });
 
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <LineChart data={rows} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart
+        data={rows}
+        margin={{ top: 5, right: 8, left: isNarrow ? -8 : 0, bottom: 5 }}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-        <XAxis dataKey="day" tick={tick} name="Day" />
+        <XAxis
+          dataKey="day"
+          tick={tick}
+          name="Day"
+          // Show every day on desktop, every ~5th on phones so labels stay legible.
+          interval={isNarrow ? 4 : 0}
+        />
         <YAxis tick={tick} tickFormatter={axisFmt} width={46} />
         <Tooltip formatter={tip} />
-        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+        <Legend
+          iconSize={10}
+          wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
+        />
         {active.map((s) => (
           <Line
             key={s.monthKey}
@@ -98,7 +126,7 @@ export default function ReportsCompareChart({
             name={s.label}
             stroke={s.color}
             strokeWidth={2}
-            dot={{ r: 2 }}
+            dot={isNarrow ? false : { r: 2 }}
             connectNulls
           />
         ))}
