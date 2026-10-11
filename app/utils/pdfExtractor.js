@@ -104,7 +104,7 @@ export function parseFabricEntries(text) {
       // Remove trailing tax rate number
       name = name.replace(/\d+\.?\d*$/, "").trim();
       // Remove trailing dots/hyphens
-      name = name.replace(/[.\-]+$/, "").trim();
+      name = name.replace(/[.-]+$/, "").trim();
 
       if (name.length >= 2) {
         const rate = Math.round((amount / qty) * 100) / 100;

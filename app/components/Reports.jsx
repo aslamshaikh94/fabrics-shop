@@ -32,8 +32,41 @@ import {
   Package,
   MessageCircle,
   Percent,
+  Calendar,
 } from "lucide-react";
 import Pagination from "./shared/Pagination";
+
+/** Stable color palette for month-comparison series (charts + table swatches). */
+const MONTH_COLORS = [
+  "#2563eb", // blue
+  "#16a34a", // green
+  "#d97706", // amber
+  "#dc2626", // red
+  "#7c3aed", // violet
+  "#0891b2", // cyan
+  "#db2777", // pink
+  "#65a30d", // lime
+];
+
+/** Color for the i-th selected month (wraps if more months than colors). */
+const colorForIndex = (i) => MONTH_COLORS[i % MONTH_COLORS.length];
+
+/** "YYYY-MM" keys for the last `count` months, newest first. */
+function recentMonthKeys(count = 12) {
+  const now = new Date();
+  const keys = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+/** "Nov '25" — short label for a "YYYY-MM" key. */
+function monthLabel(key) {
+  const [y, m] = key.split("-").map(Number);
+  return `${MONTHS[m - 1]} '${String(y).slice(2)}`;
+}
 
 // recharts is ~300KB — only load it when the Analytics charts render.
 const ReportsCharts = dynamic(() => import("./reports/ReportsCharts"), {
@@ -44,6 +77,20 @@ const ReportsCharts = dynamic(() => import("./reports/ReportsCharts"), {
     </div>
   ),
 });
+
+// Daily breakdown comparison chart (lazy-loaded)
+const ReportsCompareChart = dynamic(
+  () => import("./reports/ReportsCompareChart"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="card p-4">
+        <div className="animate-pulse bg-gray-200 rounded-lg h-[280px]" />
+      </div>
+    ),
+  },
+);
+
 
 // Rows per page in the Stock tab's Fabric-wise table. Matches the other
 // paginated tables in the app.
@@ -220,7 +267,29 @@ export default function Reports() {
   const [customTo, setCustomTo] = useState(currentMonthKey);
   const [chartView, setChartView] = useState("all");
   const [rankView, setRankView] = useState("revenue");
+  // Daily breakdown state — multi-month comparison
+  const [selectedMonths, setSelectedMonths] = useState(() => {
+    const keys = recentMonthKeys(3); // current + previous two months
+    return keys;
+  });
+  const [compareMetric, setCompareMetric] = useState("sales"); // "sales" | "profit"
+  const [compareMode, setCompareMode] = useState("daily"); // "daily" | "monthly"
+  const [dailySeries, setDailySeries] = useState([]); // [{ monthKey, label, color, data:[{day,sales,profit,count}] }]
+  const [dailyLoading, setDailyLoading] = useState(false);
+  // Free-form month to add to the comparison (older than the last 12 months).
+  const [customMonth, setCustomMonth] = useState("");
   const { showAmount } = useShowAmount();
+
+  // The last 12 months, shown as one-tap toggle chips.
+  const recentMonths = useMemo(() => recentMonthKeys(12), []);
+
+  // Toggle a month in/out of the comparison selection.
+  const toggleMonth = useCallback((key) => {
+    setSelectedMonths((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
+  }, []);
+
 
   const fetchYears = useCallback(async () => {
     setAvailableYears(await getAvailableYears());
@@ -570,6 +639,73 @@ export default function Reports() {
     }
   }, [year, filterMode, customFrom, customTo]);
 
+  const fetchDailyData = useCallback(async () => {
+    if (selectedMonths.length === 0) {
+      setDailySeries([]);
+      return;
+    }
+    setDailyLoading(true);
+    try {
+      // One query spanning the earliest → latest selected month, then bucket
+      // each sale into its (month, day). Parsing sale_date from the "YYYY-MM-DD"
+      // string (not `new Date`) keeps day-bucketing timezone-safe.
+      const sorted = [...selectedMonths].sort();
+      const [fy, fm] = sorted[0].split("-").map(Number);
+      const [ly, lm] = sorted[sorted.length - 1].split("-").map(Number);
+      const startDate = `${fy}-${String(fm).padStart(2, "0")}-01`;
+      const lastDay = new Date(ly, lm, 0).getDate();
+      const endDate = `${ly}-${String(lm).padStart(2, "0")}-${lastDay}`;
+
+      const { data: sales, error } = await supabase
+        .from("sales")
+        .select("sale_date, total_amount, margin, discount_amount")
+        .gte("sale_date", startDate)
+        .lte("sale_date", endDate);
+
+      if (error) throw error;
+
+      // Build an empty day-bucket per selected month, in the order they appear
+      // in `selectedMonths` (so colors/labels stay stable across renders).
+      const byMonth = {};
+      selectedMonths.forEach((key) => {
+        const [y, m] = key.split("-").map(Number);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        byMonth[key] = Array.from({ length: daysInMonth }, (_, i) => ({
+          day: i + 1,
+          sales: 0,
+          profit: 0,
+          count: 0,
+        }));
+      });
+
+      (sales || []).forEach((s) => {
+        const parts = String(s.sale_date).split("-"); // ["YYYY","MM","DD",...]
+        const key = `${parts[0]}-${parts[1]}`;
+        const bucket = byMonth[key];
+        if (!bucket) return;
+        const dayIdx = Number(parts[2].slice(0, 2)) - 1;
+        if (dayIdx >= 0 && dayIdx < bucket.length) {
+          bucket[dayIdx].sales += (s.total_amount || 0) - (s.discount_amount || 0);
+          bucket[dayIdx].profit += s.margin || 0;
+          bucket[dayIdx].count += 1;
+        }
+      });
+
+      const series = selectedMonths.map((key, i) => ({
+        monthKey: key,
+        label: monthLabel(key),
+        color: colorForIndex(i),
+        data: byMonth[key],
+      }));
+      setDailySeries(series);
+    } catch (err) {
+      console.error("Error fetching daily data:", err);
+      setDailySeries([]);
+    } finally {
+      setDailyLoading(false);
+    }
+  }, [selectedMonths]);
+
   useEffect(() => {
     fetchYears();
     fetchAlerts();
@@ -578,6 +714,10 @@ export default function Reports() {
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  useEffect(() => {
+    fetchDailyData();
+  }, [fetchDailyData]);
 
   const totalAlerts = useMemo(
     () =>
@@ -796,11 +936,12 @@ export default function Reports() {
           )}
         </div>
       </div>
-
-      {/* Tabs */}
+{/*
+          Tabs */}
       <div className="flex border-b border-gray-200 overflow-x-auto">
         {[
           ["analytics", "Analytics"],
+          ["daily", "Daily Breakdown"],
           ["rankings", "Rankings"],
           ["stock", "Stock"],
           ["alerts", `Alerts${totalAlerts > 0 ? ` (${totalAlerts})` : ""}`],
@@ -903,6 +1044,347 @@ export default function Reports() {
         </div>
       )}
 
+      {/* ── DAILY BREAKDOWN TAB ── */}
+      {activeTab === "daily" && (
+        <div className="space-y-5">
+          {/* Controls */}
+          <div className="card p-4 space-y-4">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Metric:</span>
+                <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+                  {[
+                    ["sales", "Sales"],
+                    ["profit", "Profit"],
+                  ].map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setCompareMetric(val)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        compareMetric === val
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">View:</span>
+                <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+                  {[
+                    ["daily", "Daily"],
+                    ["monthly", "Monthly"],
+                  ].map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setCompareMode(val)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        compareMode === val
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700">
+                  Select months to compare ({selectedMonths.length})
+                </span>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonths(recentMonthKeys(3))}
+                    className="text-xs text-primary-600 hover:underline"
+                  >
+                    Last 3
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonths(recentMonthKeys(6))}
+                    className="text-xs text-primary-600 hover:underline"
+                  >
+                    Last 6
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonths([])}
+                    className="text-xs text-gray-500 hover:underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {recentMonths.map((key) => {
+                  const idx = selectedMonths.indexOf(key);
+                  const active = idx !== -1;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleMonth(key)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                        active
+                          ? "text-white border-transparent"
+                          : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
+                      }`}
+                      style={
+                        active ? { backgroundColor: colorForIndex(idx) } : undefined
+                      }
+                    >
+                      {monthLabel(key)}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Free-form picker for any month — including older than the
+                  last 12, which the chips above can't reach. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-500">Add any month:</span>
+                <input
+                  type="month"
+                  value={customMonth}
+                  max={currentMonthKey()}
+                  onChange={(e) => setCustomMonth(e.target.value)}
+                  className="px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+                <button
+                  type="button"
+                  disabled={!customMonth || selectedMonths.includes(customMonth)}
+                  onClick={() => {
+                    if (customMonth && !selectedMonths.includes(customMonth)) {
+                      setSelectedMonths((prev) => [...prev, customMonth]);
+                      setCustomMonth("");
+                    }
+                  }}
+                  className="px-3 py-1 rounded-md text-xs font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Selected months that fall outside the last-12 chips still need
+                  to be visible and removable. */}
+              {selectedMonths.filter((m) => !recentMonths.includes(m)).length >
+                0 && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <span className="text-xs text-gray-500 block mb-2">
+                    Added months
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedMonths
+                      .filter((m) => !recentMonths.includes(m))
+                      .map((key) => {
+                        const idx = selectedMonths.indexOf(key);
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => toggleMonth(key)}
+                            title="Remove"
+                            className="px-3 py-1.5 rounded-full text-xs font-medium text-white border-transparent inline-flex items-center gap-1.5"
+                            style={{ backgroundColor: colorForIndex(idx) }}
+                          >
+                            {monthLabel(key)}
+                            <span aria-hidden className="opacity-80">
+                              ×
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {dailyLoading ? (
+            <LoadingSpinner className="h-40" text="Loading comparison data..." />
+          ) : dailySeries.length === 0 ? (
+            <div className="card p-8 text-center">
+              <p className="text-gray-400">Select at least one month to compare</p>
+            </div>
+          ) : (
+            <>
+              {/* Summary Cards — totals across all selected months */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {(() => {
+                  const monthTotals = dailySeries.map((s) => ({
+                    ...s,
+                    sales: s.data.reduce((a, d) => a + d.sales, 0),
+                    profit: s.data.reduce((a, d) => a + d.profit, 0),
+                    count: s.data.reduce((a, d) => a + d.count, 0),
+                  }));
+                  const totalSales = monthTotals.reduce((a, m) => a + m.sales, 0);
+                  const totalProfit = monthTotals.reduce((a, m) => a + m.profit, 0);
+                  const totalCount = monthTotals.reduce((a, m) => a + m.count, 0);
+                  const best = monthTotals.reduce(
+                    (b, m) => (m.sales > b.sales ? m : b),
+                    { sales: 0, label: "—" }
+                  );
+                  return [
+                    { title: "Total Sales", value: totalSales, icon: DollarSign, bg: "bg-blue-50", iconBg: "bg-blue-500", text: "text-blue-700" },
+                    { title: "Gross Profit", value: totalProfit, icon: TrendingUp, bg: "bg-green-50", iconBg: "bg-green-500", text: "text-green-700" },
+                    { title: "Total Transactions", value: totalCount, icon: Receipt, bg: "bg-purple-50", iconBg: "bg-purple-500", text: "text-purple-700" },
+                    { title: "Best Month", value: best.sales, subtitle: best.label, icon: Calendar, bg: "bg-amber-50", iconBg: "bg-amber-500", text: "text-amber-700" },
+                  ].map((card, i) => {
+                    const Icon = card.icon;
+                    return (
+                      <div key={i} className={`rounded-xl p-3 ${card.bg} border border-gray-100`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-medium text-gray-500 leading-tight">{card.title}</p>
+                          <div className={`${card.iconBg} p-1.5 rounded-lg shrink-0`}>
+                            <Icon className="w-3 h-3 text-white" />
+                          </div>
+                        </div>
+                        <p className={`text-base font-bold ${card.text}`}>
+                          {formatINRCompact(card.value, showAmount)}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {formatINRMasked(card.value, showAmount)}
+                        </p>
+                        {card.subtitle && <p className="text-[10px] text-gray-400 mt-1">{card.subtitle}</p>}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* Comparison Chart */}
+              <div className="card p-4">
+                <h2 className="font-semibold text-gray-900 mb-4">
+                  {compareMode === "daily" ? "Daily" : "Monthly"}{" "}
+                  {compareMetric === "profit" ? "Gross Profit" : "Sales"} Comparison
+                </h2>
+                <ReportsCompareChart
+                  series={dailySeries}
+                  mode={compareMode}
+                  metric={compareMetric}
+                  showAmount={showAmount}
+                />
+              </div>
+
+              {/* Monthly Comparison Table — rows = months */}
+              <div className="card p-4">
+                <h2 className="font-semibold text-gray-900 mb-4">Monthly Comparison</h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-gray-500 text-xs uppercase">
+                        <th className="pb-2 pr-4">Month</th>
+                        <th className="pb-2 pr-4 text-right">Sales</th>
+                        <th className="pb-2 pr-4 text-right">Gross Profit</th>
+                        <th className="pb-2 pr-4 text-right">Margin %</th>
+                        <th className="pb-2 pr-4 text-right">Transactions</th>
+                        <th className="pb-2 pr-4 text-right">Avg / Day</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dailySeries.map((s) => {
+                        const sales = s.data.reduce((a, d) => a + d.sales, 0);
+                        const profit = s.data.reduce((a, d) => a + d.profit, 0);
+                        const count = s.data.reduce((a, d) => a + d.count, 0);
+                        const days = s.data.length || 1;
+                        return (
+                          <tr key={s.monthKey} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-2 pr-4 font-medium text-gray-900 whitespace-nowrap">
+                              <span
+                                className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
+                                style={{ backgroundColor: s.color }}
+                              />
+                              {s.label}
+                            </td>
+                            <td className="py-2 pr-4 text-right text-gray-700">{formatINRMasked(sales, showAmount)}</td>
+                            <td className="py-2 pr-4 text-right text-green-700">{formatINRMasked(profit, showAmount)}</td>
+                            <td className="py-2 pr-4 text-right text-gray-700">
+                              {sales > 0 ? ((profit / sales) * 100).toFixed(1) : "0.0"}%
+                            </td>
+                            <td className="py-2 pr-4 text-right text-gray-500">{count}</td>
+                            <td className="py-2 pr-4 text-right text-gray-700">{formatINRMasked(sales / days, showAmount)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Daily Comparison Table — rows = days, columns = months */}
+              <div className="card p-4">
+                <h2 className="font-semibold text-gray-900 mb-4">
+                  Day-by-day {compareMetric === "profit" ? "Gross Profit" : "Sales"}
+                </h2>
+                <div className="overflow-x-auto">
+                  {(() => {
+                    const maxDay = Math.max(...dailySeries.map((s) => s.data.length), 0);
+                    const metricKey = compareMetric; // "sales" | "profit"
+                    return (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-200 text-left text-gray-500 text-xs uppercase">
+                            <th className="pb-2 pr-4">Day</th>
+                            {dailySeries.map((s) => (
+                              <th key={s.monthKey} className="pb-2 pr-4 text-right whitespace-nowrap">
+                                <span
+                                  className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
+                                  style={{ backgroundColor: s.color }}
+                                />
+                                {s.label}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({ length: maxDay }, (_, i) => (
+                            <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-2 pr-4 font-medium text-gray-900">{i + 1}</td>
+                              {dailySeries.map((s) => {
+                                const d = s.data[i];
+                                return (
+                                  <td key={s.monthKey} className="py-2 pr-4 text-right text-gray-700">
+                                    {d ? formatINRMasked(d[metricKey], showAmount) : "—"}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-gray-200 font-semibold text-gray-900">
+                            <td className="py-2 pr-4">Total</td>
+                            {dailySeries.map((s) => (
+                              <td key={s.monthKey} className="py-2 pr-4 text-right whitespace-nowrap">
+                                {formatINRMasked(
+                                  s.data.reduce((a, d) => a + d[metricKey], 0),
+                                  showAmount
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    );
+                  })()}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── RANKINGS TAB ── */}
       {activeTab === "rankings" && (
         <div className="space-y-5">
@@ -922,127 +1404,129 @@ export default function Reports() {
             ))}
           </div>
 
-          {/* Top 10 Customers */}
-          <div className="card p-4">
-            <h2 className="font-semibold text-gray-900 mb-4">
-              Top 10 Customers
-            </h2>
-            {topCustomers.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-6">
-                No data for selected period
-              </p>
-            ) : (
-              (() => {
-                const sortedCustomers = [...topCustomers]
-                  .filter((c) => rankView !== "pending" || c.pending > 0)
-                  .sort((a, b) =>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Top 10 Customers */}
+            <div className="card p-4">
+              <h2 className="font-semibold text-gray-900 mb-4">
+                Top 10 Customers
+              </h2>
+              {topCustomers.length === 0 ? (
+                <p className="text-gray-400 text-sm text-center py-6">
+                  No data for selected period
+                </p>
+              ) : (
+                (() => {
+                  const sortedCustomers = [...topCustomers]
+                    .filter((c) => rankView !== "pending" || c.pending > 0)
+                    .sort((a, b) =>
+                      rankView === "pending"
+                        ? b.pending - a.pending
+                        : b.revenue - a.revenue,
+                    )
+                    .slice(0, 10);
+                  const maxVal =
                     rankView === "pending"
-                      ? b.pending - a.pending
-                      : b.revenue - a.revenue,
-                  )
-                  .slice(0, 10);
-                const maxVal =
-                  rankView === "pending"
-                    ? sortedCustomers[0]?.pending || 0
-                    : sortedCustomers[0]?.revenue || 0;
-                return (
-                  <div className="space-y-2.5">
-                    {sortedCustomers.map((c, i) => {
-                      const val =
-                        rankView === "pending" ? c.pending : c.revenue;
-                      const pct =
-                        maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
-                      return (
-                        <div key={c.name}>
-                          <div className="flex items-center justify-between text-sm mb-1">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center font-bold">
-                                {i + 1}
-                              </span>
-                              <span className="font-medium text-gray-800 truncate">
-                                {c.name}
-                              </span>
-                              {rankView !== "pending" && c.pending > 0 && (
-                                <span className="shrink-0 text-xs text-warning-600 font-medium">
-                                  ({formatINRMasked(c.pending, showAmount)} due)
+                      ? sortedCustomers[0]?.pending || 0
+                      : sortedCustomers[0]?.revenue || 0;
+                  return (
+                    <div className="space-y-2.5">
+                      {sortedCustomers.map((c, i) => {
+                        const val =
+                          rankView === "pending" ? c.pending : c.revenue;
+                        const pct =
+                          maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
+                        return (
+                          <div key={c.name}>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center font-bold">
+                                  {i + 1}
                                 </span>
-                              )}
+                                <span className="font-medium text-gray-800 truncate">
+                                  {c.name}
+                                </span>
+                                {rankView !== "pending" && c.pending > 0 && (
+                                  <span className="shrink-0 text-xs text-warning-600 font-medium">
+                                    ({formatINRMasked(c.pending, showAmount)} due)
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-gray-600 shrink-0 ml-2">
+                                {formatINRCompact(val, showAmount)}
+                              </span>
                             </div>
-                            <span className="text-gray-600 shrink-0 ml-2">
-                              {formatINRCompact(val, showAmount)}
-                            </span>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                              <div
+                                className="bg-blue-500 h-1.5 rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="w-full bg-gray-100 rounded-full h-1.5">
-                            <div
-                              className="bg-blue-500 h-1.5 rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()
-            )}
-          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
 
-          {/* Top 10 Fabrics */}
-          <div className="card p-4">
-            <h2 className="font-semibold text-gray-900 mb-4">Top 10 Fabrics</h2>
-            {topFabrics.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-6">
-                No data for selected period
-              </p>
-            ) : (
-              (() => {
-                const sortedFabrics = [...topFabrics]
-                  .sort((a, b) =>
+            {/* Top 10 Fabrics */}
+            <div className="card p-4">
+              <h2 className="font-semibold text-gray-900 mb-4">Top 10 Fabrics</h2>
+              {topFabrics.length === 0 ? (
+                <p className="text-gray-400 text-sm text-center py-6">
+                  No data for selected period
+                </p>
+              ) : (
+                (() => {
+                  const sortedFabrics = [...topFabrics]
+                    .sort((a, b) =>
+                      rankView === "meters"
+                        ? b.meters - a.meters
+                        : b.revenue - a.revenue,
+                    )
+                    .slice(0, 10);
+                  const maxVal =
                     rankView === "meters"
-                      ? b.meters - a.meters
-                      : b.revenue - a.revenue,
-                  )
-                  .slice(0, 10);
-                const maxVal =
-                  rankView === "meters"
-                    ? sortedFabrics[0]?.meters || 0
-                    : sortedFabrics[0]?.revenue || 0;
-                return (
-                  <div className="space-y-2.5">
-                    {sortedFabrics.map((f, i) => {
-                      const val = rankView === "meters" ? f.meters : f.revenue;
-                      const pct =
-                        maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
-                      return (
-                        <div key={f.name}>
-                          <div className="flex items-center justify-between text-sm mb-1">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="shrink-0 w-5 h-5 rounded-full bg-accent-500 text-white text-xs flex items-center justify-center font-bold">
-                                {i + 1}
-                              </span>
-                              <span className="font-medium text-gray-800 truncate">
-                                {f.name}
+                      ? sortedFabrics[0]?.meters || 0
+                      : sortedFabrics[0]?.revenue || 0;
+                  return (
+                    <div className="space-y-2.5">
+                      {sortedFabrics.map((f, i) => {
+                        const val = rankView === "meters" ? f.meters : f.revenue;
+                        const pct =
+                          maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
+                        return (
+                          <div key={f.name}>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="shrink-0 w-5 h-5 rounded-full bg-accent-500 text-white text-xs flex items-center justify-center font-bold">
+                                  {i + 1}
+                                </span>
+                                <span className="font-medium text-gray-800 truncate">
+                                  {f.name}
+                                </span>
+                              </div>
+                              <span className="text-gray-600 shrink-0 ml-2">
+                                {rankView === "meters"
+                                  ? `${f.meters.toFixed(1)}m`
+                                  : formatINRCompact(f.revenue, showAmount)}
                               </span>
                             </div>
-                            <span className="text-gray-600 shrink-0 ml-2">
-                              {rankView === "meters"
-                                ? `${f.meters.toFixed(1)}m`
-                                : formatINRCompact(f.revenue, showAmount)}
-                            </span>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                              <div
+                                className="bg-accent-500 h-1.5 rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="w-full bg-gray-100 rounded-full h-1.5">
-                            <div
-                              className="bg-accent-500 h-1.5 rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()
-            )}
+                        );
+                      })}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
           </div>
         </div>
       )}
