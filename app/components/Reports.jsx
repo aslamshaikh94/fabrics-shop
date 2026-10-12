@@ -2194,6 +2194,8 @@ export default function Reports() {
             )}
           </div>
 
+          {/* Supplier Pending Payments + Low Stock Fabrics — side by side on large screens */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Supplier Dues */}
           <div className="card overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
@@ -2258,6 +2260,7 @@ export default function Reports() {
                 ))}
               </div>
             )}
+          </div>
           </div>
         </div>
       )}
