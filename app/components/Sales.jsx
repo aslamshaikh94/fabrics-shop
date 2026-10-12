@@ -173,18 +173,12 @@ export default function Sales() {
       toast("Please select an account", "error");
       return;
     }
-    // Hard cap: never record more than the outstanding amount (the HTML max
-    // attribute is only advisory — typed values can exceed it). This keeps a
-    // discounted sale from going into "extra paid (+)" by over-collection.
+    // Over-payment is allowed (rounding, an advance, or actual cash that
+    // exceeds the recorded remaining). The DB trigger clamps remaining_amount
+    // at 0 via GREATEST(...), so an over-payment can never drive the balance
+    // negative — it just marks the sale fully paid. Only reject non-positive
+    // amounts here.
     const amt = parseFloat(paymentData.amount) || 0;
-    const outstanding = parseFloat(selectedSale.remaining_amount) || 0;
-    if (amt > outstanding + 0.005) {
-      toast(
-        `Amount exceeds outstanding of ₹${formatNumber2(outstanding)}`,
-        "error",
-      );
-      return;
-    }
     if (amt <= 0) {
       toast("Please enter a valid amount", "error");
       return;
@@ -756,7 +750,6 @@ export default function Sales() {
                       type="number"
                       step="0.01"
                       required
-                      max={selectedSale.remaining_amount}
                       value={paymentData.amount}
                       onChange={(e) =>
                         setPaymentData({ ...paymentData, amount: e.target.value })

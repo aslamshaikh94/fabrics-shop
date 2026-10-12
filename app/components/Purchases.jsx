@@ -1319,7 +1319,6 @@ export default function Purchases() {
                 <input
                   type="number"
                   step="0.01"
-                  max={selectedPurchase.remaining_amount}
                   value={paymentData.amount}
                   onChange={(e) => {
                     setPaymentData({ ...paymentData, amount: e.target.value });
