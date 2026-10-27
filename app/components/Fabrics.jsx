@@ -19,6 +19,7 @@ import { formatDate, formatNumber2 } from "../utils/formatters";
 import { purchaseBreakdown } from "../utils/purchaseTotals";
 import { describeError, isMissingColumnError } from "../utils/validators";
 import { fetchAllRows } from "../utils/pagedQuery";
+import { buildSoldMeters } from "../utils/soldMeters";
 import Modal from "./shared/Modal";
 import ColumnPicker from "./shared/ColumnPicker";
 import Pagination from "./shared/Pagination";
@@ -121,6 +122,26 @@ export default function Fabrics() {
           supabase.from("suppliers").select("id, name").order("name").range(from, to),
         ),
       ]);
+      let salesRows;
+      try {
+        salesRows = await fetchAllRows((from, to) =>
+          supabase
+            .from("sales")
+            .select("id, meters, fabric_id, fabric_name")
+            .order("id")
+            .range(from, to),
+        );
+      } catch (err) {
+        if (!isMissingColumnError(err)) throw err;
+        salesRows = await fetchAllRows((from, to) =>
+          supabase
+            .from("sales")
+            .select("id, meters, fabric_name")
+            .order("id")
+            .range(from, to),
+        );
+      }
+      const { soldByFabricId } = buildSoldMeters(fabricsRows, salesRows);
       setSuppliers(suppliersRows);
 
       const supplierMap = Object.fromEntries(
@@ -147,6 +168,10 @@ export default function Fabrics() {
       setFabrics(
         fabricsRows.map((f) => ({
           ...f,
+          available_meters: Math.max(
+            0,
+            (Number(f.total_meters) || 0) - (soldByFabricId.get(f.id) || 0),
+          ),
           supplier: supplierMap[f.supplier_id] || null,
           purchase: f.purchase_id
             ? { purchase_number: purchaseMap[f.purchase_id] || null }
@@ -155,6 +180,7 @@ export default function Fabrics() {
       );
     } catch (err) {
       console.error("Error fetching fabrics data:", err);
+      toast(`Unable to load fabric stock — ${describeError(err)}`, "error");
     } finally {
       setLoading(false);
     }
@@ -225,11 +251,11 @@ export default function Fabrics() {
         const existing = fabrics.find((f) => f.id === editingId);
         const oldTotal = existing?.total_meters || 0;
         const newTotal = parseFloat(r.total_meters) || 0;
-        const diff = newTotal - oldTotal;
-        const newAvailable = Math.max(
+        const soldMeters = Math.max(
           0,
-          (existing?.available_meters || 0) + diff,
+          oldTotal - (Number(existing?.available_meters) || 0),
         );
+        const newAvailable = Math.max(0, newTotal - soldMeters);
         const payload = {
           name: r.name,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
