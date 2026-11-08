@@ -15,7 +15,7 @@ import {
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
 import DateRangeFilter from "./DateRangeFilter";
-import { formatDate, formatNumber2 } from "../utils/formatters";
+import { formatDate, formatMeters, formatNumber2 } from "../utils/formatters";
 import { purchaseBreakdown } from "../utils/purchaseTotals";
 import { describeError, isMissingColumnError } from "../utils/validators";
 import { fetchAllRows } from "../utils/pagedQuery";
@@ -168,10 +168,12 @@ export default function Fabrics() {
       setFabrics(
         fabricsRows.map((f) => ({
           ...f,
-          available_meters: Math.max(
-            0,
-            (Number(f.total_meters) || 0) - (soldByFabricId.get(f.id) || 0),
-          ),
+          available_meters: Math.round(
+            Math.max(
+              0,
+              (Number(f.total_meters) || 0) - (soldByFabricId.get(f.id) || 0),
+            ) * 100,
+          ) / 100,
           supplier: supplierMap[f.supplier_id] || null,
           purchase: f.purchase_id
             ? { purchase_number: purchaseMap[f.purchase_id] || null }
@@ -241,6 +243,19 @@ export default function Fabrics() {
     setRows((prev) =>
       prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)),
     );
+  }
+
+  function getSamePriceFabrics(row) {
+    const sellingPrice = Number(row.selling_price_per_meter);
+    if (!Number.isFinite(sellingPrice) || sellingPrice <= 0) return [];
+
+    const matches = fabrics.filter(
+      (fabric) =>
+        fabric.id !== editingId &&
+        Number(fabric.selling_price_per_meter) === sellingPrice,
+    );
+
+    return [...new Map(matches.map((fabric) => [fabric.name, fabric])).values()];
   }
 
   async function handleSubmit(e) {
@@ -347,6 +362,7 @@ export default function Fabrics() {
         const payloads = validRows.map((r) => ({
           name: r.name,
           purchase_price_per_meter: parseFloat(r.purchase_price_per_meter) || 0,
+          selling_price_per_meter: parseFloat(r.selling_price_per_meter) || 0,
           total_meters: parseFloat(r.total_meters) || 0,
           available_meters: parseFloat(r.total_meters) || 0,
           supplier_id: formData.supplier_id || null,
@@ -530,7 +546,7 @@ export default function Fabrics() {
                 {lowStock
                   .map(
                     (f) =>
-                      `${f.name} (${(f.available_meters || 0).toFixed(2)}m)`,
+                      `${f.name} (${formatMeters(f.available_meters)}m)`,
                   )
                   .join(", ")}
               </p>
@@ -651,7 +667,7 @@ export default function Fabrics() {
                         </p>
                       </div>
                       <p className="text-xs text-gray-700 font-medium">
-                        {row.total_meters ? `${row.total_meters}m` : ""}
+                        {row.total_meters ? `${formatMeters(row.total_meters)}m` : ""}
                         {row.purchase_price_per_meter
                           ? ` @ ₹${row.purchase_price_per_meter}/m`
                           : ""}
@@ -677,6 +693,7 @@ export default function Fabrics() {
             {(() => {
               const currentIdx = rows.length - 1;
               const row = rows[currentIdx];
+              const samePriceFabrics = getSamePriceFabrics(row);
               return (
                 <div className="border border-gray-200 rounded-xl p-3 space-y-3 bg-white">
                   <span className="text-[10px] font-bold text-gray-900 uppercase bg-gray-100 px-2 py-1 rounded">
@@ -764,6 +781,14 @@ export default function Fabrics() {
                         placeholder="0"
                         onWheel={(e) => e.target.blur()}
                       />
+                      {samePriceFabrics.length > 0 && (
+                        <p className="mt-1.5 flex items-start gap-1 text-xs font-medium text-warning-700">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            Selling price already used by: {samePriceFabrics.map((fabric) => fabric.name).join(", ")}
+                          </span>
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-900 mb-1">
@@ -899,7 +924,7 @@ export default function Fabrics() {
                 )}
                 {col("total") && (
                   <td className="px-4 py-3 text-center">
-                    <p className="text-sm text-gray-900">{(fabric.total_meters || 0).toFixed(2)}m</p>
+                    <p className="text-sm text-gray-900">{formatMeters(fabric.total_meters)}m</p>
                   </td>
                 )}
                 {col("buyPrice") && (
@@ -922,7 +947,7 @@ export default function Fabrics() {
                 {col("available") && (
                   <td className="px-4 py-3 text-center">
                     <p className={`font-semibold text-sm ${fabric.available_meters < 2 ? "text-red-600" : "text-gray-900"}`}>
-                      {(fabric.available_meters || 0).toFixed(2)}m
+                      {formatMeters(fabric.available_meters)}m
                       {fabric.available_meters < 2 && <span className="ml-1">⚠️</span>}
                     </p>
                   </td>

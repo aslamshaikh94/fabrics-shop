@@ -35,6 +35,9 @@ import {
 } from "lucide-react";
 import Pagination from "./shared/Pagination";
 
+/** Get current day of month (1-31) for "till date" average calculation. */
+const currentDayOfMonth = new Date().getDate();
+
 /** Stable color palette for month-comparison series (charts + table swatches). */
 const MONTH_COLORS = [
   "#2563eb", // blue
@@ -1309,7 +1312,11 @@ export default function Reports() {
                         const sales = s.data.reduce((a, d) => a + d.sales, 0);
                         const profit = s.data.reduce((a, d) => a + d.profit, 0);
                         const count = s.data.reduce((a, d) => a + d.count, 0);
-                        const days = s.data.length || 1;
+                        // Use "till date" for current month, full month for past months
+                        const monthKey = s.monthKey;
+                        const [y, m] = monthKey.split("-").map(Number);
+                        const daysInMonth = new Date(y, m, 0).getDate();
+                        const days = monthKey === currentMonthKey() ? Math.min(currentDayOfMonth, daysInMonth) : daysInMonth;
                         return (
                           <tr key={s.monthKey} className="border-b border-gray-100 hover:bg-gray-50">
                             <td className="py-2 pr-4 font-medium text-gray-900 whitespace-nowrap">

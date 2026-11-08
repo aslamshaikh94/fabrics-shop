@@ -63,6 +63,13 @@ export function formatNumber2(value) {
   return INR_2DP.format(Number(value) || 0);
 }
 
+/** Up to 2 decimal places, without trailing zeroes (for meter labels). */
+export function formatMeters(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return Number(number.toFixed(2)).toString();
+}
+
 /** "₹1,23,456.00" */
 export function formatINR(value) {
   return `₹${formatNumber2(value)}`;

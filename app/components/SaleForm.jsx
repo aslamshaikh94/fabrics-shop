@@ -18,7 +18,7 @@ import CustomerSelect from "./shared/CustomerSelect";
 import FileUpload from "./FileUpload";
 import { useToast } from "./Toast";
 import SaveSpinner from "./shared/SaveSpinner";
-import { formatCurrency, formatNumber2 } from "../utils/formatters";
+import { formatCurrency, formatMeters, formatNumber2 } from "../utils/formatters";
 
 // Camera scanner (+ @zxing) only loads when the scan button is tapped.
 const BarcodeScanner = dynamic(() => import("./BarcodeScanner"), {
@@ -733,7 +733,7 @@ export default function SaleForm({
                                     <span className="text-xs text-primary-600 ml-2">₹{f.selling_price_per_meter}/m</span>
                                   )}
                                   <span className="text-[10px] text-gray-400 ml-2">
-                                    {f.available_meters}m
+                                    {formatMeters(f.available_meters)}m
                                   </span>
                                 </button>
                               ))}

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronDown, ScanLine } from "lucide-react";
+import { formatMeters } from "../../utils/formatters";
 
 export default function FabricSelect({
   value,
@@ -89,7 +90,7 @@ export default function FabricSelect({
                   <div className="flex justify-between items-center">
                     <span className="dark:text-white">{f.name}</span>
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                      {f.available_meters}m
+                      {formatMeters(f.available_meters)}m
                     </span>
                   </div>
                 </button>

@@ -14,7 +14,7 @@ import {
 import { useToast } from "./Toast";
 import SaveSpinner from "./shared/SaveSpinner";
 import LoadingSpinner from "./shared/LoadingSpinner";
-import { formatNumber2 } from "../utils/formatters";
+import { formatMeters, formatNumber2 } from "../utils/formatters";
 import { getCashAccountId, getCashAccountName } from "../utils/cashAccount";
 
 // Camera scanner (+ @zxing) only loads when the scan button is tapped.
@@ -407,7 +407,7 @@ export default function QuickSale() {
                             {f.name}
                           </p>
                           <p className="text-xs text-gray-400">
-                            {f.available_meters}m left
+                            {formatMeters(f.available_meters)}m left
                           </p>
                         </div>
                         <div className="text-right">
