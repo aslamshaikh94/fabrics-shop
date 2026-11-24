@@ -1,4 +1,5 @@
 // Form validation schemas using basic validation (zod can be added later if needed)
+import { purchaseBreakdown } from "./purchaseTotals";
 
 /**
  * Turn a caught value into a message worth showing a user.
@@ -123,6 +124,17 @@ export const validatePurchase = (formData) => {
   const gstRate = parseFloat(formData.gst_rate) || 0;
   if (gstRate < 0 || gstRate > 28)
     errors.gst_rate = "GST rate must be between 0 and 28";
+  const discount = parseFloat(formData.discount_amount) || 0;
+  if (discount < 0)
+    errors.discount_amount = "Discount cannot be negative";
+  const grossTotal = purchaseBreakdown(
+    fabricAmount,
+    charges,
+    gstRate,
+  ).grossTotal;
+  if (discount > grossTotal) {
+    errors.discount_amount = "Discount cannot exceed the invoice total";
+  }
   if (!formData.purchase_date)
     errors.purchase_date = "Purchase date is required";
   return errors;

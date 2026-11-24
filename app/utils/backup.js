@@ -60,6 +60,7 @@ const TABLE_COLUMNS = {
     "other_charges",
     "gst_rate",
     "gst_amount",
+    "discount_amount",
   ],
   purchase_items: [
     "id",

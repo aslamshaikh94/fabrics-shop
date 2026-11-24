@@ -446,13 +446,12 @@ export default function Reports() {
               .lte("purchase_date", endDate),
             [],
           ),
-          // All-time purchase invoices, for the Stock tab's charges/GST breakdown.
-          // Tolerant of DBs where migration 042 hasn't been applied yet — then it
-          // falls back to just the total, and the breakdown reads as ₹0.
+          // All-time purchase invoices, for the Stock tab's charges/GST/discount
+          // breakdown. Older databases fall back to the base total-only shape.
           safeAllRowsTolerant(
             "purchases:all",
             "purchases",
-            "id, purchase_number, purchase_date, supplier_id, total_amount, fabric_amount, other_charges, gst_rate, gst_amount",
+            "id, purchase_number, purchase_date, supplier_id, total_amount, fabric_amount, other_charges, gst_rate, gst_amount, discount_amount",
             "id, purchase_number, purchase_date, supplier_id, total_amount",
           ),
           safeQuery(
@@ -605,6 +604,7 @@ export default function Reports() {
         charges: Number(p.other_charges) || 0,
         gstRate: Number(p.gst_rate) || 0,
         gst: Number(p.gst_amount) || 0,
+        discount: Number(p.discount_amount) || 0,
         total: Number(p.total_amount) || 0,
       }));
       const rows = (fabrics || []).map((f) => {
@@ -766,9 +766,10 @@ export default function Reports() {
         fabric: s.fabric + r.fabric,
         charges: s.charges + r.charges,
         gst: s.gst + r.gst,
+        discount: s.discount + r.discount,
         total: s.total + r.total,
       }),
-      { fabric: 0, charges: 0, gst: 0, total: 0 },
+      { fabric: 0, charges: 0, gst: 0, discount: 0, total: 0 },
     );
     return {
       ...t,
@@ -776,11 +777,11 @@ export default function Reports() {
       invoiceFabric: inv.fabric,
       invoiceCharges: inv.charges,
       invoiceGst: inv.gst,
+      invoiceDiscount: inv.discount,
       // Per-invoice tax + charges vs. the cost of the fabric itself.
       chargesGap: inv.total - t.boughtValue,
-      // Integrity check WITHIN the invoice rows: per migration 042 every
-      // invoice must satisfy total = fabric + other charges + GST. This is the
-      // only comparison that is guaranteed to hold, so it is the one surfaced.
+      // Integrity check WITHIN invoice rows: payable = fabric + charges + GST
+      // minus the flat discount applied after GST.
       //
       // Deliberately NOT compared against soldValue/inStockCost: those come
       // from the fabrics table (total_meters × buy rate) while inv.total comes
@@ -788,7 +789,7 @@ export default function Reports() {
       // expected to differ slightly — chargesGap above already reports that
       // difference, and treating it as an error would raise a false alarm.
       invoiceInternalsDiff:
-        inv.total - (inv.fabric + inv.charges + inv.gst),
+        inv.total - (inv.fabric + inv.charges + inv.gst - inv.discount),
     };
   }, [stockRows, invoiceRows]);
 
@@ -797,11 +798,12 @@ export default function Reports() {
     const m = new Map();
     for (const r of invoiceRows) {
       const k = r.supplier || "Unknown supplier";
-      const cur = m.get(k) || { supplier: k, invoices: 0, fabric: 0, charges: 0, gst: 0, total: 0 };
+      const cur = m.get(k) || { supplier: k, invoices: 0, fabric: 0, charges: 0, gst: 0, discount: 0, total: 0 };
       cur.invoices += 1;
       cur.fabric += r.fabric;
       cur.charges += r.charges;
       cur.gst += r.gst;
+      cur.discount += r.discount;
       cur.total += r.total;
       m.set(k, cur);
     }
@@ -1732,14 +1734,14 @@ export default function Reports() {
               {stockTotals.chargesGap > 0 ? "more" : "less"} — broken down below.
             </p>
 
-            {/* Same identity at invoice level: adds charges + GST on top of the
-                fabric cost, so the supplier payable reconciles the same way.
+            {/* Same identity at invoice level: adds charges + GST and deducts
+                the after-GST discount to reconcile the supplier payable.
                 Hidden entirely when no purchase invoices exist — a row of
                 zeroes is noise, not information. */}
             {invoiceRows.length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-100">
                 <p className="text-[11px] text-gray-400 mb-1">
-                  Including other charges and GST (what you owe suppliers)
+                  Including other charges, GST, and discounts (what you owe suppliers)
                 </p>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                   <span className="font-semibold text-gray-900">
@@ -1757,13 +1759,18 @@ export default function Reports() {
                   <span className="text-violet-700">
                     GST {formatINRMasked(stockTotals.invoiceGst, showAmount)}
                   </span>
+                  <span className="text-gray-400">−</span>
+                  <span className="text-warning-700">
+                    Discount {formatINRMasked(stockTotals.invoiceDiscount, showAmount)}
+                  </span>
                 </div>
                 {Math.abs(stockTotals.invoiceInternalsDiff) > 1 && (
                   <p className="text-[11px] text-amber-600 mt-1.5">
                     Some invoices don&apos;t add up: {invoiceRows.length} bill
                     {invoiceRows.length > 1 ? "s" : ""} total{" "}
                     {formatINRMasked(Math.abs(stockTotals.invoiceInternalsDiff), showAmount)}{" "}
-                    off from fabric + charges + GST. Check the By Supplier /
+                    off from fabric + charges + GST − discounts. Check the
+                    By Supplier /
                     All Invoices breakdown below.
                   </p>
                 )}
@@ -1818,15 +1825,15 @@ export default function Reports() {
             <div className="flex flex-wrap items-center gap-2">
               <Receipt className="w-4 h-4 text-indigo-500" />
               <h2 className="font-semibold text-gray-900">
-                GST &amp; Other Charges on Purchases
+                Purchase Invoice Breakdown
               </h2>
               <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
                 {invoiceRows.length}
               </span>
               <p className="w-full text-[11px] text-gray-400 sm:w-auto sm:flex-1 sm:ml-1">
                 Lifetime, all suppliers. Invoice total = fabric amount + other
-                charges + GST. This is what you owe suppliers, so it is not part
-                of stock value or gross profit.
+                charges + GST − discount. This is what you owe suppliers, so it
+                is not part of stock value or gross profit.
               </p>
               <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
                 {[
@@ -1847,7 +1854,7 @@ export default function Reports() {
                 ))}
               </div>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
               {[
                 {
                   title: "Fabric Amount",
@@ -1872,6 +1879,14 @@ export default function Reports() {
                   icon: Percent,
                   text: "text-violet-700",
                   bg: "bg-violet-50",
+                },
+                {
+                  title: "Discounts",
+                  value: stockTotals.invoiceDiscount,
+                  sub: "deducted after GST",
+                  icon: Percent,
+                  text: "text-rose-700",
+                  bg: "bg-rose-50",
                 },
                 {
                   title: "Invoice Total",
@@ -1902,7 +1917,7 @@ export default function Reports() {
             <div className="card overflow-hidden">
               {invoiceView === "bySupplier" ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[760px]">
+                  <table className="w-full text-sm min-w-[860px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
@@ -1910,6 +1925,7 @@ export default function Reports() {
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Fabric Amt</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Other Charges</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase">GST</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase">Discount</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Invoice Total</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase">GST %</th>
                       </tr>
@@ -1917,7 +1933,7 @@ export default function Reports() {
                     <tbody className="divide-y divide-gray-50">
                       {invoiceBySupplier.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-400">
+                          <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-400">
                             No purchase invoices yet.
                           </td>
                         </tr>
@@ -1929,6 +1945,7 @@ export default function Reports() {
                             <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatINRMasked(s.fabric, showAmount)}</td>
                             <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(s.charges, showAmount)}</td>
                             <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(s.gst, showAmount)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-rose-700 whitespace-nowrap">{formatINRMasked(s.discount, showAmount)}</td>
                             <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{formatINRMasked(s.total, showAmount)}</td>
                             <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">
                               {s.fabric > 0 ? `${((s.gst / s.fabric) * 100).toFixed(1)}%` : "—"}
@@ -1947,6 +1964,7 @@ export default function Reports() {
                           <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatINRMasked(stockTotals.invoiceFabric, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceCharges, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceGst, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-rose-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceDiscount, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceTotal, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-gray-500">
                             {stockTotals.invoiceFabric > 0
@@ -1960,7 +1978,7 @@ export default function Reports() {
                 </div>
               ) : (
                 <div className="overflow-x-auto max-h-[26rem] overflow-y-auto">
-                  <table className="w-full text-sm min-w-[860px]">
+                  <table className="w-full text-sm min-w-[940px]">
                     <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Invoice</th>
@@ -1970,13 +1988,14 @@ export default function Reports() {
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Other Charges</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase whitespace-nowrap">GST Rate</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase">GST Amt</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase">Discount</th>
                         <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Invoice Total</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {invoiceRows.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-400">
+                          <td colSpan={9} className="px-4 py-6 text-center text-sm text-gray-400">
                             No purchase invoices yet.
                           </td>
                         </tr>
@@ -1994,6 +2013,7 @@ export default function Reports() {
                                 {r.gstRate ? `${r.gstRate}%` : "—"}
                               </td>
                               <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(r.gst, showAmount)}</td>
+                              <td className="px-4 py-2.5 text-right tabular-nums text-rose-700 whitespace-nowrap">{formatINRMasked(r.discount, showAmount)}</td>
                               <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{formatINRMasked(r.total, showAmount)}</td>
                             </tr>
                           ))
@@ -2007,6 +2027,7 @@ export default function Reports() {
                           <td className="px-4 py-2.5 text-right tabular-nums text-sky-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceCharges, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right text-gray-400">—</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-violet-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceGst, showAmount)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-rose-700 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceDiscount, showAmount)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 whitespace-nowrap">{formatINRMasked(stockTotals.invoiceTotal, showAmount)}</td>
                         </tr>
                       </tfoot>

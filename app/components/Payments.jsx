@@ -38,6 +38,7 @@ import {
   getCashAccountPartner,
   getPrimaryAccountPartner,
 } from "../utils/cashAccount";
+import { calculateAccountBalances } from "../utils/accountBalances";
 
 const PAGE_SIZE = 10;
 
@@ -872,46 +873,30 @@ export default function Payments({
         })),
     ];
   };
-  const holderSummaries = holderNames.map((name) => {
-    const entries = getHolderEntries(name);
-    const partner = partners.find((p) => p.name === name) || null;
-    const manualOpening = Number(partner?.opening_balance || 0);
-    const manualOpeningDate = partner?.opening_balance_date || "";
+  const holderSummaries = calculateAccountBalances({
+    partners,
+    salePayments,
+    deposits,
+    withdrawals,
+    purchasePayments,
+    expenses,
+    year: currentPartnerYear,
+  }).map((summary) => {
+    const openingDate =
+      partners.find((partner) => partner.name === summary.name)
+        ?.opening_balance_date || "";
     const openingApplies =
-      Boolean(manualOpeningDate) &&
-      currentPartnerYear >= yearOf(manualOpeningDate);
-    const statementStart = openingApplies ? manualOpeningDate : "";
-    const afterStart = (e) => !statementStart || e.date >= statementStart;
-    const opening = r2(
-      (openingApplies ? manualOpening : 0) +
-        entries
-          .filter((e) => yearOf(e.date) < currentPartnerYear && afterStart(e))
-          .reduce(
-            (s, e) => s + (e.type === "credit" ? e.amount : -e.amount),
-            0,
-          ),
-    );
-    const yearEntries = entries.filter(
-      (e) => yearOf(e.date) === currentPartnerYear && afterStart(e),
-    );
-    const credit = r2(
-      yearEntries
-        .filter((e) => e.type === "credit")
-        .reduce((s, e) => s + (e.amount || 0), 0),
-    );
-    const debit = r2(
-      yearEntries
-        .filter((e) => e.type === "debit")
-        .reduce((s, e) => s + (e.amount || 0), 0),
-    );
+      Boolean(openingDate) && currentPartnerYear >= yearOf(openingDate);
     return {
-      name,
-      opening,
-      credit,
-      debit,
-      closing: r2(opening + credit - debit),
-      count: yearEntries.length,
-      recent: [...yearEntries].sort(byDateDesc).slice(0, 5),
+      ...summary,
+      recent: getHolderEntries(summary.name)
+        .filter(
+          (entry) =>
+            yearOf(entry.date) === currentPartnerYear &&
+            (!openingApplies || entry.date >= openingDate),
+        )
+        .sort(byDateDesc)
+        .slice(0, 5),
     };
   });
   // One card per account holder — including holders with no activity in the selected

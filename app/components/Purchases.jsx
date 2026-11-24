@@ -40,6 +40,7 @@ import FabricRowTotals from "./shared/FabricRowTotals";
 import {
   DEFAULT_GST_RATE,
   purchaseBreakdown,
+  round2,
 } from "../utils/purchaseTotals";
 import { fetchAllRows } from "../utils/pagedQuery";
 import {
@@ -81,6 +82,7 @@ const INITIAL_FORM = {
   fabric_amount: "",
   other_charges: "",
   gst_rate: DEFAULT_GST_RATE,
+  discount_amount: "",
   purchase_date: new Date().toISOString().split("T")[0],
   notes: "",
 };
@@ -119,6 +121,7 @@ function FormField({
   type = "text",
   required = false,
   placeholder = "",
+  min,
   children,
   formData,
   formErrors,
@@ -137,6 +140,7 @@ function FormField({
         <input
           type={type}
           step={type === "number" ? "0.01" : undefined}
+          min={min}
           required={required}
           value={value}
           onChange={(e) => onFieldChange(field, e.target.value)}
@@ -221,7 +225,7 @@ export default function Purchases() {
           fetchAllRows((from, to) =>
             supabase
               .from("purchases")
-              .select("id, supplier_id, purchase_number, purchase_date, total_amount, paid_amount, fabric_amount, other_charges, gst_rate, gst_amount, notes, invoice_url, status, created_at")
+              .select("id, supplier_id, purchase_number, purchase_date, total_amount, paid_amount, fabric_amount, other_charges, gst_rate, gst_amount, discount_amount, notes, invoice_url, status, created_at")
               .order("purchase_date", { ascending: false })
               .range(from, to),
           ),
@@ -261,6 +265,12 @@ export default function Purchases() {
       setFabrics(fabricsRows);
     } catch (error) {
       console.error("Error fetching purchases data:", error);
+      if (isMissingColumnError(error)) {
+        toast(
+          "Purchase columns are missing. Run migrations 042 and 046 in the Supabase SQL editor.",
+          "error",
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -272,7 +282,7 @@ export default function Purchases() {
         fetchAllRows((from, to) =>
           supabase
             .from("purchases")
-            .select("id, supplier_id, purchase_number, purchase_date, total_amount, paid_amount, fabric_amount, other_charges, gst_rate, gst_amount, notes, invoice_url, status, created_at")
+            .select("id, supplier_id, purchase_number, purchase_date, total_amount, paid_amount, fabric_amount, other_charges, gst_rate, gst_amount, discount_amount, notes, invoice_url, status, created_at")
             .order("purchase_date", { ascending: false })
             .range(from, to),
         ),
@@ -295,6 +305,12 @@ export default function Purchases() {
       setSuppliers(suppliersRows);
     } catch (error) {
       console.error("Error fetching purchases:", error);
+      if (isMissingColumnError(error)) {
+        toast(
+          "Purchase columns are missing. Run migrations 042 and 046 in the Supabase SQL editor.",
+          "error",
+        );
+      }
     }
   }
 
@@ -356,21 +372,33 @@ export default function Purchases() {
         formData.fabric_amount,
         formData.other_charges,
         formData.gst_rate,
+        formData.discount_amount,
       );
       const amounts = {
         fabric_amount: parseFloat(formData.fabric_amount) || 0,
         other_charges: parseFloat(formData.other_charges) || 0,
         gst_rate: parseFloat(formData.gst_rate) || 0,
         gst_amount: gstAmount,
+        discount_amount: round2(formData.discount_amount),
         total_amount: total,
       };
 
       if (editingId) {
+        const paidAmount =
+          Number(purchases.find((purchase) => purchase.id === editingId)?.paid_amount) ||
+          0;
+        const status =
+          paidAmount <= 0
+            ? "pending"
+            : paidAmount >= total
+              ? "paid"
+              : "partial";
         const { error } = await supabase
           .from("purchases")
           .update({
             supplier_id: formData.supplier_id,
             ...amounts,
+            status,
             purchase_date: formData.purchase_date,
             notes: formData.notes,
             invoice_url,
@@ -406,7 +434,7 @@ export default function Purchases() {
       console.error("Error saving purchase:", describeError(error), error);
       toast(
         isMissingColumnError(error)
-          ? "Cannot save: the database is missing the purchase GST/charges columns. Run migration 042 in the Supabase SQL editor."
+          ? "Cannot save: the database is missing purchase columns. Run migrations 042 and 046 in the Supabase SQL editor."
           : `Failed to save purchase — ${describeError(error)}`,
         "error",
       );
@@ -539,7 +567,8 @@ export default function Purchases() {
     const hasBreakdown =
       (Number(purchase.fabric_amount) || 0) !== 0 ||
       (Number(purchase.other_charges) || 0) !== 0 ||
-      (Number(purchase.gst_amount) || 0) !== 0;
+      (Number(purchase.gst_amount) || 0) !== 0 ||
+      (Number(purchase.discount_amount) || 0) !== 0;
     setFormData({
       supplier_id: purchase.supplier_id,
       fabric_amount: hasBreakdown
@@ -549,6 +578,7 @@ export default function Purchases() {
         ? String(purchase.other_charges || "")
         : "",
       gst_rate: hasBreakdown ? String(purchase.gst_rate ?? 0) : "0",
+      discount_amount: String(purchase.discount_amount || ""),
       purchase_date: purchase.purchase_date,
       notes: purchase.notes,
     });
@@ -1035,6 +1065,7 @@ export default function Purchases() {
     formData.fabric_amount,
     formData.other_charges,
     formData.gst_rate,
+    formData.discount_amount,
   );
 
   const statusBadge = (status) => {
@@ -1182,14 +1213,37 @@ export default function Purchases() {
               </p>
             </div>
           </div>
+          <FormField
+            field="discount_amount"
+            label="Discount After GST (₹)"
+            type="number"
+            min="0"
+            placeholder="₹0.00"
+            formData={formData}
+            formErrors={formErrors}
+            onFieldChange={handleFieldChange}
+          />
           <div className="rounded-lg bg-primary-50 border border-primary-100 px-3 py-2">
             <div className="flex items-center justify-between text-sm">
+              <span className="text-primary-700">Invoice total after GST</span>
+              <span className="font-medium text-primary-700">
+                ₹{formatNumber2(formGst.grossTotal)}
+              </span>
+            </div>
+            {formGst.discountAmount > 0 && (
+              <div className="flex items-center justify-between text-sm mt-1">
+                <span className="text-warning-700">Discount after GST</span>
+                <span className="font-medium text-warning-700">
+                  −₹{formatNumber2(formGst.discountAmount)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-sm">
               <span className="text-primary-700">
-                Total Payable (fabric + charges + GST)
+                Total Payable
               </span>
               <span className="font-bold text-primary-700">
-                ₹
-                {formatNumber2(formGst.total)}
+                ₹{formatNumber2(formGst.total)}
               </span>
             </div>
             <p className="text-[11px] text-primary-600/80 mt-0.5">
@@ -1830,6 +1884,7 @@ export default function Purchases() {
               {/* Invoice Breakdown */}
               {(selectedPurchase.other_charges > 0 ||
                 selectedPurchase.gst_amount > 0 ||
+                selectedPurchase.discount_amount > 0 ||
                 (selectedPurchase.fabric_amount > 0 &&
                   selectedPurchase.fabric_amount !==
                     selectedPurchase.total_amount)) && (
@@ -1858,6 +1913,14 @@ export default function Purchases() {
                       <span className="font-medium text-gray-900">
                         ₹
                         {formatNumber2(selectedPurchase.gst_amount)}
+                      </span>
+                    </div>
+                  )}
+                  {selectedPurchase.discount_amount > 0 && (
+                    <div className="flex justify-between">
+                      <span>Discount (after GST):</span>
+                      <span className="font-medium text-warning-700">
+                        −₹{formatNumber2(selectedPurchase.discount_amount)}
                       </span>
                     </div>
                   )}
@@ -2381,6 +2444,11 @@ export default function Purchases() {
                           {formatNumber2(purchase.gst_amount)}
                         </span>
                       ) : null}
+                      {purchase.discount_amount > 0 && (
+                        <span className="block text-[10px] font-normal text-warning-700">
+                          Discount −₹{formatNumber2(purchase.discount_amount)}
+                        </span>
+                      )}
                     </td>
                   )}
                   {col("paid") && (

@@ -18,6 +18,7 @@ import {
   monthKeyOf,
   buildYearRange,
 } from "../utils/periods";
+import { calculateAccountBalances } from "../utils/accountBalances";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import {
   TrendingUp,
@@ -48,6 +49,7 @@ export default function Dashboard() {
     collectedAmount: 0,
     reinvestedAmount: 0,
     freshAmount: 0,
+    availableToReinvest: 0,
     inventoryValue: 0,
   });
   const [changes, setChanges] = useState({});
@@ -92,15 +94,20 @@ export default function Dashboard() {
         recentRes,
         allCustomersRes,
         yearsRes,
-        purchasePaymentsRes,
+        purchasePayments,
+        salePayments,
+        partners,
+        deposits,
+        withdrawals,
+        expenses,
       ] = await Promise.all([
         // All-time sales, column-tolerant: fabric_id (migration 023) is
         // preferred for attribution, falling back to fabric_name alone.
         fetchAllRowsTolerant(
           "sales:all",
           "sales",
-          "total_amount, remaining_amount, paid_amount, meters, fabric_id, fabric_name",
-          "total_amount, remaining_amount, paid_amount, meters, fabric_name",
+          "total_amount, remaining_amount, meters, fabric_id, fabric_name",
+          "total_amount, remaining_amount, meters, fabric_name",
         ),
         fetchAllRows((from, to) =>
           supabase
@@ -157,7 +164,47 @@ export default function Dashboard() {
           .limit(20),
         supabase.from("customers").select("id, name"),
         supabase.from("sales").select("sale_date").order("sale_date").limit(1),
-        supabase.from("purchase_payments").select("reinvested_amount"),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("purchase_payments")
+            .select("id, partner_id, reinvested_amount, payment_date")
+            .order("id")
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("sale_payments")
+            .select("id, partner_id, amount, payment_date")
+            .order("id")
+            .range(from, to),
+        ),
+        fetchAllRowsTolerant(
+          "account-balances:partners",
+          "partners",
+          "id, name, is_active, opening_balance, opening_balance_date",
+          "id, name, is_active",
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("cash_deposits")
+            .select("id, partner_id, amount, deposit_date")
+            .order("id")
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("withdrawals")
+            .select("id, amount, withdrawal_date, withdrawn_by")
+            .order("id")
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("expenses")
+            .select("id, partner_id, amount, expense_date")
+            .order("id")
+            .range(from, to),
+        ),
       ]);
 
       // Build available years
@@ -238,10 +285,21 @@ export default function Dashboard() {
         (s, r) => s + (Number(r.remaining_amount) || 0),
         0,
       );
-      const totalPaidAmount = (salesRes || []).reduce(
-        (s, r) => s + (Number(r.paid_amount) || 0),
+      const totalPaidAmount = (salePayments || []).reduce(
+        (s, r) => s + (Number(r.amount) || 0),
         0,
       );
+      const availableToReinvest =
+        Math.round(
+          calculateAccountBalances({
+            partners,
+            salePayments,
+            deposits,
+            withdrawals,
+            purchasePayments,
+            expenses,
+          }).reduce((sum, account) => sum + account.closing, 0) * 100,
+        ) / 100;
 
       setStats({
         thisMonthSales: currSales,
@@ -272,8 +330,8 @@ export default function Dashboard() {
           0,
         ),
         collectedAmount: totalPaidAmount,
-        reinvestedAmount: (purchasePaymentsRes.data || []).reduce(
-          (s, r) => s + (r.reinvested_amount || 0),
+        reinvestedAmount: (purchasePayments || []).reduce(
+          (s, r) => s + (Number(r.reinvested_amount) || 0),
           0,
         ),
         freshAmount: Math.max(
@@ -281,12 +339,13 @@ export default function Dashboard() {
             (s, r) => s + (Number(r.paid_amount) || 0),
             0,
           ) -
-            (purchasePaymentsRes.data || []).reduce(
-              (s, r) => s + (r.reinvested_amount || 0),
+            (purchasePayments || []).reduce(
+              (s, r) => s + (Number(r.reinvested_amount) || 0),
               0,
             ),
           0,
         ),
+        availableToReinvest,
       });
       const toCollectChange = pctChange(currToCollect, prevToCollect);
       setChanges({
@@ -686,13 +745,13 @@ export default function Dashboard() {
               <p className="text-xs text-gray-400">Available to Reinvest</p>
               <p
                 className={`text-sm font-bold mt-0.5 ${
-                  stats.collectedAmount - stats.reinvestedAmount >= 0
+                  stats.availableToReinvest >= 0
                     ? "text-green-600"
                     : "text-red-500"
                 }`}
               >
                 {formatINRMasked(
-                  Math.max(stats.collectedAmount - stats.reinvestedAmount, 0),
+                  stats.availableToReinvest,
                   showAmount,
                 )}
               </p>

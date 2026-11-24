@@ -310,10 +310,11 @@ export default function Fabrics() {
               .eq("purchase_id", purchaseId),
             supabase
               .from("purchases")
-              .select("other_charges, gst_rate")
+              .select("other_charges, gst_rate, discount_amount, paid_amount")
               .eq("id", purchaseId)
               .single(),
           ]);
+          if (purchaseRes.error) throw purchaseRes.error;
           const existingTotal = (fabricsRes.data || []).reduce(
             (sum, f) =>
               sum +
@@ -326,6 +327,7 @@ export default function Fabrics() {
             newFabricAmt,
             purchaseRes.data?.other_charges || 0,
             purchaseRes.data?.gst_rate || 0,
+            purchaseRes.data?.discount_amount || 0,
           );
           const { error: updateError } = await supabase
             .from("purchases")
@@ -333,6 +335,13 @@ export default function Fabrics() {
               fabric_amount: newFabricAmt,
               gst_amount: gstAmount,
               total_amount: total,
+              discount_amount: purchaseRes.data?.discount_amount || 0,
+              status:
+                Number(purchaseRes.data?.paid_amount) <= 0
+                  ? "pending"
+                  : Number(purchaseRes.data?.paid_amount) >= total
+                    ? "paid"
+                    : "partial",
             })
             .eq("id", purchaseId);
           if (updateError) throw updateError;
@@ -347,6 +356,7 @@ export default function Fabrics() {
                 other_charges: 0,
                 gst_rate: 0,
                 gst_amount: 0,
+                discount_amount: 0,
                 total_amount: newFabricsTotal,
                 purchase_date: new Date().toISOString().split("T")[0],
                 notes: `Fabric purchase: ${validRows.map((r) => r.name).join(", ")}`,
@@ -387,7 +397,7 @@ export default function Fabrics() {
       console.error("Error saving fabric:", describeError(err), err);
       toast(
         isMissingColumnError(err)
-          ? "Cannot save: the database is missing the purchase GST/charges columns. Run migration 042 in the Supabase SQL editor."
+          ? "Cannot save: the database is missing purchase columns. Run migrations 042 and 046 in the Supabase SQL editor."
           : `Failed to save fabric — ${describeError(err)}`,
         "error",
       );
