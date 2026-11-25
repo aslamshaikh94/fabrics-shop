@@ -46,6 +46,7 @@ import { fetchAllRows } from "../utils/pagedQuery";
 import {
   isPurchaseItemsUnavailable,
   mergePurchaseFabrics,
+  toPurchaseReceiptFabrics,
 } from "../utils/purchaseItems";
 import { formatINR, formatDateShort, formatNumber2 } from "../utils/formatters";
 import { useVisibleCols } from "../hooks/useVisibleCols";
@@ -75,6 +76,71 @@ const ALL_PURCHASE_COLUMNS = [
 ];
 
 const PURCHASE_DEFAULT_VISIBLE = new Set(["purchaseNo", "supplier", "date", "total", "paid", "remaining", "status", "actions"]);
+
+function isMissingPurchaseReceiptTable(error) {
+  const message = describeError(error).toLowerCase();
+  return (
+    error?.code === "PGRST205" ||
+    error?.code === "42P01" ||
+    (message.includes("purchase_fabric_receipts") &&
+      (message.includes("schema cache") ||
+        message.includes("does not exist") ||
+        message.includes("not found")))
+  );
+}
+
+function isMissingRestockFunction(error) {
+  return error?.code === "PGRST202" || error?.code === "42883";
+}
+
+function normalizeFabricName(name) {
+  return String(name || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function findImportedFabric(name, barcode, fabrics) {
+  const normalizedName = normalizeFabricName(name);
+  const normalizedBarcode = String(barcode || "").trim().toLowerCase();
+  const barcodeMatches = normalizedBarcode
+    ? fabrics.filter(
+        (fabric) =>
+          String(fabric.barcode || "").trim().toLowerCase() ===
+          normalizedBarcode,
+      )
+    : [];
+
+  if (barcodeMatches.length > 1) {
+    return {
+      error: `Barcode "${barcode}" matches multiple fabrics.`,
+      candidates: barcodeMatches,
+    };
+  }
+  if (barcodeMatches.length === 1) {
+    const fabric = barcodeMatches[0];
+    if (
+      normalizedName &&
+      normalizeFabricName(fabric.name) !== normalizedName
+    ) {
+      return {
+        error: `Barcode "${barcode}" belongs to "${fabric.name}", not "${name}".`,
+      };
+    }
+    return { fabric };
+  }
+
+  const nameMatches = fabrics.filter(
+    (fabric) => normalizeFabricName(fabric.name) === normalizedName,
+  );
+  if (nameMatches.length > 1) {
+    return {
+      error: `"${name}" matches multiple existing fabrics. Choose the correct record below.`,
+      candidates: nameMatches,
+    };
+  }
+  return { fabric: nameMatches[0] || null };
+}
 
 
 const INITIAL_FORM = {
@@ -112,6 +178,7 @@ function makeEmptyFabricRow() {
     quantity: "",
     barcode: "",
     discount_amount: "",
+    match_candidates: [],
   };
 }
 
@@ -196,6 +263,10 @@ export default function Purchases() {
   const [fabricRows, setFabricRows] = useState([makeEmptyFabricRow()]);
   const [fabricSearch, setFabricSearch] = useState("");
   const [activeFabricIdx, setActiveFabricIdx] = useState(null);
+  const [loadingFabricSuggestions, setLoadingFabricSuggestions] = useState(false);
+  const [fabricSuggestionsError, setFabricSuggestionsError] = useState(false);
+  const [purchaseReceiptMigrationMissing, setPurchaseReceiptMigrationMissing] =
+    useState(false);
   const [savingFabrics, setSavingFabrics] = useState(false);
   const [scanningRowIdx, setScanningRowIdx] = useState(null);
   const [pdfExtracting, setPdfExtracting] = useState(false);
@@ -536,27 +607,69 @@ export default function Purchases() {
     }
   }
 
+  async function loadPurchaseFabrics(purchaseId) {
+    const [receiptsRes, itemsRes] = await Promise.all([
+      supabase
+        .from("purchase_fabric_receipts")
+        .select("id, fabric_name, meters, purchase_price_per_meter, discount_amount, quantity, barcode, is_legacy")
+        .eq("purchase_id", purchaseId)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("purchase_items")
+        .select("id, description, meters, rate, hsn")
+        .eq("purchase_id", purchaseId),
+    ]);
+
+    if (itemsRes.error && !isPurchaseItemsUnavailable(itemsRes.error)) {
+      throw itemsRes.error;
+    }
+    if (itemsRes.error) {
+      console.warn("Purchase items unavailable:", {
+        message: itemsRes.error.message,
+        code: itemsRes.error.code,
+      });
+    }
+
+    let receiptRows;
+    if (receiptsRes.error) {
+      if (!isMissingPurchaseReceiptTable(receiptsRes.error)) {
+        throw receiptsRes.error;
+      }
+      setPurchaseReceiptMigrationMissing(true);
+      console.warn(
+        "Purchase receipt migration 047 is missing; using legacy fabric links:",
+        describeError(receiptsRes.error),
+        receiptsRes.error,
+      );
+      const legacyFabricsRes = await supabase
+        .from("fabrics")
+        .select(
+          "id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode",
+        )
+        .eq("purchase_id", purchaseId);
+      if (legacyFabricsRes.error) throw legacyFabricsRes.error;
+      receiptRows = legacyFabricsRes.data || [];
+    } else {
+      setPurchaseReceiptMigrationMissing(false);
+      receiptRows = toPurchaseReceiptFabrics(receiptsRes.data);
+    }
+
+    return mergePurchaseFabrics(
+      receiptRows,
+      itemsRes.data,
+    );
+  }
+
   async function fetchPurchaseFabrics(purchaseId) {
     try {
-      const [fabricsRes, itemsRes] = await Promise.all([
-        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode").eq("purchase_id", purchaseId),
-        supabase.from("purchase_items").select("id, description, meters, rate, hsn").eq("purchase_id", purchaseId),
-      ]);
-      if (fabricsRes.error) throw fabricsRes.error;
-      // purchase_items is a legacy invoice-lines table; it may not exist on
-      // this DB (PGRST205) or RLS may hide it — either way show fabrics.
-      if (itemsRes.error && !isPurchaseItemsUnavailable(itemsRes.error)) {
-        throw itemsRes.error;
-      }
-      if (itemsRes.error) {
-        console.warn("Purchase items unavailable, showing fabrics only:", {
-          message: itemsRes.error.message,
-          code: itemsRes.error.code,
-        });
-      }
-      setPurchaseFabrics(mergePurchaseFabrics(fabricsRes.data, itemsRes.data));
+      setPurchaseFabrics(await loadPurchaseFabrics(purchaseId));
     } catch (error) {
-      console.error("Error fetching purchase fabrics:", error);
+      console.error(
+        "Error fetching purchase fabrics:",
+        describeError(error),
+        error,
+      );
+      toast(`Could not load received fabric items — ${describeError(error)}`, "error");
     }
   }
 
@@ -597,41 +710,21 @@ export default function Purchases() {
         .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
         .eq("purchase_id", purchase.id)
         .order("payment_date", { ascending: false }),
-      supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode").eq("purchase_id", purchase.id),
-      supabase.from("purchase_items").select("id, description, meters, rate, hsn").eq("purchase_id", purchase.id),
+      loadPurchaseFabrics(purchase.id),
     ])
-      .then(([paymentsRes, fabricsRes, itemsRes]) => {
-        if (paymentsRes.error)
-          console.error("Error fetching payments:", {
-            message: paymentsRes.error.message,
-            code: paymentsRes.error.code,
-          });
-        if (fabricsRes.error)
-          console.error("Error fetching purchase fabrics:", {
-            message: fabricsRes.error.message,
-            code: fabricsRes.error.code,
-          });
-        if (fabricsRes.error && !itemsRes.error && !itemsRes.data) {
-          // fabrics query itself failed — leave list empty rather than stale.
-          setPayments(paymentsRes.data || []);
-          setPurchaseFabrics([]);
-          return;
-        }
-        if (itemsRes.error && !isPurchaseItemsUnavailable(itemsRes.error)) {
-          console.error("Error fetching purchase items:", {
-            message: itemsRes.error.message,
-            code: itemsRes.error.code,
-          });
-        }
+      .then(([paymentsRes, purchaseFabricRows]) => {
+        if (paymentsRes.error) throw paymentsRes.error;
         setPayments(paymentsRes.data || []);
-        setPurchaseFabrics(mergePurchaseFabrics(fabricsRes.data, itemsRes.data));
+        setPurchaseFabrics(purchaseFabricRows);
       })
-      .catch((e) =>
-        console.error("Error fetching purchase details:", {
-          message: e?.message,
-          code: e?.code,
-        }),
-      );
+      .catch((error) => {
+        console.error(
+          "Error fetching purchase details:",
+          describeError(error),
+          error,
+        );
+        toast(`Could not load purchase details — ${describeError(error)}`, "error");
+      });
   }
 
   async function handleAddPayment(purchase) {
@@ -640,22 +733,24 @@ export default function Purchases() {
     setPurchaseFabrics([]);
     setShowPaymentModal(true);
     try {
-      const [paymentsRes, fabricsRes, itemsRes] = await Promise.all([
+      const [paymentsRes, purchaseFabricRows] = await Promise.all([
         supabase
           .from("purchase_payments")
           .select("id, amount, reinvested_amount, payment_date, payment_method, partner_id, reference_number")
           .eq("purchase_id", purchase.id)
           .order("payment_date", { ascending: false }),
-        supabase.from("fabrics").select("id, name, total_meters, purchase_price_per_meter, selling_price_per_meter, quantity, barcode").eq("purchase_id", purchase.id),
-        supabase
-          .from("purchase_items")
-          .select("id, description, meters, rate, hsn")
-          .eq("purchase_id", purchase.id),
+        loadPurchaseFabrics(purchase.id),
       ]);
+      if (paymentsRes.error) throw paymentsRes.error;
       setPayments(paymentsRes.data || []);
-      setPurchaseFabrics(mergePurchaseFabrics(fabricsRes.data, itemsRes.data));
+      setPurchaseFabrics(purchaseFabricRows);
     } catch (error) {
-      console.error("Error fetching purchase details:", error);
+      console.error(
+        "Error fetching purchase details:",
+        describeError(error),
+        error,
+      );
+      toast(`Could not load purchase details — ${describeError(error)}`, "error");
     }
   }
 
@@ -673,14 +768,32 @@ export default function Purchases() {
     setFabricSearch("");
     setActiveFabricIdx(null);
     setShowAddFabrics(true);
-    // Fetch fabrics list for auto-suggest
-    supabase
-      .from("fabrics")
-      .select("id, name, barcode, available_meters, purchase_price_per_meter")
-      .order("name")
-      .then((res) => {
-        setFabrics(res.data || []);
-      });
+    loadFabricSuggestions();
+  }
+
+  async function loadFabricSuggestions() {
+    setLoadingFabricSuggestions(true);
+    setFabricSuggestionsError(false);
+    setFabrics([]);
+    try {
+      const data = await fetchAllRows((from, to) =>
+        supabase
+          .from("fabrics")
+          .select(
+            "id, name, barcode, total_meters, available_meters, purchase_price_per_meter, selling_price_per_meter, quantity",
+          )
+          .order("name")
+          .order("id")
+          .range(from, to),
+      );
+      setFabrics(data);
+    } catch (error) {
+      console.error("Error loading fabric suggestions:", error);
+      setFabricSuggestionsError(true);
+      toast("Could not load existing fabrics. Please retry before adding stock.", "error");
+    } finally {
+      setLoadingFabricSuggestions(false);
+    }
   }
 
   function handleCloseAddFabrics() {
@@ -703,6 +816,7 @@ export default function Purchases() {
       fabric_id: fabric.id,
       fabric_name: fabric.name,
       purchase_price_per_meter: fabric.purchase_price_per_meter.toString(),
+      quantity: fabric.quantity || "",
       barcode: fabric.barcode || "",
     });
     setActiveFabricIdx(null);
@@ -714,8 +828,9 @@ export default function Purchases() {
 
   function addFabricRow() {
     const lastRow = fabricRows[fabricRows.length - 1];
-    if (!lastRow.fabric_name || !lastRow.total_meters) {
-      toast("Please fill in fabric name and meters first", "error");
+    const meters = Number(lastRow.total_meters);
+    if (!lastRow.fabric_name?.trim() || !Number.isFinite(meters) || meters <= 0) {
+      toast("Please enter a fabric name and positive meters first", "error");
       return;
     }
     setFabricRows((prev) => [...prev, makeEmptyFabricRow()]);
@@ -736,6 +851,11 @@ export default function Purchases() {
       toast("Please upload a .json file", "error");
       return;
     }
+    if (loadingFabricSuggestions || fabricSuggestionsError) {
+      toast("Wait for the existing fabric list to load before importing JSON.", "error");
+      e.target.value = "";
+      return;
+    }
     setJsonExtracting(true);
     try {
       const text = await file.text();
@@ -749,26 +869,52 @@ export default function Purchases() {
         return;
       }
 
-      const newRows = items.map((item) => ({
-        fabric_id: "",
-        fabric_name:
+      const ambiguousMatches = [];
+      const importErrors = [];
+      const newRows = items.map((rawItem) => {
+        const item = rawItem || {};
+        const name = String(
           item.fabric_name || item.fabricName || item.name || item.fabric || "",
-        total_meters: String(
-          item.total_meters || item.meters || item.mtrs || "",
-        ),
-        purchase_price_per_meter: String(
-          item.purchase_price_per_meter ||
-            item.price ||
-            item.buy_price ||
-            item.rate ||
-            "",
-        ),
-        quantity: String(item.quantity || item.qty || "1"),
-        barcode: item.barcode || item.barCode || "",
-        discount_amount: String(
-          item.discount_amount || item.discAmt || item.discount || "",
-        ),
-      }));
+        ).trim();
+        const barcode = String(item.barcode || item.barCode || "").trim();
+        const match = findImportedFabric(name, barcode, fabrics);
+        if (match.error) {
+          if (match.candidates?.length) ambiguousMatches.push(match.error);
+          else importErrors.push(match.error);
+        }
+        const existingFabric = match.fabric;
+        return {
+          fabric_id: existingFabric?.id || "",
+          match_candidates: match.candidates || [],
+          fabric_name: existingFabric?.name || name,
+          total_meters: String(
+            item.total_meters || item.meters || item.mtrs || "",
+          ),
+          purchase_price_per_meter: String(
+            item.purchase_price_per_meter ||
+              item.price ||
+              item.buy_price ||
+              item.rate ||
+              existingFabric?.purchase_price_per_meter ||
+              "",
+          ),
+          quantity: String(
+            item.quantity ||
+              item.qty ||
+              existingFabric?.quantity ||
+              (existingFabric || match.candidates?.length ? "" : "1"),
+          ),
+          barcode: barcode || existingFabric?.barcode || "",
+          discount_amount: String(
+            item.discount_amount || item.discAmt || item.discount || "",
+          ),
+        };
+      });
+
+      if (importErrors.length > 0) {
+        toast([...new Set(importErrors)].join(" "), "error");
+        return;
+      }
 
       // Filter out rows without required fields
       const validRows = newRows.filter(
@@ -784,8 +930,11 @@ export default function Purchases() {
 
       validRows.push(makeEmptyFabricRow());
       setFabricRows(validRows);
+      const ambiguousNotice = ambiguousMatches.length
+        ? ` Choose an existing fabric for ${ambiguousMatches.length} ambiguous item${ambiguousMatches.length > 1 ? "s" : ""} before saving.`
+        : "";
       toast(
-        `Loaded ${validRows.length - 1} fabric item${validRows.length - 1 > 1 ? "s" : ""} from JSON.`,
+        `Loaded ${validRows.length - 1} fabric item${validRows.length - 1 > 1 ? "s" : ""} from JSON.${ambiguousNotice}`,
       );
     } catch (err) {
       console.error("JSON parse error:", err);
@@ -801,6 +950,11 @@ export default function Purchases() {
     if (!file) return;
     if (file.type !== "application/pdf") {
       toast("Please upload a PDF file", "error");
+      return;
+    }
+    if (loadingFabricSuggestions || fabricSuggestionsError) {
+      toast("Wait for the existing fabric list to load before importing a PDF.", "error");
+      e.target.value = "";
       return;
     }
     setPdfExtracting(true);
@@ -819,18 +973,34 @@ export default function Purchases() {
         return;
       }
       // Replace current rows with extracted entries + one empty row
-      const newRows = entries.map((entry) => ({
-        fabric_id: "",
-        fabric_name: entry.fabric_name,
-        total_meters: entry.total_meters,
-        purchase_price_per_meter: entry.purchase_price_per_meter,
-        quantity: entry.quantity || "1",
-        barcode: "",
-      }));
+      const ambiguousMatches = [];
+      const newRows = entries.map((entry) => {
+        const match = findImportedFabric(entry.fabric_name, "", fabrics);
+        if (match.error) ambiguousMatches.push(match.error);
+        const existingFabric = match.fabric;
+        return {
+          fabric_id: existingFabric?.id || "",
+          match_candidates: match.candidates || [],
+          fabric_name: existingFabric?.name || entry.fabric_name,
+          total_meters: entry.total_meters,
+          purchase_price_per_meter:
+            entry.purchase_price_per_meter ||
+            existingFabric?.purchase_price_per_meter,
+          quantity:
+            entry.quantity ||
+            existingFabric?.quantity ||
+            (existingFabric || match.candidates?.length ? "" : "1"),
+          barcode: existingFabric?.barcode || "",
+          discount_amount: "",
+        };
+      });
       newRows.push(makeEmptyFabricRow());
       setFabricRows(newRows);
+      const ambiguousNotice = ambiguousMatches.length
+        ? ` Choose an existing fabric for ${ambiguousMatches.length} ambiguous item${ambiguousMatches.length > 1 ? "s" : ""} before saving.`
+        : "";
       toast(
-        `Extracted ${entries.length} fabric item${entries.length > 1 ? "s" : ""} from PDF. Please review and adjust.`,
+        `Extracted ${entries.length} fabric item${entries.length > 1 ? "s" : ""} from PDF. Please review and adjust.${ambiguousNotice}`,
       );
     } catch (err) {
       console.error("PDF extraction error:", err);
@@ -844,76 +1014,101 @@ export default function Purchases() {
   async function handleAddFabricsSubmit(e) {
     e.preventDefault();
 
-    // Validate rows
-    const validRows = fabricRows.filter((r) => r.fabric_name && r.total_meters);
+    if (!selectedPurchase) return;
+    if (purchaseReceiptMigrationMissing) {
+      toast("Apply migration 047 in Supabase before recording stock receipts.", "error");
+      return;
+    }
+
+    const hasInput = (row) =>
+      [
+        row.fabric_id,
+        row.fabric_name,
+        row.total_meters,
+        row.purchase_price_per_meter,
+        row.discount_amount,
+        row.quantity,
+        row.barcode,
+      ].some((value) => String(value || "").trim() !== "");
+    const validRows = fabricRows.filter(hasInput);
     if (validRows.length === 0) {
       toast("Please add at least one fabric item", "error");
       return;
     }
 
+    for (const row of validRows) {
+      if (row.match_candidates?.length && !row.fabric_id) {
+        toast(
+          "Choose the existing fabric record for each ambiguous imported item.",
+          "error",
+        );
+        return;
+      }
+      const meters = Number(row.total_meters);
+      const buyPrice =
+        row.purchase_price_per_meter === ""
+          ? 0
+          : Number(row.purchase_price_per_meter);
+      const discount =
+        row.discount_amount === "" ? 0 : Number(row.discount_amount);
+      if (!String(row.fabric_name || "").trim()) {
+        toast("Enter a fabric name for every item", "error");
+        return;
+      }
+      if (!Number.isFinite(meters) || meters <= 0) {
+        toast("Meters must be greater than zero for every item", "error");
+        return;
+      }
+      if (!Number.isFinite(buyPrice) || buyPrice < 0) {
+        toast("Buy price cannot be negative", "error");
+        return;
+      }
+      if (
+        !Number.isFinite(discount) ||
+        discount < 0 ||
+        discount > meters * buyPrice
+      ) {
+        toast("Discount must be between zero and the fabric line total", "error");
+        return;
+      }
+    }
+
     setSavingFabrics(true);
     try {
       const purchaseId = selectedPurchase.id;
-      for (const row of validRows) {
-        const meters = parseFloat(row.total_meters) || 0;
-        const buyPrice = parseFloat(row.purchase_price_per_meter) || 0;
+      const { error } = await supabase.rpc("add_fabrics_to_purchase", {
+        p_purchase_id: purchaseId,
+        p_rows: validRows.map((row) => ({
+          fabric_id: row.fabric_id || null,
+          fabric_name: String(row.fabric_name || "").trim(),
+          total_meters: Number(row.total_meters),
+          purchase_price_per_meter:
+            row.purchase_price_per_meter === ""
+              ? 0
+              : Number(row.purchase_price_per_meter),
+          discount_amount:
+            row.discount_amount === "" ? 0 : Number(row.discount_amount),
+          quantity: String(row.quantity || "").trim(),
+          barcode: String(row.barcode || "").trim(),
+        })),
+      });
+      if (error) throw error;
 
-        if (row.fabric_id) {
-          // Existing fabric — restock: increase total_meters and available_meters
-          const { data: existingFabric } = await supabase
-            .from("fabrics")
-            .select("total_meters, available_meters")
-            .eq("id", row.fabric_id)
-            .single();
-
-          if (existingFabric) {
-            const { error: updateErr } = await supabase
-              .from("fabrics")
-              .update({
-                total_meters: (existingFabric.total_meters || 0) + meters,
-                available_meters:
-                  (existingFabric.available_meters || 0) + meters,
-                purchase_price_per_meter:
-                  buyPrice > 0
-                    ? buyPrice
-                    : existingFabric.purchase_price_per_meter,
-                quantity: row.quantity || undefined,
-                barcode: row.barcode || undefined,
-                purchase_id: purchaseId,
-              })
-              .eq("id", row.fabric_id);
-            if (updateErr) throw updateErr;
-          }
-        } else {
-          // New fabric — create record
-          const { error } = await supabase.from("fabrics").insert([
-            {
-              name: row.fabric_name,
-              total_meters: meters,
-              available_meters: meters,
-              purchase_price_per_meter: buyPrice,
-              quantity: row.quantity || "",
-              barcode: row.barcode || "",
-              purchase_id: purchaseId,
-              supplier_id: selectedPurchase.supplier_id,
-              created_at: selectedPurchase.purchase_date + "T00:00:00",
-            },
-          ]);
-          if (error) throw error;
-        }
-      }
-
-      const hasRestock = validRows.some((r) => r.fabric_id);
       toast(
-        `${validRows.length} fabric${validRows.length > 1 ? "s" : ""} added to purchase${hasRestock ? " (restocked existing)" : ""}`,
+        `Stock updated for ${validRows.length} fabric item${validRows.length > 1 ? "s" : ""}. Purchase total is unchanged.`,
       );
 
       handleCloseAddFabrics();
       fetchPurchases();
       fetchPurchaseFabrics(purchaseId);
     } catch (err) {
-      console.error("Error adding fabrics:", err);
-      toast(err?.message || "Failed to add fabrics", "error");
+      console.error("Error adding received stock:", describeError(err), err);
+      toast(
+        isMissingRestockFunction(err)
+          ? "Apply migration 047 in Supabase before recording stock receipts."
+          : `Failed to add stock — ${describeError(err)}`,
+        "error",
+      );
     } finally {
       setSavingFabrics(false);
     }
@@ -1000,17 +1195,20 @@ export default function Purchases() {
 
   async function handleDelete(id) {
     try {
-      await Promise.all([
-        supabase.from("purchase_payments").delete().eq("purchase_id", id),
-        supabase.from("fabrics").delete().eq("purchase_id", id),
-      ]);
-      const { error } = await supabase.from("purchases").delete().eq("id", id);
+      const { error } = await supabase.rpc("delete_purchase_with_stock", {
+        p_purchase_id: id,
+      });
       if (error) throw error;
-      toast("Purchase deleted");
+      toast("Purchase and its available received stock deleted");
       fetchPurchases();
     } catch (err) {
-      console.error("Error deleting purchase:", err);
-      toast("Failed to delete purchase", "error");
+      console.error("Error deleting purchase:", describeError(err), err);
+      toast(
+        isMissingRestockFunction(err)
+          ? "Apply migration 047 in Supabase before deleting purchases safely."
+          : `Failed to delete purchase — ${describeError(err)}`,
+        "error",
+      );
     } finally {
       setConfirmDelete(null);
     }
@@ -1499,10 +1697,30 @@ export default function Purchases() {
       <Modal
         open={showAddFabrics}
         onClose={handleCloseAddFabrics}
-        title={`Add Fabrics — ${selectedPurchase?.supplier?.name || "Purchase"}`}
+        title={`Add Stock — ${selectedPurchase?.supplier?.name || "Purchase"}`}
         size="lg"
       >
         <form onSubmit={handleAddFabricsSubmit} className="space-y-4">
+          <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
+            This records received fabric and updates inventory. It does not
+            change the purchase total or amount due.
+          </p>
+          {fabricSuggestionsError && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              <span>
+                Existing fabrics could not be loaded. Retry before adding stock
+                to avoid creating duplicates.
+              </span>
+              <button
+                type="button"
+                onClick={loadFabricSuggestions}
+                disabled={loadingFabricSuggestions}
+                className="font-semibold underline disabled:opacity-50"
+              >
+                Retry
+              </button>
+            </div>
+          )}
           {/* Totals bar */}
           {(() => {
             const validRows = fabricRows.filter(
@@ -1535,7 +1753,7 @@ export default function Purchases() {
                     Mtrs: <strong>{totalMeters.toFixed(2)}m</strong>
                   </span>
                   <span className="text-primary-700">
-                    Total:{" "}
+                    Line amount:{" "}
                     <strong>
                       ₹
                       {formatNumber2(totalAmount)}
@@ -1543,32 +1761,18 @@ export default function Purchases() {
                   </span>
                   {totalDisc > 0 && (
                     <span className="text-warning-700">
-                      Disc:{" "}
+                      Discounts:{" "}
                       <strong>
                         -₹
                         {formatNumber2(totalDisc)}
                       </strong>
                     </span>
                   )}
-                  <span className="text-primary-700">
-                    Net:{" "}
+                  <span className="text-accent-700 font-semibold">
+                    Estimated stock value:{" "}
                     <strong>
                       ₹
                       {formatNumber2(netAmount)}
-                    </strong>
-                  </span>
-                  <span className="text-primary-700">
-                    GST (5%):{" "}
-                    <strong>
-                      ₹
-                      {formatNumber2(Math.round(netAmount * 0.05 * 100) / 100)}
-                    </strong>
-                  </span>
-                  <span className="text-accent-700 font-semibold">
-                    Total with GST:{" "}
-                    <strong>
-                      ₹
-                      {formatNumber2(Math.round(netAmount * 1.05 * 100) / 100)}
                     </strong>
                   </span>
                 </div>
@@ -1582,6 +1786,14 @@ export default function Purchases() {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
                 Added Fabrics ({fabricRows.length - 1})
               </p>
+              {fabricRows.some(
+                (row) => row.match_candidates?.length && !row.fabric_id,
+              ) && (
+                <p className="rounded-lg border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800">
+                  Some names match multiple inventory records. Choose the
+                  correct existing fabric for each before saving.
+                </p>
+              )}
               {fabricRows.slice(0, -1).map((row, idx) => (
                 <div
                   key={idx}
@@ -1593,7 +1805,12 @@ export default function Purchases() {
                         type="text"
                         value={row.fabric_name}
                         onChange={(e) =>
-                          updateFabricRow(idx, { fabric_name: e.target.value })
+                          updateFabricRow(idx, {
+                            fabric_name: e.target.value,
+                            fabric_id: "",
+                            barcode: "",
+                            match_candidates: [],
+                          })
                         }
                         className="input text-sm py-1.5"
                         placeholder="Fabric Name"
@@ -1678,6 +1895,50 @@ export default function Purchases() {
                     </div>
                   ) : (
                     <div className="flex-1 min-w-0">
+                      {row.match_candidates?.length > 0 && !row.fabric_id && (
+                        <div className="mb-2">
+                          <label className="block text-xs font-semibold text-warning-800 mb-1">
+                            Choose the existing fabric to restock
+                          </label>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const selectedFabric = row.match_candidates.find(
+                                (fabric) => fabric.id === e.target.value,
+                              );
+                              if (!selectedFabric) return;
+                              updateFabricRow(idx, {
+                                fabric_id: selectedFabric.id,
+                                fabric_name: selectedFabric.name,
+                                purchase_price_per_meter:
+                                  row.purchase_price_per_meter ||
+                                  String(
+                                    selectedFabric.purchase_price_per_meter || 0,
+                                  ),
+                                quantity:
+                                  row.quantity || selectedFabric.quantity || "",
+                                barcode:
+                                  row.barcode || selectedFabric.barcode || "",
+                                match_candidates: [],
+                              });
+                            }}
+                            className="input text-sm py-1.5"
+                          >
+                            <option value="">Select matching record</option>
+                            {row.match_candidates.map((fabric) => (
+                              <option key={fabric.id} value={fabric.id}>
+                                {fabric.name} — {fabric.available_meters}m
+                                available · buy ₹
+                                {fabric.purchase_price_per_meter}/m · sell ₹
+                                {fabric.selling_price_per_meter}/m
+                                {fabric.barcode ? ` · ${fabric.barcode}` : ""}
+                                {" · #"}
+                                {fabric.id.slice(0, 8)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       <p className="text-sm font-medium text-gray-900 truncate">
                         {row.fabric_name}
                         {row.fabric_id && (
@@ -1767,7 +2028,10 @@ export default function Purchases() {
             setFabricSearch={setFabricSearch}
             activeFabricIdx={activeFabricIdx}
             setActiveFabricIdx={setActiveFabricIdx}
+            loadingFabricSuggestions={loadingFabricSuggestions}
+            fabricSuggestionsError={fabricSuggestionsError}
             fabrics={fabrics}
+            fabricRows={fabricRows}
             updateFabricRow={updateFabricRow}
             selectFabricFromSuggest={selectFabricFromSuggest}
             addFabricRow={addFabricRow}
@@ -1798,7 +2062,11 @@ export default function Purchases() {
                 accept=".json,application/json"
                 className="hidden"
                 onChange={handleJsonUpload}
-                disabled={jsonExtracting}
+                disabled={
+                  jsonExtracting ||
+                  loadingFabricSuggestions ||
+                  fabricSuggestionsError
+                }
               />
             </label>
             <p className="text-xs text-gray-400 mt-1.5 text-center">
@@ -1816,7 +2084,11 @@ export default function Purchases() {
             </button>
             <button
               type="submit"
-              disabled={savingFabrics}
+              disabled={
+                savingFabrics ||
+                loadingFabricSuggestions ||
+                fabricSuggestionsError
+              }
               className="btn btn-primary flex-1"
             >
               {savingFabrics ? <SaveSpinner /> : (
@@ -1974,23 +2246,16 @@ export default function Purchases() {
                         Mtrs: <strong>{totalMeters.toFixed(2)}m</strong>
                       </span>
                       <span className="text-primary-700">
-                        Total: <strong>₹{formatNumber2(totalAmount)}</strong>
+                        Line amount: <strong>₹{formatNumber2(totalAmount)}</strong>
                       </span>
                       {totalDisc > 0 && (
                         <span className="text-warning-700">
-                          Disc: <strong>-₹{formatNumber2(totalDisc)}</strong>
+                          Discounts: <strong>-₹{formatNumber2(totalDisc)}</strong>
                         </span>
                       )}
-                      <span className="text-primary-700">
-                        Net: <strong>₹{formatNumber2(netAmount)}</strong>
-                      </span>
-                      <span className="text-primary-700">
-                        GST ({selectedPurchase.gst_rate || 5}%):{" "}
-                        <strong>₹{formatNumber2(selectedPurchase.gst_amount)}</strong>
-                      </span>
                       <span className="text-accent-700 font-semibold">
-                        Total with GST:{" "}
-                        <strong>₹{formatNumber2(selectedPurchase.total_amount)}</strong>
+                        Received stock value:{" "}
+                        <strong>₹{formatNumber2(netAmount)}</strong>
                       </span>
                     </div>
                   </div>
@@ -2000,7 +2265,7 @@ export default function Purchases() {
             {purchaseFabrics.length > 0 && (
               <div className="mb-4">
                 <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                  Purchased Fabrics ({purchaseFabrics.length})
+                  Received Items ({purchaseFabrics.length})
                 </h3>
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {purchaseFabrics.map((fabric) => (
@@ -2118,6 +2383,13 @@ export default function Purchases() {
                                   invoice item
                                 </span>
                               ) : null}
+                              {fabric.receipt ? (
+                                <span className="ml-1.5 text-[10px] text-accent-700 bg-accent-100 px-1.5 py-0.5 rounded-full">
+                                  {fabric.legacyReceipt
+                                    ? "legacy stock"
+                                    : "stock receipt"}
+                                </span>
+                              ) : null}
                             </p>
                             <p className="text-xs text-gray-500 flex items-center gap-1.5 flex-wrap">
                               {fabric.color ? (
@@ -2179,7 +2451,7 @@ export default function Purchases() {
                               </p>
                             ) : null}
                           </div>
-                          {!fabric.legacy && (
+                          {!fabric.legacy && !fabric.receipt && (
                             <div className="flex items-center gap-1 shrink-0 ml-2">
                               <button
                                 type="button"
@@ -2209,13 +2481,19 @@ export default function Purchases() {
               </div>
             )}
 
-            {/* Add Fabrics button */}
+            {purchaseReceiptMigrationMissing && (
+              <p className="mb-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-xs text-warning-800">
+                Apply migration 047 in Supabase to enable safe stock receipts
+                and purchase deletion.
+              </p>
+            )}
             <button
               onClick={() => handleOpenAddFabrics(selectedPurchase)}
+              disabled={purchaseReceiptMigrationMissing}
               className="btn btn-primary w-full mb-4"
             >
               <Package className="w-5 h-5 mr-2" />
-              Add Fabrics to Purchase
+              Add Received Stock
             </button>
 
             {payments.length > 0 && (
@@ -2295,9 +2573,9 @@ export default function Purchases() {
 
             {payments.length === 0 && purchaseFabrics.length === 0 && (
               <div className="text-center py-8 text-sm text-gray-400">
-                No fabrics or payments recorded for this purchase.
+                No stock receipts or payments recorded for this purchase.
                 <br />
-                Click "Add Fabrics to Purchase" above to add fabric items.
+                Click "Add Received Stock" above to record received fabric.
               </div>
             )}
 
@@ -2608,7 +2886,7 @@ export default function Purchases() {
 
       {confirmDelete && (
         <ConfirmModal
-          message="This will permanently delete the purchase, all its payments, and all linked fabric items."
+          message="This deletes the purchase, its payments, and any unsold stock received with it. Deletion is blocked if received stock has already been sold or the purchase has legacy stock records."
           onConfirm={() => handleDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />

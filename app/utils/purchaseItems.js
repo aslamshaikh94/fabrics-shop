@@ -1,11 +1,6 @@
 /**
- * `purchase_items` is a legacy invoice-lines table that predates the current
- * `fabrics.purchase_id` link, and is absent (or RLS-hidden) on some projects.
- *
- * Every screen that shows "fabrics on this purchase" needs the same two things:
- * decide whether a failed `purchase_items` query is benign, and reshape any
- * rows that did come back into the fabric shape the UI renders. Both live here
- * so the three call sites in Purchases.jsx can't drift apart.
+ * `purchase_items` is an optional legacy invoice-lines table. Receipt rows and
+ * any legacy lines are reshaped here for the purchase details UI.
  */
 
 /**
@@ -45,7 +40,23 @@ export function toLegacyFabrics(items) {
   }));
 }
 
-/** Combine live fabric rows with any legacy invoice lines, fabrics first. */
-export function mergePurchaseFabrics(fabrics, items) {
-  return [...(fabrics || []), ...toLegacyFabrics(items)];
+export function toPurchaseReceiptFabrics(receipts) {
+  if (!Array.isArray(receipts)) return [];
+  return receipts.map((receipt) => ({
+    id: `receipt-${receipt.id}`,
+    name: receipt.fabric_name || "Fabric item",
+    total_meters: Number(receipt.meters) || 0,
+    purchase_price_per_meter:
+      Number(receipt.purchase_price_per_meter) || 0,
+    discount_amount: Number(receipt.discount_amount) || 0,
+    quantity: receipt.quantity || "",
+    barcode: receipt.barcode || "",
+    receipt: true,
+    legacyReceipt: Boolean(receipt.is_legacy),
+  }));
+}
+
+/** Combine received fabric lines with any legacy invoice lines. */
+export function mergePurchaseFabrics(receipts, items) {
+  return [...(receipts || []), ...toLegacyFabrics(items)];
 }

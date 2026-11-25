@@ -2,7 +2,7 @@
 import { ScanLine, Plus } from "lucide-react";
 
 /**
- * Fabric row form used inside the "Add Fabrics to Purchase" modal.
+ * Fabric row form used inside the received-stock modal.
  * Each row lets the user search/select an existing fabric, enter meters, price, quantity, barcode.
  */
 export default function FabricRowForm({
@@ -12,7 +12,10 @@ export default function FabricRowForm({
   setFabricSearch,
   activeFabricIdx,
   setActiveFabricIdx,
+  loadingFabricSuggestions,
+  fabricSuggestionsError,
   fabrics,
+  fabricRows,
   updateFabricRow,
   selectFabricFromSuggest,
   addFabricRow,
@@ -39,6 +42,7 @@ export default function FabricRowForm({
               updateFabricRow(idx, {
                 fabric_name: e.target.value,
                 fabric_id: "",
+                barcode: "",
               });
               setFabricSearch(e.target.value);
               setActiveFabricIdx(idx);
@@ -62,29 +66,53 @@ export default function FabricRowForm({
           )}
           {activeFabricIdx === idx && fabricSearch.length > 0 && (
             <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-40 overflow-y-auto py-1">
-              {fabrics
-                .filter((f) =>
-                  f.name.toLowerCase().includes(fabricSearch.toLowerCase()),
-                )
-                .map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => selectFabricFromSuggest(idx, f)}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm flex items-center justify-between"
-                  >
-                    <span className="font-medium">{f.name}</span>
-                    <span className="text-[10px] text-gray-400">
-                      {f.available_meters}m in stock
-                    </span>
-                  </button>
-                ))}
-              {fabrics.filter((f) =>
-                f.name.toLowerCase().includes(fabricSearch.toLowerCase()),
-              ).length === 0 && (
-                <div className="px-3 py-2 text-xs text-gray-400 italic">
-                  No existing fabric found — will create new
+              {loadingFabricSuggestions ? (
+                <div className="px-3 py-2 text-xs text-gray-500">
+                  Loading existing fabrics...
                 </div>
+              ) : fabricSuggestionsError ? (
+                <div className="px-3 py-2 text-xs text-red-600">
+                  Could not check existing fabrics. Retry before adding stock.
+                </div>
+              ) : (
+                <>
+                  {fabrics
+                    .filter((f) =>
+                      f.name
+                        .toLowerCase()
+                        .includes(fabricSearch.toLowerCase()),
+                    )
+                    .map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => selectFabricFromSuggest(idx, f)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+                      >
+                        <span className="block font-medium">
+                          {f.name}{" "}
+                          <span className="font-mono text-[10px] text-gray-400">
+                            #{f.id.slice(0, 8)}
+                          </span>
+                        </span>
+                        <span className="block text-[10px] text-gray-500">
+                          {f.available_meters}m available · Buy ₹
+                          {f.purchase_price_per_meter}/m · Sell ₹
+                          {f.selling_price_per_meter}/m
+                          {f.barcode ? ` · ${f.barcode}` : ""}
+                        </span>
+                      </button>
+                    ))}
+                  {fabrics.filter((f) =>
+                    f.name
+                      .toLowerCase()
+                      .includes(fabricSearch.toLowerCase()),
+                  ).length === 0 && (
+                    <div className="px-3 py-2 text-xs text-gray-400 italic">
+                      No existing fabric found — will create new
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -94,6 +122,13 @@ export default function FabricRowForm({
           (() => {
             const fabric = fabrics.find((f) => f.id === row.fabric_id);
             if (!fabric) return null;
+            const pendingMeters = fabricRows
+              .filter((fabricRow) => fabricRow.fabric_id === fabric.id)
+              .reduce(
+                (total, fabricRow) =>
+                  total + (parseFloat(fabricRow.total_meters) || 0),
+                0,
+              );
             return (
               <div className="mt-2 bg-primary-50 border border-primary-200 rounded-lg p-3 space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -144,7 +179,7 @@ export default function FabricRowForm({
                   After restock:{" "}
                   {(
                     (fabric.available_meters || 0) +
-                    (parseFloat(row.total_meters) || 0)
+                    pendingMeters
                   ).toFixed(2)}
                   m available
                 </div>
@@ -161,6 +196,7 @@ export default function FabricRowForm({
           <input
             type="number"
             step="0.01"
+            min="0.01"
             className="input bg-white"
             value={row.total_meters}
             onChange={(e) =>
@@ -177,6 +213,7 @@ export default function FabricRowForm({
           <input
             type="number"
             step="0.01"
+            min="0"
             className="input bg-white"
             value={row.purchase_price_per_meter}
             onChange={(e) =>
@@ -193,36 +230,55 @@ export default function FabricRowForm({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="block text-xs font-bold text-gray-900 mb-1">
-            Quantity (optional)
+            Discount (₹)
+          </label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="input bg-white"
+            value={row.discount_amount}
+            onChange={(e) =>
+              updateFabricRow(idx, { discount_amount: e.target.value })
+            }
+            placeholder="0"
+            onWheel={(e) => e.target.blur()}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-900 mb-1">
+            Quantity note (optional; blank keeps current)
           </label>
           <input
             className="input bg-white"
             value={row.quantity}
             onChange={(e) => updateFabricRow(idx, { quantity: e.target.value })}
-            placeholder="e.g. 10 Rolls"
+            placeholder="e.g. 10 rolls"
           />
+          <p className="mt-1 text-[11px] text-gray-500">
+            When restocking, a new note replaces the current one; values are not added.
+          </p>
         </div>
-        <div>
-          <label className="block text-xs font-bold text-gray-900 mb-1">
-            Barcode
-          </label>
-          <div className="flex gap-1">
-            <input
-              className="input bg-white flex-1"
-              value={row.barcode}
-              onChange={(e) =>
-                updateFabricRow(idx, { barcode: e.target.value })
-              }
-              placeholder="Scan or type"
-            />
-            <button
-              type="button"
-              onClick={() => setScanningRowIdx(idx)}
-              className="px-2.5 border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
-            >
-              <ScanLine className="w-4 h-4" />
-            </button>
-          </div>
+      </div>
+
+      <div>
+        <label className="block text-xs font-bold text-gray-900 mb-1">
+          Barcode
+        </label>
+        <div className="flex gap-1">
+          <input
+            className="input bg-white flex-1"
+            value={row.barcode}
+            onChange={(e) => updateFabricRow(idx, { barcode: e.target.value })}
+            placeholder="Scan or type"
+          />
+          <button
+            type="button"
+            onClick={() => setScanningRowIdx(idx)}
+            className="px-2.5 border border-gray-300 hover:bg-primary-50 hover:border-primary-400 rounded-lg text-gray-500 transition-colors"
+          >
+            <ScanLine className="w-4 h-4" />
+          </button>
         </div>
       </div>
 

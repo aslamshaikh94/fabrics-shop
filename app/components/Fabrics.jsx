@@ -60,19 +60,6 @@ const emptyRow = {
 };
 const emptyForm = { supplier_id: "", purchase_number: "" };
 
-function NavigateToPurchaseButton({ purchaseNumber, onNavigate }) {
-  const handleClick = useCallback(() => onNavigate(purchaseNumber), [purchaseNumber, onNavigate]);
-  return (
-    <button
-      onClick={handleClick}
-      className="p-2 hover:bg-blue-100 rounded-lg text-gray-500 hover:text-blue-600"
-      title={"View " + purchaseNumber}
-    >
-      <span className="text-xs font-mono">🛒</span>
-    </button>
-  );
-}
-
 export default function Fabrics() {
   const [fabrics, setFabrics] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -114,7 +101,7 @@ export default function Fabrics() {
         fetchAllRows((from, to) =>
           supabase
             .from("fabrics")
-            .select("id, name, total_meters, available_meters, purchase_price_per_meter, selling_price_per_meter, supplier_id, purchase_id, barcode, quantity, created_at")
+            .select("id, name, total_meters, available_meters, purchase_price_per_meter, selling_price_per_meter, supplier_id, barcode, quantity, created_at")
             .order("created_at", { ascending: false })
             .range(from, to),
         ),
@@ -148,23 +135,6 @@ export default function Fabrics() {
         suppliersRows.map((c) => [c.id, c]),
       );
 
-      const purchaseIds = fabricsRows
-        .filter((f) => f.purchase_id)
-        .map((f) => f.purchase_id);
-
-      let purchaseMap = {};
-      if (purchaseIds.length > 0) {
-        const { data: purchases } = await supabase
-          .from("purchases")
-          .select("id, purchase_number")
-          .in("id", purchaseIds);
-        if (purchases) {
-          purchaseMap = Object.fromEntries(
-            purchases.map((p) => [p.id, p.purchase_number]),
-          );
-        }
-      }
-
       setFabrics(
         fabricsRows.map((f) => ({
           ...f,
@@ -175,9 +145,6 @@ export default function Fabrics() {
             ) * 100,
           ) / 100,
           supplier: supplierMap[f.supplier_id] || null,
-          purchase: f.purchase_id
-            ? { purchase_number: purchaseMap[f.purchase_id] || null }
-            : null,
         })),
       );
     } catch (err) {
@@ -403,11 +370,6 @@ export default function Fabrics() {
       );
     }
   }
-
-  const handleNavigateToPurchase = useCallback((purchaseNumber) => {
-    localStorage.setItem("prefill_purchase_number", purchaseNumber);
-    window.dispatchEvent(new CustomEvent("navigate", { detail: { page: "purchases" } }));
-  }, []);
 
   const handlePageChange = useCallback((p) => {
     setPage(p);
@@ -964,12 +926,6 @@ export default function Fabrics() {
                 )}
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
-                    {fabric.purchase?.purchase_number && (
-                      <NavigateToPurchaseButton
-                        purchaseNumber={fabric.purchase.purchase_number}
-                        onNavigate={handleNavigateToPurchase}
-                      />
-                    )}
                     <button
                       onClick={() => handleEdit(fabric)}
                       className="p-2 hover:bg-gray-200 rounded-lg text-gray-500 hover:text-gray-700"
